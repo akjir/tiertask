@@ -18,62 +18,88 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/entity_controller.dart';
-import '../../presentation/entity_view_models.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/shell_models.dart';
+import '../../models/location_state.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_location.dart';
+import '../../providers/entity_actions_provider.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/location_providers.dart';
+import '../../providers/location_source_resolver.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../../services/plus_code_service.dart';
 import '../dialogs/geocoding_candidates_modal.dart';
+import '../layout/ui_responsive_grid.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_pill.dart';
+import '../primitives/ui_segmented_control.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
 import '../widgets/entity_note_section.dart';
 
+/// Default formatted geofence radius seeding an uncommitted [LocationDraftCard].
 const String _defaultDraftRadiusText = '200m';
 
-/// Maximum Unicode scalar length for location display names (`maxTdfTextLength`).
-const int _maxLocationNameLength = 500;
-
-/// Maximum Unicode scalar length for optional location notes (`maxTdfNoteLength`).
-const int _maxLocationNoteLength = 2000;
-
-/// Maximum Unicode scalar length for location address or Plus Code sources (`maxTdfTextLength`).
-const int _maxLocationSourceLength = 500;
-
-/// Single expandable Location card managing reveal scrolling, inline name editing, and panel coordination.
-class LocationCard extends ConsumerStatefulWidget {
+/// Unified expandable Location card sharing single-expand coordination (`U-CARD-001`..`005`).
+class LocationCard extends ConsumerWidget {
   /// Creates a [LocationCard].
   const LocationCard({
     super.key,
+    required this.cardScrollKey,
     required this.location,
-    required this.isExpanded,
-    required this.activeInlineSection,
-    required this.isConfirmingDelete,
-    required this.shouldReveal,
-    required this.isBusy,
   });
 
-  /// Currently open inline section key on this location card, or `null`.
-  final String? activeInlineSection;
+  /// [GlobalKey] attached around the card for smooth reveal scrolling.
+  final GlobalKey cardScrollKey;
 
-  /// Whether an entity mutation is currently active.
-  final bool isBusy;
-
-  /// Whether inline delete confirmation is open for this location card.
-  final bool isConfirmingDelete;
-
-  /// Whether this location card is expanded in the single-expand accordion.
-  final bool isExpanded;
-
-  /// Projected location view model.
-  final LocationCardViewModel location;
-
-  /// Whether a one-shot reveal request targets this location card.
-  final bool shouldReveal;
+  /// Persisted domain location rendered by this card.
+  final TdfLocation location;
 
   @override
-  ConsumerState<LocationCard> createState() => _LocationExpandableCardState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final locationRef = EntityRef(kind: EntityKind.location, id: location.id);
+    final openCount = ref.watch(
+      taskNotifierProvider.select(
+        (boardAsync) =>
+            boardAsync.asData?.value.openTaskCountsByLocation[location.id] ?? 0,
+      ),
+    );
+    final isExpanded = ref.watch(
+      shellProvider.select((shell) => shell.expandedEntity == locationRef),
+    );
+    final activeInlineSection = ref.watch(
+      shellProvider.select(
+        (shell) => shell.activeInlineEdit?.entity == locationRef
+            ? shell.activeInlineEdit?.sectionKey
+            : null,
+      ),
+    );
+    final isConfirmingDelete = ref.watch(
+      shellProvider.select((shell) => shell.activeDeleteConfirm == locationRef),
+    );
+    final isBusy = ref.watch(
+      entityActionsProvider.select((state) => state.isBusy),
+    );
+
+    return KeyedSubtree(
+      key: cardScrollKey,
+      child: _LocationExpandableCardView(
+        location: location,
+        openCount: openCount,
+        isExpanded: isExpanded,
+        activeInlineSection: activeInlineSection,
+        isConfirmingDelete: isConfirmingDelete,
+        isBusy: isBusy,
+      ),
+    );
+  }
 }
 
 /// Accent-bordered uncommitted Location Draft Card replacing Quick-Create in place (`U-CARD-006`).
@@ -83,16 +109,8 @@ class LocationDraftCard extends ConsumerStatefulWidget {
     super.key,
     required this.seedTitle,
     required this.hasActiveGpsFix,
-    required this.activeGpsLatitudeText,
-    required this.activeGpsLongitudeText,
     required this.isBusy,
   });
-
-  /// Active foreground GPS latitude formatted to 6 decimal places, if available.
-  final String? activeGpsLatitudeText;
-
-  /// Active foreground GPS longitude formatted to 6 decimal places, if available.
-  final String? activeGpsLongitudeText;
 
   /// Whether a valid foreground GPS fix is currently available for seeding.
   final bool hasActiveGpsFix;
@@ -130,7 +148,7 @@ class _LocationAddChipsBar extends StatelessWidget {
   /// Callback opening the inline editor for a chosen section.
   final ValueChanged<LocationSectionKind> onOpenSection;
 
-  /// Unset optional sections reported by [LocationCardViewModel.unsetSections].
+  /// Unset optional sections computed from the location.
   final List<LocationSectionKind> unsetSections;
 
   @override
@@ -196,7 +214,7 @@ class _LocationAddChipsSlot extends StatelessWidget {
   /// Callback opening the inline editor for a chosen section.
   final ValueChanged<LocationSectionKind> onOpenSection;
 
-  /// Unset optional sections reported by [LocationCardViewModel.unsetSections].
+  /// Unset optional sections computed from the location.
   final List<LocationSectionKind> unsetSections;
 
   @override
@@ -277,44 +295,47 @@ class _LocationCardCollapsedMetadata extends StatelessWidget {
   /// Creates a [_LocationCardCollapsedMetadata].
   const _LocationCardCollapsedMetadata({
     required this.location,
+    required this.openCount,
     required this.onToggleExpand,
   });
 
-  /// Location card view model providing formatted badge labels.
-  final LocationCardViewModel location;
+  /// Persisted domain location providing source, coordinate, and note data.
+  final TdfLocation location;
 
   /// Callback toggling expansion of the owning location card.
   final VoidCallback onToggleExpand;
 
+  /// Count of open tasks referencing [location].
+  final int openCount;
+
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final noteText = location.note;
-    final hasNote = noteText != null && noteText.trim().isNotEmpty;
+    final sourceType = PlusCodeService.classifySource(location.source);
 
     return Wrap(
       spacing: 6.0,
       runSpacing: 6.0,
       children: <Widget>[
         UiPill(
-          label: location.sourceTypeLabel,
+          label: _locationSourceTypeLabel(sourceType, localizations),
           icon: Icons.my_location_rounded,
           variant: UiPillVariant.meta,
           onPressed: onToggleExpand,
         ),
         UiPill(
-          label: location.coordinatesSummary,
+          label: TaskScheduleHelper.formatCoordinatesSummary(location),
           variant: UiPillVariant.meta,
           isMono: true,
           onPressed: onToggleExpand,
         ),
         UiPill(
-          label: localizations.openTasksCountPill('${location.openCount}'),
+          label: localizations.openTasksCountPill('$openCount'),
           variant: UiPillVariant.meta,
           tone: UiPillTone.soft,
           onPressed: onToggleExpand,
         ),
-        if (hasNote)
+        if (_hasNonEmptyNote(location.note))
           UiPill(
             label: localizations.taskNoteLabel,
             icon: Icons.description_outlined,
@@ -327,21 +348,14 @@ class _LocationCardCollapsedMetadata extends StatelessWidget {
 }
 
 /// Expanded Location card body composing meta bar and progressive-disclosure sections (`U-CARD-002`).
-class _LocationCardExpandedPanel extends StatelessWidget {
+class _LocationCardExpandedPanel extends ConsumerWidget {
   /// Creates a [_LocationCardExpandedPanel].
   const _LocationCardExpandedPanel({
     required this.location,
+    required this.openCount,
     required this.activeInlineSection,
     required this.isConfirmingDelete,
     required this.isBusy,
-    required this.onCopyId,
-    required this.onRequestDelete,
-    required this.onCancelDelete,
-    required this.onConfirmDelete,
-    required this.onOpenSection,
-    required this.onCancelInlineEdit,
-    required this.onSaveNote,
-    required this.onClearNote,
   });
 
   /// Currently open inline section key on this location card, if any.
@@ -353,66 +367,42 @@ class _LocationCardExpandedPanel extends StatelessWidget {
   /// Whether the inline delete confirmation prompt is open for this card.
   final bool isConfirmingDelete;
 
-  /// Expanded location view model.
-  final LocationCardViewModel location;
+  /// Expanded domain location.
+  final TdfLocation location;
 
-  /// Callback cancelling inline delete confirmation.
-  final VoidCallback onCancelDelete;
-
-  /// Callback cancelling the active inline section editor.
-  final VoidCallback onCancelInlineEdit;
-
-  /// Callback clearing the location note.
-  final Future<void> Function() onClearNote;
-
-  /// Callback confirming deletion of this location.
-  final VoidCallback onConfirmDelete;
-
-  /// Callback copying the location ID to the clipboard.
-  final VoidCallback onCopyId;
-
-  /// Callback opening a specific section editor.
-  final ValueChanged<LocationSectionKind> onOpenSection;
-
-  /// Callback opening inline delete confirmation.
-  final VoidCallback onRequestDelete;
-
-  /// Callback persisting an edited location note.
-  final Future<ActionResult> Function(String rawNote) onSaveNote;
+  /// Count of open tasks referencing [location].
+  final int openCount;
 
   @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
+  Widget build(BuildContext context, WidgetRef ref) {
     final tokens = UiThemeTokens.of(context);
+    final shellNotifier = ref.read(shellProvider.notifier);
+    final entityNotifier = ref.read(entityActionsProvider.notifier);
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        EntityCardMetaBar(
-          entityId: location.id,
-          copyIdTooltip: localizations.actionCopy,
-          onCopyId: onCopyId,
-          statusPillLabel: localizations.openTasksCountPill(
-            '${location.openCount}',
-          ),
-          statusPillTone: UiPillTone.soft,
-          deleteTooltip: localizations.tooltipDeleteLocation,
-          deleteConfirmMessage: localizations.inlineDeleteLocationConfirm,
+        _LocationCardMetaBar(
+          locationId: location.id,
+          openCount: openCount,
           isConfirmingDelete: isConfirmingDelete,
-          onRequestDelete: onRequestDelete,
-          onCancelDelete: onCancelDelete,
-          onConfirmDelete: onConfirmDelete,
         ),
         SizedBox(height: tokens.spacing.space3),
         _LocationCardExpandedSections(
           location: location,
           activeInlineSection: activeInlineSection,
           isBusy: isBusy,
-          onOpenSection: onOpenSection,
-          onCancelInlineEdit: onCancelInlineEdit,
-          onSaveNote: onSaveNote,
-          onClearNote: onClearNote,
+          onOpenSection: (section) => shellNotifier.openInlineEdit(
+            InlineEditTarget.location(location.id, section),
+          ),
+          onCancelInlineEdit: shellNotifier.closeInlineEdit,
+          onSaveNote: (rawNote) => entityNotifier.saveLocationNote(
+            location.id,
+            rawNote,
+            locale: Localizations.localeOf(context),
+          ),
+          onClearNote: () => _clearLocationNote(context, ref, location.id),
         ),
       ],
     );
@@ -438,8 +428,8 @@ class _LocationCardExpandedSections extends StatelessWidget {
   /// Whether an entity mutation is currently active.
   final bool isBusy;
 
-  /// Expanded location view model.
-  final LocationCardViewModel location;
+  /// Expanded domain location.
+  final TdfLocation location;
 
   /// Callback cancelling the active inline editor.
   final VoidCallback onCancelInlineEdit;
@@ -481,7 +471,7 @@ class _LocationCardExpandedSections extends StatelessWidget {
         ),
         _LocationAddChipsSlot(
           locationId: location.id,
-          unsetSections: location.unsetSections,
+          unsetSections: _computeUnsetLocationSections(location),
           activeInlineSection: activeInlineSection,
           isBusy: isBusy,
           onOpenSection: onOpenSection,
@@ -533,6 +523,47 @@ class _LocationCardLeadingIcon extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Location-specific [EntityCardMetaBar] wiring Copy ID, open count pill, and inline Delete confirmation.
+class _LocationCardMetaBar extends ConsumerWidget {
+  /// Creates a [_LocationCardMetaBar].
+  const _LocationCardMetaBar({
+    required this.locationId,
+    required this.openCount,
+    required this.isConfirmingDelete,
+  });
+
+  /// Whether inline delete confirmation is open.
+  final bool isConfirmingDelete;
+
+  /// Canonical location identifier.
+  final String locationId;
+
+  /// Count of open tasks referencing this location.
+  final int openCount;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final shellNotifier = ref.read(shellProvider.notifier);
+    final locationRef = EntityRef(kind: EntityKind.location, id: locationId);
+
+    return EntityCardMetaBar(
+      entityId: locationId,
+      copyIdTooltip: localizations.actionCopy,
+      onCopyId: () => unawaited(_copyLocationId(context, ref, locationId)),
+      statusPillLabel: localizations.openTasksCountPill('$openCount'),
+      statusPillTone: UiPillTone.soft,
+      deleteTooltip: localizations.tooltipDeleteLocation,
+      deleteConfirmMessage: localizations.inlineDeleteLocationConfirm,
+      isConfirmingDelete: isConfirmingDelete,
+      onRequestDelete: () => shellNotifier.requestInlineDelete(locationRef),
+      onCancelDelete: shellNotifier.cancelInlineDelete,
+      onConfirmDelete: () =>
+          unawaited(_confirmDeleteLocation(context, ref, locationId)),
     );
   }
 }
@@ -618,12 +649,12 @@ class _LocationCoordinatesActionRow extends StatelessWidget {
   final VoidCallback onUseCurrentGps;
 
   /// Active coordinate source mode governing mutual gating.
-  final ShellLocationSourceType sourceType;
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final isGps = sourceType == ShellLocationSourceType.gps;
+    final isGps = sourceType == LocationSourceType.gps;
     final canUseGps = isGps && !isBusy && !isResolving;
     final canResolve = !isGps && !isBusy && !isResolving;
 
@@ -711,8 +742,8 @@ class _LocationCoordinatesEditCard extends StatelessWidget {
   /// Callback saving edited coordinates and radius.
   final VoidCallback onSave;
 
-  /// Callback switching [ShellLocationSourceType].
-  final ValueChanged<ShellLocationSourceType> onSourceTypeChanged;
+  /// Callback switching [LocationSourceType].
+  final ValueChanged<LocationSourceType> onSourceTypeChanged;
 
   /// Callback applying the active foreground GPS fix.
   final VoidCallback onUseCurrentGps;
@@ -730,7 +761,7 @@ class _LocationCoordinatesEditCard extends StatelessWidget {
   final String? sourceErrorText;
 
   /// Currently selected coordinate source type.
-  final ShellLocationSourceType sourceType;
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
@@ -807,8 +838,8 @@ class _LocationCoordinatesEditorFields extends StatelessWidget {
   /// Callback resolving the current address or Plus Code source.
   final VoidCallback onResolveSource;
 
-  /// Callback switching the selected [ShellLocationSourceType].
-  final ValueChanged<ShellLocationSourceType> onSourceTypeChanged;
+  /// Callback switching the selected [LocationSourceType].
+  final ValueChanged<LocationSourceType> onSourceTypeChanged;
 
   /// Callback applying the current foreground GPS fix.
   final VoidCallback onUseCurrentGps;
@@ -826,12 +857,12 @@ class _LocationCoordinatesEditorFields extends StatelessWidget {
   final String? sourceErrorText;
 
   /// Active coordinate source mode (`gps`, `address`, or `plusCode`).
-  final ShellLocationSourceType sourceType;
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
-    final isGps = sourceType == ShellLocationSourceType.gps;
+    final isGps = sourceType == LocationSourceType.gps;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -931,19 +962,28 @@ class _LocationCoordinatesPairGrid extends StatelessWidget {
 /// Read-only coordinates summary lines displaying optional source text, monospace WGS-84 pair, and radius.
 class _LocationCoordinatesReadOnlyBody extends StatelessWidget {
   /// Creates a [_LocationCoordinatesReadOnlyBody].
-  const _LocationCoordinatesReadOnlyBody({required this.location});
+  const _LocationCoordinatesReadOnlyBody({
+    required this.location,
+    required this.sourceType,
+  });
 
-  /// Persisted location view model.
-  final LocationCardViewModel location;
+  /// Persisted domain location.
+  final TdfLocation location;
+
+  /// Classified coordinate source type for [location].
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
+    final sourceValue = _locationSourceDisplayValue(location, sourceType);
     final showSourceValue =
-        location.sourceType != ShellLocationSourceType.gps &&
-        location.sourceValue.isNotEmpty;
+        sourceType != LocationSourceType.gps && sourceValue.isNotEmpty;
+    final radiusSummary = TaskScheduleHelper.formatRadiusMeters(
+      location.radius,
+    );
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -951,7 +991,7 @@ class _LocationCoordinatesReadOnlyBody extends StatelessWidget {
       children: <Widget>[
         if (showSourceValue) ...<Widget>[
           Text(
-            location.sourceValue,
+            sourceValue,
             style: tokens.typography.control.copyWith(color: colors.ink),
           ),
           const SizedBox(height: 4.0),
@@ -964,7 +1004,7 @@ class _LocationCoordinatesReadOnlyBody extends StatelessWidget {
         ),
         const SizedBox(height: 4.0),
         Text(
-          localizations.locationRadiusReadout(location.radiusSummary),
+          localizations.locationRadiusReadout(radiusSummary),
           style: tokens.typography.meta.copyWith(color: colors.muted),
         ),
       ],
@@ -984,8 +1024,8 @@ class _LocationCoordinatesReadOnlyCard extends StatelessWidget {
   /// Disables the edit trigger while a mutation is in flight.
   final bool isBusy;
 
-  /// Persisted location view model.
-  final LocationCardViewModel location;
+  /// Persisted domain location.
+  final TdfLocation location;
 
   /// Callback opening inline coordinate editing.
   final VoidCallback onStartEdit;
@@ -993,12 +1033,14 @@ class _LocationCoordinatesReadOnlyCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final sourceType = PlusCodeService.classifySource(location.source);
+
     return UiCard.inset(
       key: ValueKey<String>('location_coords_section_${location.id}'),
       headerIcon: Icons.my_location_rounded,
       headerTitle: localizations.locationCoordinatesSectionTitle,
       headerBadge: UiPill(
-        label: location.sourceTypeLabel,
+        label: _locationSourceTypeLabel(sourceType, localizations),
         variant: UiPillVariant.badge,
       ),
       headerTrailing: UiButton(
@@ -1009,7 +1051,10 @@ class _LocationCoordinatesReadOnlyCard extends StatelessWidget {
         tooltip: localizations.actionEdit,
         onPressed: isBusy ? null : onStartEdit,
       ),
-      child: _LocationCoordinatesReadOnlyBody(location: location),
+      child: _LocationCoordinatesReadOnlyBody(
+        location: location,
+        sourceType: sourceType,
+      ),
     );
   }
 }
@@ -1031,8 +1076,8 @@ class _LocationCoordinatesSection extends ConsumerStatefulWidget {
   /// Whether this section is currently in inline edit mode.
   final bool isEditing;
 
-  /// Persisted location view model.
-  final LocationCardViewModel location;
+  /// Persisted domain location.
+  final TdfLocation location;
 
   /// Callback cancelling inline coordinate editing.
   final VoidCallback onCancelEdit;
@@ -1056,14 +1101,15 @@ class _LocationCoordinatesSectionState
   String? _errorText;
   Map<String, String> _fieldErrors = const <String, String>{};
   bool _isSubmitting = false;
-  late ShellLocationSourceType _sourceType;
+  late LocationSourceType _sourceType;
 
   @override
   void initState() {
     super.initState();
-    _sourceType = widget.location.sourceType;
+    final sourceType = PlusCodeService.classifySource(widget.location.source);
+    _sourceType = sourceType;
     _sourceController = TextEditingController(
-      text: widget.location.sourceValue,
+      text: _locationSourceDisplayValue(widget.location, sourceType),
     );
     _latitudeController = TextEditingController(
       text: widget.location.latitudeText,
@@ -1071,7 +1117,9 @@ class _LocationCoordinatesSectionState
     _longitudeController = TextEditingController(
       text: widget.location.longitudeText,
     );
-    _radiusController = TextEditingController(text: widget.location.radiusText);
+    _radiusController = TextEditingController(
+      text: TaskScheduleHelper.formatRadiusMeters(widget.location.radius),
+    );
   }
 
   @override
@@ -1105,7 +1153,7 @@ class _LocationCoordinatesSectionState
       );
     }
     final isResolving = ref.watch(
-      entityControllerProvider.select((state) => state.isResolvingLocation),
+      entityActionsProvider.select((state) => state.isResolvingLocation),
     );
     return _LocationCoordinatesEditCard(
       locationId: widget.location.id,
@@ -1153,28 +1201,36 @@ class _LocationCoordinatesSectionState
     }
     final localizations = AppLocalizations.of(context);
     switch (outcome) {
-      case LocationSourceUiResolved(
-        :final latitudeText,
-        :final longitudeText,
+      case LocationSourceResolved(
+        :final latitude,
+        :final longitude,
         :final normalizedSource,
         :final sourceType,
       ):
         setState(() {
           _sourceType = sourceType;
           _sourceController.text = normalizedSource;
-          _latitudeController.text = latitudeText;
-          _longitudeController.text = longitudeText;
+          _latitudeController.text = TdfLocation.formatRoundedDouble(
+            latitude,
+            6,
+          );
+          _longitudeController.text = TdfLocation.formatRoundedDouble(
+            longitude,
+            6,
+          );
           _errorText = null;
           _fieldErrors = const <String, String>{};
         });
-      case LocationSourceUiError(:final message):
-        setState(() => _errorText = message);
-      case LocationSourceUiNeedsDisambiguation():
+      case LocationSourceResolutionError(:final localizedMessage):
+        setState(() => _errorText = localizedMessage);
+      case LocationSourceNeedsDisambiguation():
         setState(() => _errorText = localizations.locationResolveErrorNotFound);
+      case LocationSourceNotNeeded():
+        break;
     }
   }
 
-  /// Validates and persists coordinates, source, and radius via [EntityController.saveLocationCoordinates].
+  /// Validates and persists coordinates, source, and radius via [EntityActionsNotifier.saveLocationCoordinates].
   Future<void> _handleSave() async {
     if (widget.isBusy || _isSubmitting) {
       return;
@@ -1185,7 +1241,7 @@ class _LocationCoordinatesSectionState
       _fieldErrors = const <String, String>{};
     });
     final result = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .saveLocationCoordinates(
           widget.location.id,
           sourceType: _sourceType,
@@ -1220,7 +1276,7 @@ class _LocationCoordinatesSectionState
   }
 
   /// Updates the active source mode and clears stale lookup errors.
-  void _handleSourceTypeChanged(ShellLocationSourceType nextSourceType) {
+  void _handleSourceTypeChanged(LocationSourceType nextSourceType) {
     setState(() {
       _sourceType = nextSourceType;
       _errorText = null;
@@ -1232,7 +1288,7 @@ class _LocationCoordinatesSectionState
   Future<void> _handleUseCurrentGps() async {
     _clearErrors();
     final coordinates = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .resolveCurrentGpsPosition(locale: Localizations.localeOf(context));
     if (!mounted) {
       return;
@@ -1252,12 +1308,15 @@ class _LocationCoordinatesSectionState
   }
 
   /// Re-seeds editor controllers from persisted [location] values when entering edit mode.
-  void _resetDraftFromLocation(LocationCardViewModel location) {
-    _sourceType = location.sourceType;
-    _sourceController.text = location.sourceValue;
+  void _resetDraftFromLocation(TdfLocation location) {
+    final sourceType = PlusCodeService.classifySource(location.source);
+    _sourceType = sourceType;
+    _sourceController.text = _locationSourceDisplayValue(location, sourceType);
     _latitudeController.text = location.latitudeText;
     _longitudeController.text = location.longitudeText;
-    _radiusController.text = location.radiusText;
+    _radiusController.text = TaskScheduleHelper.formatRadiusMeters(
+      location.radius,
+    );
     _errorText = null;
     _fieldErrors = const <String, String>{};
     _isSubmitting = false;
@@ -1276,18 +1335,22 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
   String? _errorText;
   Map<String, String> _fieldErrors = const <String, String>{};
   bool _isSubmitting = false;
-  ShellLocationSourceType _sourceType = ShellLocationSourceType.gps;
+  LocationSourceType _sourceType = LocationSourceType.gps;
 
   @override
   void initState() {
     super.initState();
+    final seededCoordinates = _readForegroundSeedCoordinates(
+      ref,
+      hasActiveGpsFix: widget.hasActiveGpsFix,
+    );
     _nameController = TextEditingController(text: widget.seedTitle);
     _sourceController = TextEditingController();
     _latitudeController = TextEditingController(
-      text: widget.hasActiveGpsFix ? (widget.activeGpsLatitudeText ?? '') : '',
+      text: seededCoordinates.latitudeText,
     );
     _longitudeController = TextEditingController(
-      text: widget.hasActiveGpsFix ? (widget.activeGpsLongitudeText ?? '') : '',
+      text: seededCoordinates.longitudeText,
     );
     _radiusController = TextEditingController(text: _defaultDraftRadiusText);
     _noteController = TextEditingController();
@@ -1308,7 +1371,7 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final isResolving = ref.watch(
-      entityControllerProvider.select((state) => state.isResolvingLocation),
+      entityActionsProvider.select((state) => state.isResolvingLocation),
     );
     final effectiveBusy = widget.isBusy || _isSubmitting;
 
@@ -1357,7 +1420,7 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
 
   /// Discards the uncommitted location draft without persisting changes.
   void _handleCancel() {
-    ref.read(appShellControllerProvider.notifier).cancelDraft();
+    ref.read(shellProvider.notifier).cancelDraft();
   }
 
   /// Resolves the entered address or Plus Code source and handles candidate disambiguation.
@@ -1374,29 +1437,37 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
     }
     final localizations = AppLocalizations.of(context);
     switch (outcome) {
-      case LocationSourceUiResolved(
-        :final latitudeText,
-        :final longitudeText,
+      case LocationSourceResolved(
+        :final latitude,
+        :final longitude,
         :final normalizedSource,
         :final sourceType,
       ):
         setState(() {
           _sourceType = sourceType;
           _sourceController.text = normalizedSource;
-          _latitudeController.text = latitudeText;
-          _longitudeController.text = longitudeText;
+          _latitudeController.text = TdfLocation.formatRoundedDouble(
+            latitude,
+            6,
+          );
+          _longitudeController.text = TdfLocation.formatRoundedDouble(
+            longitude,
+            6,
+          );
           _errorText = null;
           _fieldErrors = const <String, String>{};
         });
-      case LocationSourceUiError(:final message):
-        setState(() => _errorText = message);
-      case LocationSourceUiNeedsDisambiguation():
+      case LocationSourceResolutionError(:final localizedMessage):
+        setState(() => _errorText = localizedMessage);
+      case LocationSourceNeedsDisambiguation():
         setState(() => _errorText = localizations.locationResolveErrorNotFound);
+      case LocationSourceNotNeeded():
+        break;
     }
   }
 
   /// Switches the active coordinate source mode inside the draft card.
-  void _handleSourceTypeChanged(ShellLocationSourceType nextSourceType) {
+  void _handleSourceTypeChanged(LocationSourceType nextSourceType) {
     setState(() {
       _sourceType = nextSourceType;
       _errorText = null;
@@ -1404,7 +1475,7 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
     });
   }
 
-  /// Validates and commits the uncommitted location draft via [EntityController.createLocationDraft].
+  /// Validates and commits the uncommitted location draft via [EntityActionsNotifier.createLocationDraft].
   Future<void> _handleSubmit() async {
     if (widget.isBusy || _isSubmitting) {
       return;
@@ -1415,7 +1486,7 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
       _fieldErrors = const <String, String>{};
     });
     final result = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .createLocationDraft(
           LocationDraftInput(
             name: _nameController.text,
@@ -1456,7 +1527,7 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
   Future<void> _handleUseCurrentGps() async {
     _clearErrors();
     final coordinates = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .resolveCurrentGpsPosition(locale: Localizations.localeOf(context));
     if (!mounted) {
       return;
@@ -1514,7 +1585,7 @@ class _LocationDraftCoordinatesWell extends StatelessWidget {
   final VoidCallback onResolveSource;
 
   /// Callback switching source type.
-  final ValueChanged<ShellLocationSourceType> onSourceTypeChanged;
+  final ValueChanged<LocationSourceType> onSourceTypeChanged;
 
   /// Callback applying current GPS coordinates.
   final VoidCallback onUseCurrentGps;
@@ -1532,7 +1603,7 @@ class _LocationDraftCoordinatesWell extends StatelessWidget {
   final String? sourceErrorText;
 
   /// Active coordinate source mode.
-  final ShellLocationSourceType sourceType;
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
@@ -1661,8 +1732,8 @@ class _LocationDraftFormBody extends StatelessWidget {
   /// Callback resolving address or Plus Code inputs.
   final VoidCallback onResolveSource;
 
-  /// Callback switching [ShellLocationSourceType].
-  final ValueChanged<ShellLocationSourceType> onSourceTypeChanged;
+  /// Callback switching [LocationSourceType].
+  final ValueChanged<LocationSourceType> onSourceTypeChanged;
 
   /// Callback applying the current foreground GPS fix.
   final VoidCallback onUseCurrentGps;
@@ -1674,7 +1745,7 @@ class _LocationDraftFormBody extends StatelessWidget {
   final TextEditingController sourceController;
 
   /// Currently selected coordinate source type.
-  final ShellLocationSourceType sourceType;
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
@@ -1748,7 +1819,7 @@ class _LocationDraftNameField extends StatelessWidget {
       controller: nameController,
       label: localizations.locationNameLabel,
       hintText: localizations.quickCreateLocationHint,
-      maxLength: _maxLocationNameLength,
+      maxLength: maxTdfTextLength,
       autofocus: true,
       enabled: !isBusy,
       errorText: errorText,
@@ -1790,7 +1861,7 @@ class _LocationDraftNoteWell extends StatelessWidget {
         kind: UiFieldKind.multiline,
         controller: noteController,
         hintText: localizations.taskNoteHint,
-        maxLength: _maxLocationNoteLength,
+        maxLength: maxTdfNoteLength,
         minLines: 2,
         maxLines: 4,
         enabled: !isBusy,
@@ -1802,12 +1873,11 @@ class _LocationDraftNoteWell extends StatelessWidget {
 }
 
 /// Trailing inline Name Edit pencil button rendered only on expanded location cards (`U-CARD-001`).
-class _LocationEditNameButton extends StatelessWidget {
+class _LocationEditNameButton extends ConsumerWidget {
   /// Creates a [_LocationEditNameButton].
   const _LocationEditNameButton({
     required this.locationId,
     required this.isBusy,
-    required this.onPressed,
   });
 
   /// Disables the button while a mutation is in flight.
@@ -1816,11 +1886,8 @@ class _LocationEditNameButton extends StatelessWidget {
   /// Canonical location identifier.
   final String locationId;
 
-  /// Callback opening inline name editing.
-  final VoidCallback onPressed;
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     return UiButton(
       key: ValueKey<String>('location_edit_name_button_$locationId'),
@@ -1828,226 +1895,97 @@ class _LocationEditNameButton extends StatelessWidget {
       variant: UiButtonVariant.icon,
       density: UiButtonDensity.dense,
       tooltip: localizations.inlineEditNameTooltip,
-      onPressed: isBusy ? null : onPressed,
+      onPressed: isBusy
+          ? null
+          : () => ref
+                .read(shellProvider.notifier)
+                .openInlineEdit(
+                  InlineEditTarget.location(
+                    locationId,
+                    LocationSectionKind.title,
+                  ),
+                ),
     );
-  }
-}
-
-/// Coordinates smooth post-frame `Scrollable.ensureVisible` reveal and card action dispatching for [LocationCard].
-class _LocationExpandableCardState extends ConsumerState<LocationCard> {
-  @override
-  void initState() {
-    super.initState();
-    if (widget.shouldReveal) {
-      _scheduleReveal();
-    }
-  }
-
-  @override
-  void didUpdateWidget(covariant LocationCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!oldWidget.shouldReveal && widget.shouldReveal) {
-      _scheduleReveal();
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final location = widget.location;
-    final isEditingTitle =
-        widget.isExpanded &&
-        widget.activeInlineSection == LocationSectionKind.title.name;
-
-    return _LocationExpandableCardView(
-      location: location,
-      isExpanded: widget.isExpanded,
-      isEditingTitle: isEditingTitle,
-      isBusy: widget.isBusy,
-      onToggleExpand: _handleToggleExpand,
-      onCancelInlineEdit: _handleCancelInlineEdit,
-      onOpenTitleEdit: () => _handleOpenSection(LocationSectionKind.title),
-      expandedChild: _LocationCardExpandedPanel(
-        location: location,
-        activeInlineSection: widget.activeInlineSection,
-        isConfirmingDelete: widget.isConfirmingDelete,
-        isBusy: widget.isBusy,
-        onCopyId: () => unawaited(_copyLocationId(context, ref, location.id)),
-        onRequestDelete: _handleRequestDelete,
-        onCancelDelete: _handleCancelDelete,
-        onConfirmDelete: () => unawaited(_handleConfirmDelete()),
-        onOpenSection: _handleOpenSection,
-        onCancelInlineEdit: _handleCancelInlineEdit,
-        onSaveNote: _handleSaveNote,
-        onClearNote: _handleClearNote,
-      ),
-    );
-  }
-
-  /// Cancels inline delete confirmation on this card.
-  void _handleCancelDelete() {
-    ref.read(appShellControllerProvider.notifier).cancelInlineDelete();
-  }
-
-  /// Closes the currently open inline section editor.
-  void _handleCancelInlineEdit() {
-    ref.read(appShellControllerProvider.notifier).closeInlineEdit();
-  }
-
-  /// Clears the location note via [EntityController.clearLocationNote].
-  Future<void> _handleClearNote() async {
-    final result = await ref
-        .read(entityControllerProvider.notifier)
-        .clearLocationNote(
-          widget.location.id,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    _reportActionFailure(ref, result);
-  }
-
-  /// Deletes this location via [EntityController.deleteLocation] and reports errors via floating notice.
-  Future<void> _handleConfirmDelete() async {
-    final result = await ref
-        .read(entityControllerProvider.notifier)
-        .deleteLocation(
-          widget.location.id,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    _reportActionFailure(ref, result);
-  }
-
-  /// Opens the single active inline editor for [section] on this location.
-  void _handleOpenSection(LocationSectionKind section) {
-    ref
-        .read(appShellControllerProvider.notifier)
-        .openInlineEdit(InlineEditTarget.location(widget.location.id, section));
-  }
-
-  /// Opens the inline delete confirmation prompt on this card.
-  void _handleRequestDelete() {
-    ref
-        .read(appShellControllerProvider.notifier)
-        .requestInlineDelete(
-          EntityRef(kind: EntityKind.location, id: widget.location.id),
-        );
-  }
-
-  /// Persists an edited note via [EntityController.saveLocationNote].
-  Future<ActionResult> _handleSaveNote(String rawNote) {
-    return ref
-        .read(entityControllerProvider.notifier)
-        .saveLocationNote(
-          widget.location.id,
-          rawNote,
-          locale: Localizations.localeOf(context),
-        );
-  }
-
-  /// Toggles expansion of this location card under strict single-expand coordination.
-  void _handleToggleExpand() {
-    ref
-        .read(appShellControllerProvider.notifier)
-        .toggleExpandEntity(
-          EntityRef(kind: EntityKind.location, id: widget.location.id),
-        );
-  }
-
-  /// Schedules post-frame smooth reveal scrolling and clears the one-shot reveal request.
-  void _scheduleReveal() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      unawaited(
-        Scrollable.ensureVisible(
-          context,
-          duration: UiThemeTokens.of(context).focus.expandDuration,
-          curve: Curves.easeOut,
-          alignment: 0.12,
-        ),
-      );
-      ref.read(appShellControllerProvider.notifier).clearRevealRequest();
-    });
   }
 }
 
 /// Renders the expandable [UiCard.expandable] shell for [LocationCard].
-class _LocationExpandableCardView extends StatelessWidget {
+class _LocationExpandableCardView extends ConsumerWidget {
   /// Creates a [_LocationExpandableCardView].
   const _LocationExpandableCardView({
     required this.location,
+    required this.openCount,
     required this.isExpanded,
-    required this.isEditingTitle,
+    required this.activeInlineSection,
+    required this.isConfirmingDelete,
     required this.isBusy,
-    required this.onToggleExpand,
-    required this.onCancelInlineEdit,
-    required this.onOpenTitleEdit,
-    required this.expandedChild,
   });
 
-  /// Expanded body content displayed when [isExpanded] is true.
-  final Widget expandedChild;
+  /// Currently open inline section key on this location card, if any.
+  final String? activeInlineSection;
 
   /// Whether an entity mutation is currently active.
   final bool isBusy;
 
-  /// Whether inline title editing is active in the card header.
-  final bool isEditingTitle;
+  /// Whether inline delete confirmation is open for this location card.
+  final bool isConfirmingDelete;
 
   /// Whether this location card is expanded.
   final bool isExpanded;
 
-  /// Projected location view model.
-  final LocationCardViewModel location;
+  /// Persisted domain location.
+  final TdfLocation location;
 
-  /// Callback cancelling the active inline editor.
-  final VoidCallback onCancelInlineEdit;
-
-  /// Callback entering inline name editing.
-  final VoidCallback onOpenTitleEdit;
-
-  /// Callback toggling expansion of this card.
-  final VoidCallback onToggleExpand;
+  /// Count of open tasks referencing [location].
+  final int openCount;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isEditingTitle =
+        isExpanded && activeInlineSection == LocationSectionKind.title.name;
+    void toggleExpand() => _toggleExpand(ref);
+
     return UiCard.expandable(
       title: location.name,
       isExpanded: isExpanded,
       isEditingTitle: isEditingTitle,
-      onToggleExpand: onToggleExpand,
+      onToggleExpand: toggleExpand,
       leading: _LocationCardLeadingIcon(
         isExpanded: isExpanded,
         semanticLabel: location.name,
-        onPressed: onToggleExpand,
+        onPressed: toggleExpand,
       ),
       titleEditor: isEditingTitle
-          ? _LocationInlineNameEditor(
-              locationId: location.id,
-              initialName: location.name,
-              isBusy: isBusy,
-              onCancel: onCancelInlineEdit,
-            )
+          ? _LocationInlineNameEditor(location: location, isBusy: isBusy)
           : null,
       trailingActions: <Widget>[
         if (isExpanded && !isEditingTitle)
-          _LocationEditNameButton(
-            locationId: location.id,
-            isBusy: isBusy,
-            onPressed: onOpenTitleEdit,
-          ),
+          _LocationEditNameButton(locationId: location.id, isBusy: isBusy),
       ],
       collapsedMetadata: _LocationCardCollapsedMetadata(
         location: location,
-        onToggleExpand: onToggleExpand,
+        openCount: openCount,
+        onToggleExpand: toggleExpand,
       ),
-      expandedChild: expandedChild,
+      expandedChild: isExpanded
+          ? _LocationCardExpandedPanel(
+              location: location,
+              openCount: openCount,
+              activeInlineSection: activeInlineSection,
+              isConfirmingDelete: isConfirmingDelete,
+              isBusy: isBusy,
+            )
+          : null,
     );
+  }
+
+  /// Toggles single-expand state for [location] in [shellProvider].
+  void _toggleExpand(WidgetRef ref) {
+    ref
+        .read(shellProvider.notifier)
+        .toggleExpandEntity(
+          EntityRef(kind: EntityKind.location, id: location.id),
+        );
   }
 }
 
@@ -2055,23 +1993,15 @@ class _LocationExpandableCardView extends StatelessWidget {
 class _LocationInlineNameEditor extends ConsumerStatefulWidget {
   /// Creates a [_LocationInlineNameEditor].
   const _LocationInlineNameEditor({
-    required this.locationId,
-    required this.initialName,
+    required this.location,
     required this.isBusy,
-    required this.onCancel,
   });
-
-  /// Persisted location name seeding the text field.
-  final String initialName;
 
   /// Disables actions while a parent mutation is active.
   final bool isBusy;
 
-  /// Canonical location identifier.
-  final String locationId;
-
-  /// Callback closing inline name editing without saving.
-  final VoidCallback onCancel;
+  /// Persisted domain location seeding the text field and target identifier.
+  final TdfLocation location;
 
   @override
   ConsumerState<_LocationInlineNameEditor> createState() =>
@@ -2180,7 +2110,7 @@ class _LocationInlineNameEditorState
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(text: widget.initialName);
+    _controller = TextEditingController(text: widget.location.name);
   }
 
   @override
@@ -2198,10 +2128,10 @@ class _LocationInlineNameEditorState
     return _LocationInlineNameEditorLayout(
       isCompact: isCompact,
       field: UiField(
-        key: ValueKey<String>('location_name_editor_${widget.locationId}'),
+        key: ValueKey<String>('location_name_editor_${widget.location.id}'),
         controller: _controller,
         autofocus: true,
-        maxLength: _maxLocationNameLength,
+        maxLength: maxTdfTextLength,
         hintText: localizations.locationNameLabel,
         semanticLabel: localizations.inlineEditNameTooltip,
         enabled: !effectiveBusy,
@@ -2211,10 +2141,10 @@ class _LocationInlineNameEditorState
         onSubmitted: (_) => unawaited(_handleSave()),
       ),
       actions: _LocationInlineNameEditorActions(
-        locationId: widget.locationId,
+        locationId: widget.location.id,
         isBusy: effectiveBusy,
         onSave: () => unawaited(_handleSave()),
-        onCancel: widget.onCancel,
+        onCancel: ref.read(shellProvider.notifier).closeInlineEdit,
       ),
     );
   }
@@ -2226,7 +2156,7 @@ class _LocationInlineNameEditorState
     }
   }
 
-  /// Validates and commits the updated location name via [EntityController.saveLocationName].
+  /// Validates and commits the updated location name via [EntityActionsNotifier.saveLocationName].
   Future<void> _handleSave() async {
     if (widget.isBusy || _isSubmitting) {
       return;
@@ -2236,9 +2166,9 @@ class _LocationInlineNameEditorState
       _errorText = null;
     });
     final result = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .saveLocationName(
-          widget.locationId,
+          widget.location.id,
           _controller.text,
           locale: Localizations.localeOf(context),
         );
@@ -2348,8 +2278,8 @@ class _LocationNoteSectionSlot extends StatelessWidget {
   /// Whether the note section is currently in inline edit mode.
   final bool isEditing;
 
-  /// Expanded location view model.
-  final LocationCardViewModel location;
+  /// Expanded domain location.
+  final TdfLocation location;
 
   /// Callback cancelling inline note editing.
   final VoidCallback onCancelEdit;
@@ -2365,9 +2295,7 @@ class _LocationNoteSectionSlot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final noteText = location.note;
-    final showNoteSection =
-        isEditing || (noteText != null && noteText.trim().isNotEmpty);
+    final showNoteSection = isEditing || _hasNonEmptyNote(location.note);
     if (!showNoteSection) {
       return const SizedBox.shrink();
     }
@@ -2420,8 +2348,8 @@ class _LocationSourceAndLookupFields extends StatelessWidget {
   /// Callback resolving the current address or Plus Code source.
   final VoidCallback onResolveSource;
 
-  /// Callback switching the selected [ShellLocationSourceType].
-  final ValueChanged<ShellLocationSourceType> onSourceTypeChanged;
+  /// Callback switching the selected [LocationSourceType].
+  final ValueChanged<LocationSourceType> onSourceTypeChanged;
 
   /// Callback applying the current foreground GPS fix.
   final VoidCallback onUseCurrentGps;
@@ -2433,12 +2361,12 @@ class _LocationSourceAndLookupFields extends StatelessWidget {
   final String? sourceErrorText;
 
   /// Active coordinate source mode (`gps`, `address`, or `plusCode`).
-  final ShellLocationSourceType sourceType;
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
-    final isGps = sourceType == ShellLocationSourceType.gps;
+    final isGps = sourceType == LocationSourceType.gps;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2508,12 +2436,12 @@ class _LocationSourceInputField extends StatelessWidget {
   final VoidCallback onResolveSource;
 
   /// Active non-GPS source type selecting label and hint copy.
-  final ShellLocationSourceType sourceType;
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final isAddress = sourceType == ShellLocationSourceType.address;
+    final isAddress = sourceType == LocationSourceType.address;
 
     return UiField(
       key: ValueKey<String>('${keyPrefix}_source_field'),
@@ -2524,7 +2452,7 @@ class _LocationSourceInputField extends StatelessWidget {
       hintText: isAddress
           ? localizations.locationSourceAddressHint
           : localizations.locationSourcePlusCodeHint,
-      maxLength: _maxLocationSourceLength,
+      maxLength: maxTdfTextLength,
       enabled: enabled,
       errorText: errorText,
       textInputAction: TextInputAction.search,
@@ -2551,31 +2479,31 @@ class _LocationSourceSegmentedControl extends StatelessWidget {
   final String keyPrefix;
 
   /// Callback notified when the user switches source type.
-  final ValueChanged<ShellLocationSourceType> onChanged;
+  final ValueChanged<LocationSourceType> onChanged;
 
   /// Currently selected coordinate source type.
-  final ShellLocationSourceType sourceType;
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    return UiSegmentedControl<ShellLocationSourceType>(
+    return UiSegmentedControl<LocationSourceType>(
       key: ValueKey<String>('${keyPrefix}_source_type_segmented'),
       value: sourceType,
       enabled: enabled,
       semanticLabel: localizations.locationSourceTypeLabel,
       onChanged: onChanged,
-      segments: <UiSegment<ShellLocationSourceType>>[
-        UiSegment<ShellLocationSourceType>(
-          value: ShellLocationSourceType.gps,
+      segments: <UiSegment<LocationSourceType>>[
+        UiSegment<LocationSourceType>(
+          value: LocationSourceType.gps,
           label: localizations.locationSourceTypeGps,
         ),
-        UiSegment<ShellLocationSourceType>(
-          value: ShellLocationSourceType.address,
+        UiSegment<LocationSourceType>(
+          value: LocationSourceType.address,
           label: localizations.locationSourceTypeAddress,
         ),
-        UiSegment<ShellLocationSourceType>(
-          value: ShellLocationSourceType.plusCode,
+        UiSegment<LocationSourceType>(
+          value: LocationSourceType.plusCode,
           label: localizations.locationSourceTypePlusCode,
         ),
       ],
@@ -2600,10 +2528,10 @@ class _LocationSourceSelectorField extends StatelessWidget {
   final String keyPrefix;
 
   /// Callback notified when the user switches source type.
-  final ValueChanged<ShellLocationSourceType> onChanged;
+  final ValueChanged<LocationSourceType> onChanged;
 
   /// Currently selected coordinate source type.
-  final ShellLocationSourceType sourceType;
+  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
@@ -2633,6 +2561,43 @@ class _LocationSourceSelectorField extends StatelessWidget {
   }
 }
 
+/// Clears the optional note on [locationId] and reports any failure via floating notice.
+Future<void> _clearLocationNote(
+  BuildContext context,
+  WidgetRef ref,
+  String locationId,
+) async {
+  final result = await ref
+      .read(entityActionsProvider.notifier)
+      .clearLocationNote(locationId, locale: Localizations.localeOf(context));
+  if (!context.mounted) {
+    return;
+  }
+  _reportActionFailure(ref, result);
+}
+
+/// Computes the ordered optional [LocationSectionKind] sections not yet populated on [location].
+List<LocationSectionKind> _computeUnsetLocationSections(TdfLocation location) {
+  return <LocationSectionKind>[
+    if (!_hasNonEmptyNote(location.note)) LocationSectionKind.note,
+  ];
+}
+
+/// Deletes [locationId] via [EntityActionsNotifier.deleteLocation] and reports errors via floating notice.
+Future<void> _confirmDeleteLocation(
+  BuildContext context,
+  WidgetRef ref,
+  String locationId,
+) async {
+  final result = await ref
+      .read(entityActionsProvider.notifier)
+      .deleteLocation(locationId, locale: Localizations.localeOf(context));
+  if (!context.mounted) {
+    return;
+  }
+  _reportActionFailure(ref, result);
+}
+
 /// Copies [locationId] to the system clipboard and emits `locationIdCopiedNotice`.
 Future<void> _copyLocationId(
   BuildContext context,
@@ -2645,34 +2610,90 @@ Future<void> _copyLocationId(
     return;
   }
   ref
-      .read(floatingNoticeControllerProvider.notifier)
-      .showNotice(copiedNotice, tone: NoticeTone.success);
+      .read(floatingNoticeProvider.notifier)
+      .showNotice(copiedNotice, tone: FloatingNoticeTone.success);
 }
 
-/// Presents [showGeocodingCandidatesModal] and applies the chosen candidate via [EntityController].
-Future<LocationSourceUiResult?> _disambiguateLocationCandidate(
+/// Presents [showGeocodingCandidatesModal] and applies the chosen [GeocodingCandidate] via [entityActionsProvider].
+Future<LocationSourceResolutionResult?> _disambiguateLocationCandidate(
   BuildContext context,
   WidgetRef ref, {
-  required List<GeocodingCandidateViewModel> candidates,
-  required ShellLocationSourceType sourceType,
+  required List<GeocodingCandidate> candidates,
+  required LocationSourceType sourceType,
   required String? shortPlusCode,
+  required String? localityQuery,
   required Locale locale,
 }) async {
-  final chosenIndex = await showGeocodingCandidatesModal(
+  final chosenCandidate = await showGeocodingCandidatesModal(
     context,
     candidates: candidates,
   );
-  if (!context.mounted || chosenIndex == null) {
+  if (!context.mounted || chosenCandidate == null) {
     return null;
   }
   return ref
-      .read(entityControllerProvider.notifier)
+      .read(entityActionsProvider.notifier)
       .applyDisambiguatedCandidate(
-        candidateIndex: chosenIndex,
+        candidate: chosenCandidate,
         sourceType: sourceType,
         shortPlusCode: shortPlusCode,
+        localityQuery: localityQuery,
         locale: locale,
       );
+}
+
+/// Returns `true` when [note] contains at least one non-whitespace character.
+bool _hasNonEmptyNote(String? note) => note != null && note.trim().isNotEmpty;
+
+/// Extracts the normalized editable source text for [location], omitting legacy GPS sentinel tokens.
+String _locationSourceDisplayValue(
+  TdfLocation location,
+  LocationSourceType sourceType,
+) {
+  final rawSource = location.source?.trim() ?? '';
+  final lower = rawSource.toLowerCase();
+  if (sourceType == LocationSourceType.gps ||
+      lower == 'manual' ||
+      lower == 'gps') {
+    return '';
+  }
+  return rawSource;
+}
+
+/// Maps [sourceType] exhaustively to its localized display label.
+String _locationSourceTypeLabel(
+  LocationSourceType sourceType,
+  AppLocalizations localizations,
+) {
+  return switch (sourceType) {
+    LocationSourceType.gps => localizations.locationSourceTypeGps,
+    LocationSourceType.address => localizations.locationSourceTypeAddress,
+    LocationSourceType.plusCode => localizations.locationSourceTypePlusCode,
+  };
+}
+
+/// Reads initial 6-decimal foreground GPS coordinate strings from [locationStateProvider] when available.
+({String latitudeText, String longitudeText}) _readForegroundSeedCoordinates(
+  WidgetRef ref, {
+  required bool hasActiveGpsFix,
+}) {
+  if (!hasActiveGpsFix) {
+    return (latitudeText: '', longitudeText: '');
+  }
+  final locationState = ref.read(locationStateProvider);
+  final fix = locationState.status == LocationStatus.found
+      ? locationState.fix
+      : null;
+  if ((fix?.latitude, fix?.longitude) case (
+    final double latitude,
+    final double longitude,
+  )) {
+    return (
+      latitudeText: TdfLocation.formatRoundedDouble(latitude, 6),
+      longitudeText: TdfLocation.formatRoundedDouble(longitude, 6),
+    );
+  }
+  return (latitudeText: '', longitudeText: '');
 }
 
 /// Emits a danger floating notice when [result] indicates validation or persistence failure.
@@ -2683,8 +2704,8 @@ void _reportActionFailure(WidgetRef ref, ActionResult result) {
     case ActionValidationFailed(:final message):
     case ActionPersistFailed(:final message):
       ref
-          .read(floatingNoticeControllerProvider.notifier)
-          .showNotice(message, tone: NoticeTone.danger);
+          .read(floatingNoticeProvider.notifier)
+          .showNotice(message, tone: FloatingNoticeTone.danger);
   }
 }
 
@@ -2705,16 +2726,17 @@ String? _resolveBannerErrorText({
   return null;
 }
 
-/// Resolves an address or Plus Code source through [EntityController], prompting for disambiguation when needed.
-Future<LocationSourceUiResult?> _resolveLocationSourceWithDisambiguation(
+/// Resolves an address or Plus Code source through [entityActionsProvider], prompting for disambiguation when needed.
+Future<LocationSourceResolutionResult?>
+_resolveLocationSourceWithDisambiguation(
   BuildContext context,
   WidgetRef ref, {
-  required ShellLocationSourceType sourceType,
+  required LocationSourceType sourceType,
   required String rawSource,
 }) async {
   final locale = Localizations.localeOf(context);
   final result = await ref
-      .read(entityControllerProvider.notifier)
+      .read(entityActionsProvider.notifier)
       .resolveLocationSource(
         sourceType: sourceType,
         rawSource: rawSource,
@@ -2724,11 +2746,14 @@ Future<LocationSourceUiResult?> _resolveLocationSourceWithDisambiguation(
     return null;
   }
   return switch (result) {
-    LocationSourceUiResolved() || LocationSourceUiError() => result,
-    LocationSourceUiNeedsDisambiguation(
+    LocationSourceResolved() ||
+    LocationSourceResolutionError() ||
+    LocationSourceNotNeeded() => result,
+    LocationSourceNeedsDisambiguation(
       :final candidates,
       :final sourceType,
       :final shortPlusCode,
+      :final localityQuery,
     ) =>
       _disambiguateLocationCandidate(
         context,
@@ -2736,6 +2761,7 @@ Future<LocationSourceUiResult?> _resolveLocationSourceWithDisambiguation(
         candidates: candidates,
         sourceType: sourceType,
         shortPlusCode: shortPlusCode,
+        localityQuery: localityQuery,
         locale: locale,
       ),
   };

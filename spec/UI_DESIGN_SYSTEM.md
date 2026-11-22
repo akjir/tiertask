@@ -1,18 +1,18 @@
 # TierTask UI Design System & Interaction Guidelines
 
 > [!IMPORTANT]
-> This specification is the authoritative source for TierTask visual design tokens, layout geometry, reusable component boundaries, interaction patterns, keyboard shortcuts, and accessibility rules derived from the approved `.agents/prototypes/ui_v2/` concept. All work on `packages/tiertask_ui/` and `lib/ui/` MUST enforce these rules (`P-UI-DESIGN-SYSTEM`) via the **`ui-design-system`** skill.
+> This specification is the authoritative source for TierTask visual design tokens, layout geometry, reusable component boundaries, interaction patterns, keyboard shortcuts, and accessibility rules derived from the approved `.agents/prototypes/ui_v2/` concept. All work on `lib/ui/{tokens,primitives,layout,components}/` and app `lib/ui/` MUST enforce these rules (`P-UI-DESIGN-SYSTEM`) via the **`ui-design-system`** skill.
 
 ## 1. Scope, Governance & Fidelity Policy
 
 ### `U-FIDELITY-001` Initial Prototype Parity
-The `packages/tiertask_ui/` component library and adaptive `lib/ui/` shell and views MUST match the visual design, layout proportions, surface hierarchy, token values, and interaction flows established from `.agents/prototypes/ui_v2/` across Desktop (`Linux`, `Windows`) and Mobile (`Android`), English (`en`) and German (`de`), and all built-in theme presets (`Calm` and `Plum Umber`, Light and Dark).
+The integrated `lib/ui/{tokens,primitives,layout,components}/` design system and adaptive `lib/ui/` shell and views MUST match the visual design, layout proportions, surface hierarchy, token values, and interaction flows established from `.agents/prototypes/ui_v2/` across Desktop (`Linux`, `Windows`) and Mobile (`Android`), English (`en`) and German (`de`), and all built-in theme presets (`Calm` and `Plum Umber`, Light and Dark).
 
 ### `U-FIDELITY-002` Post-Cutover Evolution
 Following completion of the UI migration, future iterations of the Flutter application MAY refine, extend, or diverge from `.agents/prototypes/ui_v2/`. Any intentional divergence MUST update `spec/UI_DESIGN_SYSTEM.md` in the same change so this document remains the single source of truth; backporting changes to the historical HTML prototype is not required.
 
 ### `U-FIDELITY-003` Maximum Reuse & Minimum Widget Count
-`packages/tiertask_ui/` MUST stay compact and orthogonal around the 17 core widgets defined in Section 6 (`8` primitives, `4` adaptive layouts, `5` domain-agnostic composites). Introduce a new widget ONLY when existing primitives and layouts cannot express a pattern cleanly through composition, slots, or semantic variants. Feature screens in `lib/ui/` MUST compose these shared building blocks rather than duplicating bespoke one-off widgets across Tasks, Labels, Locations, Settings, Conflicts, and Modals.
+`lib/ui/{tokens,primitives,layout,components}/` MUST stay compact and orthogonal around the 17 core widgets defined in Section 6 (`8` primitives, `4` adaptive layouts, `5` domain-agnostic composites). Introduce a new widget ONLY when existing primitives and layouts cannot express a pattern cleanly through composition, slots, or semantic variants. Feature screens in `lib/ui/` MUST compose these shared building blocks rather than duplicating bespoke one-off widgets across Tasks, Labels, Locations, Settings, Conflicts, and Modals.
 
 ## 2. Surface Hierarchy, Flatness & Elevation
 
@@ -36,7 +36,7 @@ Drop shadows and inset rings are permitted ONLY on the following surfaces:
 
 ### `U-SURFACE-003` Surface Alternation Ladder
 Establish figure-ground depth through surface alternation rather than elevation:
-1. **`pageBg`:** Outer canvas backdrop (if windowed or gallery-framed).
+1. **`pageBg`:** Outer canvas backdrop (if windowed).
 2. **`bg`:** Application shell canvas, main scrollable list background, pinned bottom docks, and inset containers placed inside `panel` surfaces (expanded `.info-card` wells, standard form inputs/selects/textareas, segmented control trough, chips, badges, chrome pills, sidebar filter input, workspace rows, resolved preview box).
 3. **`panel`:** Top chrome bar, sidebar/drawer, top-level cards (entity cards, draft cards, static settings/conflict cards, quick-create bar, quick-add composer card, log console, raw TDF block), secondary buttons, count pills, selected segmented tab, overlays (toasts, popovers, sheets, modals), and **re-elevated interactive controls nested inside `bg` inset cards** (inline section edit inputs, color preset chips, subtask edit inputs, label picker search/list, read-only link rows, inline location chips, workspace rename input, history inline edit inputs).
 4. **`soft`:** Accent-tinted active/selected surface paired exclusively with `accent` foreground (active nav items, active chips/toggles, hovered icon buttons, active workspace card, Undo button, `tone-soft` and `tone-accent` badges).
@@ -178,9 +178,9 @@ Default inactive icons to `muted`; use `accent` for active navigation, section h
 
 ## 6. Component Architecture & Domain-Agnostic Catalog
 
-### `U-COMP-001` Compiler-Isolated Four-Layer Package (`packages/tiertask_ui/`)
-Organize `packages/tiertask_ui/lib/src/` into four strict layers exported through one curated package entrypoint (`packages/tiertask_ui/lib/tiertask_ui.dart`; no nested internal barrels):
-- Zero imports from `package:tiertask/*`, `package:flutter_riverpod/*`, `dart:io`, or `dart:ffi`.
+### `U-COMP-001` Isolated Four-Layer Design System (`lib/ui/{tokens,primitives,layout,components}/`)
+Organize the universal design system inside `lib/ui/` into four strict bottom-up sub-ranks (`tokens (0) < primitives (1) < layout (2) < components (3)`) imported directly by leaf path (zero barrel `export`, `part`, or `part of` shims per `P-FILE-SIZE`):
+- Zero imports from `lib/ui/{widgets,dialogs,views}/`, `lib/ui/tier_task_shell_screen.dart`, `lib/ui/ui_domain_mappers.dart`, `lib/models/`, `lib/l10n/`, `lib/services/`, `lib/repositories/`, `lib/providers/`, `package:flutter_riverpod/*`, `dart:io`, or `dart:ffi`.
 - Built on Flutter and `material_ui` platform primitives (IME, focus traversal, scrolling, semantics) styled 100% through `UiThemeTokens` (`ThemeExtension`).
 
 ### `U-COMP-002` Eight Core Primitives (`primitives/`)
@@ -312,7 +312,7 @@ On `compact` (`<= 720`) viewports, tier navigation uses the slide-over drawer an
 - **Auto-Saved Cards (`Auto-saved` badge):** Language, Appearance, Color Palette, Time Zone (including `37` manual UTC offsets matching `WebDavConfig.supportedUtcOffsetMinutes`), Deadline Lead Window, Foreground Location, Diagnostic Logging, Storage Mode, Local file watch toggle, and Local file actions commit immediately.
 - **Explicit WebDAV Dirty Flow:** Editing WebDAV URL, username, password, or path marks settings dirty and shows a `warning` `Unsaved changes` pill in BOTH the WebDAV card header and the docked footer.
 - **Dynamic Dock Emphasis:** When dirty, `Save` promotes to `primary` and `Test Connection / Sync Now` demotes to `secondary`; when clean, `Test Connection / Sync Now` is `primary` (disabled in `local`-only mode) and `Save` is `secondary`. Switching to `local` clears dirty state and validation errors.
-- **Validation & Platform Guards:** Validate HTTP(S) scheme with non-empty host, reject URL userinfo (`user:pass@`), require credentials, and reject `..`, `\`, and ASCII control characters in remote path with both per-field error text and a top danger banner. Show live resolved endpoint preview and password visibility toggle. Gate Local Storage `Move` (disabled with an explanatory desktop-only tooltip when unsupported) and `Select` (native OS file chooser vs in-app `UiDialogFrame` + `UiSearchablePicker` `.tdf` modal) on platform capability (`supportsNativeDirectoryPickerProvider`) rather than viewport width.
+- **Validation & Platform Guards:** Validate HTTP(S) scheme with non-empty host, reject URL userinfo (`user:pass@`), require credentials, and reject `..`, `\`, and ASCII control characters in remote path with both per-field error text and a top danger banner. Show live resolved endpoint preview and password visibility toggle. Gate Local Storage `Move` (disabled with an explanatory desktop-only tooltip when unsupported) and `Select` (native OS file chooser vs in-app `UiDialogFrame` + `UiSearchablePicker` `.tdf` modal) on platform capability (`supportsDirectoryPickerProvider`) rather than viewport width.
 
 ### `U-UX-007` Operational, Diagnostic & Conflict/Recovery Views
 - **Initial Loading:** Centered spinner + heading/subtitle replacing Tasks view and hiding the bottom dock.
@@ -363,17 +363,16 @@ On `compact` (`<= 720`) viewports, tier navigation uses the slide-over drawer an
 
 ## 10. Cross-Phase Verification Gates
 
-### `U-GATE-001` Phase 2 (`packages/tiertask_ui/`) Verification Gate
-Widget tests in `packages/tiertask_ui/test/` MUST prove:
-- Zero `tiertask`, `flutter_riverpod`, `dart:io`, or `dart:ffi` dependencies.
+### `U-GATE-001` Design System (`lib/ui/{tokens,primitives,layout,components}/`) Verification Gate
+Widget tests in `test/ui/{tokens,primitives,layout,components}/` MUST prove:
+- Strict internal sub-rank order (`tokens (0) < primitives (1) < layout (2) < components (3)`) and zero imports from app `lib/ui/` files, `lib/models/`, `lib/l10n/`, `lib/services/`, `lib/repositories/`, `lib/providers/`, `flutter_riverpod`, `dart:io`, or `dart:ffi`.
 - All 4 presets (`Calm` and `Plum Umber`, Light and Dark) render cleanly and pass automated WCAG AA contrast checks (`>= 4.5:1`).
 - Every primitive variant, density, and tone (`M-EXHAUSTIVE-STATE-TESTS`), focus/keyboard traversal, and breakpoint boundary (`390`, `720`, `721`, `760`, `820`, `821`, `1280`; `M-EXTREME-BOUND-TESTS`) match Sections 2–9.
-- Runnable `example/` gallery exercises all 17 widgets across presets, modes, and viewports.
 
 ### `U-GATE-002` Feature Shell & Interaction Verification Gate
 Feature widget and integration tests in `test/ui/` MUST prove:
-- Strict Rank `7` UI whitelist (zero `models/`, `services/`, `repositories/`, `providers/` imports and zero Riverpod provider/notifier declarations in `lib/ui/`).
+- Strict Rank `6` domain-direct UI compliance: app `lib/ui/` consumes `lib/models/`, `lib/l10n/`, pure `lib/services/`, `lib/providers/`, and `flutter_riverpod` directly through granular `.select(...)` and `.autoDispose` subscriptions while forbidding direct `lib/repositories/`, `dart:io`, `dart:ffi`, and `HttpClient` imports.
 - Full feature, `en`/`de` localization, keyboard shortcut, 9-layer `Escape`, badge-order/overflow, non-jumping task creation, Settings auto-save vs WebDAV dirty flow, and `M-REAL-MECHANICS-TESTS` parity across Linux, Android, and Windows.
 
 ### `U-GATE-003` Retirement & Global Lock Verification Gate
-Legacy UI code and retired ARB keys are removed (`P-NO-DEAD-CODE`), strict Rank `7` UI whitelist and no-provider-in-UI checks apply globally across `lib/ui/` (banning transitional `lib/ui_v2/` and `test/ui_v2/` directories), and `spec/UI_DESIGN_SYSTEM.md`, `ARCHITECTURE.md`, `AGENTS.md`, `README.md`, and `CHANGELOG.md` are synchronized with `tiertask_dev.py verify --full --fix` passing cleanly.
+Legacy UI code, retired `packages/tiertask_ui/`, `lib/presentation/`, `test/presentation/`, transitional `lib/ui_v2/` and `test/ui_v2/` directories, and unused ARB keys are removed (`P-NO-DEAD-CODE`), the 8-rank bottom-up DAG (`0..7`), universal Rank `0..3` design-system isolation, `lib/ui/ -> lib/repositories/` ban, and unconditional `export`/`part` ban apply globally, and `spec/UI_DESIGN_SYSTEM.md`, `ARCHITECTURE.md`, `AGENTS.md`, `README.md`, and `CHANGELOG.md` are synchronized with `tiertask_dev.py verify --full --fix` passing cleanly.

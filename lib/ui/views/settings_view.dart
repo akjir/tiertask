@@ -17,55 +17,65 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/log_viewer_controller.dart';
-import '../../presentation/settings_controller.dart';
-import '../../presentation/shell_models.dart';
+import '../../models/app_workspace.dart';
+import '../../models/tdf_file_path.dart';
+import '../../models/webdav_config.dart';
+import '../../providers/config_providers.dart';
+import '../../providers/log_viewer_providers.dart';
+import '../../providers/settings_draft_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/workspace_providers.dart';
+import '../../services/app_logger.dart';
 import '../dialogs/local_file_modals.dart';
 import '../dialogs/wipe_tdf_modal.dart';
-import '../ui_icon_mapper.dart';
+import '../layout/ui_page_header.dart';
+import '../layout/ui_responsive_grid.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_pill.dart';
+import '../primitives/ui_segmented_control.dart';
+import '../primitives/ui_toggle_row.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
+import '../ui_domain_mappers.dart';
 
+/// Pinned bottom dock footer hosting conditional `Unsaved changes` pill, `Save`,
+/// and `Test Connection / Sync Now` buttons decoupled outside the Settings scroll region (`U-LAYOUT-006`, `U-UX-006`).
 class SettingsActionDock extends ConsumerWidget {
   /// Creates a [SettingsActionDock].
   const SettingsActionDock({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final tokens = UiThemeTokens.of(context);
-    final dockState = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          busyOperation: model.busyOperation,
-          canTestConnectionAndSync: model.canTestConnectionAndSync,
-          isBusy: model.isBusy,
-          isWebDavDirty: model.isWebDavDirty,
-          storageMode: model.storageMode,
-        ),
-      ),
+    final spacing = UiThemeTokens.of(context).spacing.space2;
+    final usesWebDav = _watchConfigSlice<bool>(
+      ref,
+      (config) => config.storageMode.usesWebDav,
+      fallback: false,
     );
-    final usesWebDav = _usesWebDavStorage(dockState.storageMode);
+    final draft = ref.watch(settingsDraftProvider.select(_selectDockDraft));
+    final canAct = usesWebDav && !draft.isBusy;
 
     return SizedBox(
       width: double.infinity,
       child: Wrap(
         alignment: WrapAlignment.spaceBetween,
         crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: tokens.spacing.space2,
-        runSpacing: tokens.spacing.space2,
+        spacing: spacing,
+        runSpacing: spacing,
         children: <Widget>[
-          _SettingsDockUnsavedBadge(isVisible: dockState.isWebDavDirty),
+          _SettingsDockUnsavedBadge(isVisible: draft.isDirty),
           _SettingsDockButtons(
-            canSave: !dockState.isBusy && usesWebDav,
-            canTestConnectionAndSync: dockState.canTestConnectionAndSync,
-            isDirty: dockState.isWebDavDirty,
-            isSaving:
-                dockState.busyOperation == SettingsBusyOperation.saveWebDav,
-            isTestingSync:
-                dockState.busyOperation ==
-                SettingsBusyOperation.testConnectionAndSync,
+            canSave: canAct,
+            canTestConnectionAndSync: canAct,
+            isDirty: draft.isDirty,
+            isSaving: draft.isSavingWebDav,
+            isTestingSync: draft.isTestingConnection,
             onSave: () => _handleSave(context, ref),
             onTestAndSync: () => _handleTestAndSync(context, ref),
           ),
@@ -74,22 +84,20 @@ class SettingsActionDock extends ConsumerWidget {
     );
   }
 
-  /// Validates and persists the WebDAV draft via [SettingsController.saveWebDavDraft].
+  /// Validates and persists the WebDAV draft via [SettingsDraftNotifier.saveWebDavDraft].
   void _handleSave(BuildContext context, WidgetRef ref) {
     final locale = Localizations.localeOf(context);
     unawaited(
-      ref
-          .read(settingsControllerProvider.notifier)
-          .saveWebDavDraft(locale: locale),
+      ref.read(settingsDraftProvider.notifier).saveWebDavDraft(locale: locale),
     );
   }
 
-  /// Validates and tests WebDAV synchronization via [SettingsController.testConnectionAndSync].
+  /// Validates and tests WebDAV synchronization via [SettingsDraftNotifier.testConnectionAndSync].
   void _handleTestAndSync(BuildContext context, WidgetRef ref) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
+          .read(settingsDraftProvider.notifier)
           .testConnectionAndSync(locale: locale),
     );
   }
@@ -116,13 +124,10 @@ class _AppearanceCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          themeMode: model.themeMode,
-        ),
-      ),
+    final themeMode = _watchConfigSlice<AppThemeMode>(
+      ref,
+      (config) => config.themeMode,
+      fallback: AppThemeMode.system,
     );
 
     return _SettingsAutoSavedCard(
@@ -130,10 +135,9 @@ class _AppearanceCard extends ConsumerWidget {
       icon: Icons.brightness_6_outlined,
       title: localizations.themeSectionTitle,
       description: localizations.themeSectionDescription,
-      child: UiSegmentedControl<ShellThemeMode>(
+      child: UiSegmentedControl<AppThemeMode>(
         key: const ValueKey<String>('settings_theme_mode_control'),
-        value: slice.themeMode,
-        enabled: !slice.isDisabled,
+        value: themeMode,
         semanticLabel: localizations.themeSectionTitle,
         segments: _themeModeSegments(localizations),
         onChanged: (next) => _commitThemeMode(context, ref, next),
@@ -141,17 +145,20 @@ class _AppearanceCard extends ConsumerWidget {
     );
   }
 
-  /// Commits a theme mode change immediately via [SettingsController.setThemeMode].
+  /// Commits a theme mode change immediately via [SettingsDraftNotifier.savePreference].
   void _commitThemeMode(
     BuildContext context,
     WidgetRef ref,
-    ShellThemeMode next,
+    AppThemeMode next,
   ) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setThemeMode(next, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateThemeMode(next),
+            locale: locale,
+          ),
     );
   }
 }
@@ -164,13 +171,10 @@ class _ColorPaletteCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          themePalette: model.themePalette,
-        ),
-      ),
+    final themePalette = _watchConfigSlice<AppThemePalette>(
+      ref,
+      (config) => config.themePalette,
+      fallback: AppThemePalette.calm,
     );
 
     return _SettingsAutoSavedCard(
@@ -178,10 +182,9 @@ class _ColorPaletteCard extends ConsumerWidget {
       icon: Icons.palette_outlined,
       title: localizations.themePaletteSectionTitle,
       description: localizations.themePaletteSectionDescription,
-      child: UiSegmentedControl<AppThemePresetKey>(
+      child: UiSegmentedControl<AppThemePalette>(
         key: const ValueKey<String>('settings_theme_palette_control'),
-        value: slice.themePalette,
-        enabled: !slice.isDisabled,
+        value: themePalette,
         semanticLabel: localizations.themePaletteSectionTitle,
         segments: _themePaletteSegments(localizations),
         onChanged: (next) => _commitPalette(context, ref, next),
@@ -189,17 +192,20 @@ class _ColorPaletteCard extends ConsumerWidget {
     );
   }
 
-  /// Commits a palette change immediately via [SettingsController.setThemePalette].
+  /// Commits a palette change immediately via [SettingsDraftNotifier.savePreference].
   void _commitPalette(
     BuildContext context,
     WidgetRef ref,
-    AppThemePresetKey next,
+    AppThemePalette next,
   ) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setThemePalette(next, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateThemePalette(next),
+            locale: locale,
+          ),
     );
   }
 }
@@ -212,13 +218,10 @@ class _DeadlinePrioritizationCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          dueLeadWindow: model.dueLeadWindow,
-          isDisabled: model.isPreferenceControlDisabled,
-        ),
-      ),
+    final dueLeadWindow = _watchConfigSlice<DueLeadWindow>(
+      ref,
+      (config) => config.dueLeadWindow,
+      fallback: DueLeadWindow.hours24,
     );
 
     return _SettingsAutoSavedCard(
@@ -230,25 +233,27 @@ class _DeadlinePrioritizationCard extends ConsumerWidget {
         key: const ValueKey<String>('settings_due_lead_select'),
         kind: UiFieldKind.select,
         label: localizations.dueLeadWindowLabel,
-        selectValue: slice.dueLeadWindow.name,
+        selectValue: dueLeadWindow.name,
         selectOptions: _dueLeadOptions(localizations),
-        enabled: !slice.isDisabled,
         onSelectChanged: (raw) => _commitDueLead(context, ref, raw),
       ),
     );
   }
 
-  /// Parses [raw] into a [ShellDueLeadOption] and commits via [SettingsController.setDueLeadWindow].
+  /// Parses [raw] into a [DueLeadWindow] and commits via [SettingsDraftNotifier.savePreference].
   void _commitDueLead(BuildContext context, WidgetRef ref, String raw) {
-    final parsed = _parseDueLeadOption(raw);
+    final parsed = _parseDueLeadWindow(raw);
     if (parsed == null) {
       return;
     }
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setDueLeadWindow(parsed, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateDueLeadWindow(parsed),
+            locale: locale,
+          ),
     );
   }
 }
@@ -262,13 +267,10 @@ class _DiagnosticsCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          diagnosticsEnabled: model.diagnosticsEnabled,
-          isDisabled: model.isPreferenceControlDisabled,
-        ),
-      ),
+    final diagnosticsEnabled = _watchConfigSlice<bool>(
+      ref,
+      (config) => config.diagnosticsEnabled,
+      fallback: false,
     );
 
     return _SettingsAutoSavedCard(
@@ -283,11 +285,10 @@ class _DiagnosticsCard extends ConsumerWidget {
             key: const ValueKey<String>('settings_diagnostics_toggle'),
             label: localizations.diagnosticsSectionTitle,
             description: localizations.diagnosticsSectionDescription,
-            value: slice.diagnosticsEnabled,
-            enabled: !slice.isDisabled,
+            value: diagnosticsEnabled,
             onChanged: (enabled) => _commitDiagnostics(context, ref, enabled),
           ),
-          if (slice.diagnosticsEnabled) ...<Widget>[
+          if (diagnosticsEnabled) ...<Widget>[
             SizedBox(height: tokens.spacing.space3),
             const _DiagnosticsDetailsPanel(),
           ],
@@ -296,28 +297,28 @@ class _DiagnosticsCard extends ConsumerWidget {
     );
   }
 
-  /// Commits diagnostic logging opt-in state via [SettingsController.setDiagnosticsEnabled].
+  /// Commits diagnostic logging opt-in state via [SettingsDraftNotifier.savePreference].
   void _commitDiagnostics(BuildContext context, WidgetRef ref, bool enabled) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setDiagnosticsEnabled(enabled, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateDiagnosticsEnabled(enabled),
+            locale: locale,
+          ),
     );
   }
 }
 
 /// Conditional diagnostic level, storage, and viewer trigger controls inside [_DiagnosticsCard].
-class _DiagnosticsDetailsPanel extends ConsumerWidget {
+class _DiagnosticsDetailsPanel extends StatelessWidget {
   /// Creates a [_DiagnosticsDetailsPanel].
   const _DiagnosticsDetailsPanel();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
-    final activeLogFileName = ref.watch(
-      settingsControllerProvider.select((model) => model.activeLogFileName),
-    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -327,7 +328,7 @@ class _DiagnosticsDetailsPanel extends ConsumerWidget {
         SizedBox(height: tokens.spacing.space3),
         const _DiagnosticsLogStorageSelect(),
         SizedBox(height: tokens.spacing.space3),
-        _DiagnosticsLogFooter(activeLogFileName: activeLogFileName),
+        const _DiagnosticsLogFooter(),
       ],
     );
   }
@@ -336,15 +337,13 @@ class _DiagnosticsDetailsPanel extends ConsumerWidget {
 /// Active diagnostic log filename readout and viewer trigger button inside [_DiagnosticsDetailsPanel].
 class _DiagnosticsLogFooter extends ConsumerWidget {
   /// Creates a [_DiagnosticsLogFooter].
-  const _DiagnosticsLogFooter({required this.activeLogFileName});
-
-  /// Active dated diagnostic log filename.
-  final String activeLogFileName;
+  const _DiagnosticsLogFooter();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
+    final activeLogFileName = ref.watch(activeLogFileNameProvider);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -368,9 +367,8 @@ class _DiagnosticsLogFooter extends ConsumerWidget {
             label: localizations.diagnosticLogButton,
             leadingIcon: Icons.bug_report_outlined,
             density: UiButtonDensity.compact,
-            onPressed: () => ref
-                .read(appShellControllerProvider.notifier)
-                .openView(ShellView.logs),
+            onPressed: () =>
+                ref.read(shellProvider.notifier).openView(ShellView.logs),
           ),
         ),
       ],
@@ -386,37 +384,36 @@ class _DiagnosticsLogLevelSelect extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          logLevel: model.logLevel,
-        ),
-      ),
+    final logLevel = _watchConfigSlice<LogLevel>(
+      ref,
+      (config) => config.logLevel,
+      fallback: LogLevel.info,
     );
 
     return UiField(
       key: const ValueKey<String>('settings_log_level_select'),
       kind: UiFieldKind.select,
       label: localizations.logLevelLabel,
-      selectValue: slice.logLevel.name,
+      selectValue: logLevel.name,
       selectOptions: _logLevelOptions(localizations),
-      enabled: !slice.isDisabled,
       onSelectChanged: (raw) => _commitLogLevel(context, ref, raw),
     );
   }
 
-  /// Parses [raw] into a [DiagnosticLogLevel] and commits via [SettingsController.setLogLevel].
+  /// Parses [raw] into a [LogLevel] and commits via [SettingsDraftNotifier.savePreference].
   void _commitLogLevel(BuildContext context, WidgetRef ref, String raw) {
-    final parsed = _parseDiagnosticLogLevel(raw);
+    final parsed = _parseLogLevel(raw);
     if (parsed == null) {
       return;
     }
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setLogLevel(parsed, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateLogLevel(parsed),
+            locale: locale,
+          ),
     );
   }
 }
@@ -429,27 +426,23 @@ class _DiagnosticsLogStorageSelect extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          logStorageMode: model.logStorageMode,
-        ),
-      ),
+    final logStorageMode = _watchConfigSlice<StorageMode>(
+      ref,
+      (config) => config.logStorageMode,
+      fallback: StorageMode.local,
     );
 
     return UiField(
       key: const ValueKey<String>('settings_log_storage_select'),
       kind: UiFieldKind.select,
       label: localizations.logStorageLabel,
-      selectValue: slice.logStorageMode.name,
+      selectValue: logStorageMode.name,
       selectOptions: _logStorageOptions(localizations),
-      enabled: !slice.isDisabled,
       onSelectChanged: (raw) => _commitLogStorageMode(context, ref, raw),
     );
   }
 
-  /// Parses [raw] into a [ShellStorageMode] and commits via [SettingsController.setLogStorageMode].
+  /// Parses [raw] into a [StorageMode] and commits via [SettingsDraftNotifier.savePreference].
   void _commitLogStorageMode(BuildContext context, WidgetRef ref, String raw) {
     final parsed = _parseStorageMode(raw);
     if (parsed == null) {
@@ -458,8 +451,11 @@ class _DiagnosticsLogStorageSelect extends ConsumerWidget {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setLogStorageMode(parsed, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateLogStorageMode(parsed),
+            locale: locale,
+          ),
     );
   }
 }
@@ -472,13 +468,10 @@ class _ForegroundLocationCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          locationEnabled: model.locationEnabled,
-        ),
-      ),
+    final locationEnabled = _watchConfigSlice<bool>(
+      ref,
+      (config) => config.locationEnabled,
+      fallback: false,
     );
 
     return _SettingsAutoSavedCard(
@@ -488,8 +481,7 @@ class _ForegroundLocationCard extends ConsumerWidget {
       description: localizations.locationSectionDescription,
       child: UiSegmentedControl<bool>(
         key: const ValueKey<String>('settings_location_control'),
-        value: slice.locationEnabled,
-        enabled: !slice.isDisabled,
+        value: locationEnabled,
         semanticLabel: localizations.locationSectionTitle,
         segments: _locationSegments(localizations),
         onChanged: (next) => _commitLocationEnabled(context, ref, next),
@@ -497,13 +489,16 @@ class _ForegroundLocationCard extends ConsumerWidget {
     );
   }
 
-  /// Commits foreground location state immediately via [SettingsController.setLocationEnabled].
+  /// Commits foreground location state immediately via [SettingsDraftNotifier.savePreference].
   void _commitLocationEnabled(BuildContext context, WidgetRef ref, bool next) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setLocationEnabled(next, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateLocationEnabled(next),
+            locale: locale,
+          ),
     );
   }
 }
@@ -516,13 +511,10 @@ class _LanguageCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          language: model.language,
-        ),
-      ),
+    final language = _watchConfigSlice<AppLanguage>(
+      ref,
+      (config) => config.language,
+      fallback: AppLanguage.system,
     );
 
     return _SettingsAutoSavedCard(
@@ -530,10 +522,9 @@ class _LanguageCard extends ConsumerWidget {
       icon: Icons.language_rounded,
       title: localizations.languageSectionTitle,
       description: localizations.languageSectionDescription,
-      child: UiSegmentedControl<ShellLanguageOption>(
+      child: UiSegmentedControl<AppLanguage>(
         key: const ValueKey<String>('settings_language_control'),
-        value: slice.language,
-        enabled: !slice.isDisabled,
+        value: language,
         semanticLabel: localizations.languageSectionTitle,
         segments: _languageSegments(localizations),
         onChanged: (next) => _commitLanguage(context, ref, next),
@@ -541,17 +532,16 @@ class _LanguageCard extends ConsumerWidget {
     );
   }
 
-  /// Commits display language immediately via [SettingsController.setLanguage].
-  void _commitLanguage(
-    BuildContext context,
-    WidgetRef ref,
-    ShellLanguageOption next,
-  ) {
+  /// Commits display language immediately via [SettingsDraftNotifier.savePreference].
+  void _commitLanguage(BuildContext context, WidgetRef ref, AppLanguage next) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setLanguage(next, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateLanguage(next),
+            locale: locale,
+          ),
     );
   }
 }
@@ -638,33 +628,30 @@ class _LocalMoveActionButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isBusy: model.isBusy,
-          supportsNativeDirectoryPicker: model.supportsNativeDirectoryPicker,
-        ),
-      ),
+    final supportsDirectoryPicker = ref.watch(supportsDirectoryPickerProvider);
+    final isBusy = ref.watch(
+      settingsDraftProvider.select((draft) => draft.isBusy),
     );
+
     return _LocalActionButton(
       buttonKey: const ValueKey<String>('settings_move_local_button'),
       label: localizations.actionMoveLocalFile,
       icon: Icons.drive_file_move_outlined,
-      tooltip: slice.supportsNativeDirectoryPicker
+      tooltip: supportsDirectoryPicker
           ? null
           : localizations.settingsMoveDesktopOnlyTooltip,
-      onPressed: (slice.supportsNativeDirectoryPicker && !slice.isBusy)
+      onPressed: (supportsDirectoryPicker && !isBusy)
           ? () => _handleMove(context, ref)
           : null,
     );
   }
 
-  /// Moves the active local `.tdf` file via [SettingsController.moveLocalDirectory].
+  /// Moves the active local `.tdf` file via [SettingsDraftNotifier.moveLocalDirectory].
   void _handleMove(BuildContext context, WidgetRef ref) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
+          .read(settingsDraftProvider.notifier)
           .moveLocalDirectory(locale: locale),
     );
   }
@@ -678,23 +665,48 @@ class _LocalRenameActionButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, localFileName: model.localFileName),
-      ),
+    final localFilePath = _watchConfigSlice<String>(
+      ref,
+      (config) => config.localFilePath,
+      fallback: WebDavConfig.defaultFileName,
     );
+    final isBusy = ref.watch(
+      settingsDraftProvider.select((draft) => draft.isBusy),
+    );
+    final localFileName = TdfFilePath.extractFileNameFromPath(localFilePath);
+
     return _LocalActionButton(
       buttonKey: const ValueKey<String>('settings_rename_local_button'),
       label: localizations.actionRenameLocalFile,
       icon: Icons.drive_file_rename_outline,
-      onPressed: slice.isBusy
+      onPressed: isBusy
           ? null
           : () => unawaited(
-              showRenameLocalFileModal(
-                context,
-                currentFileName: slice.localFileName,
-              ),
+              showRenameLocalFileModal(context, currentFileName: localFileName),
             ),
+    );
+  }
+}
+
+/// Read-only resolved local `.tdf` path preview inside [_LocalStorageCardBody].
+class _LocalResolvedPathField extends ConsumerWidget {
+  /// Creates a [_LocalResolvedPathField].
+  const _LocalResolvedPathField();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final resolvedLocalPath = ref.watch(
+      settingsDraftProvider.select(
+        (draft) => draft.resolvedLocalPathPreview ?? '',
+      ),
+    );
+
+    return UiField(
+      key: const ValueKey<String>('settings_resolved_local_path_field'),
+      kind: UiFieldKind.readOnlyDisplay,
+      label: localizations.resolvedLocalPathLabel,
+      displayValue: resolvedLocalPath,
     );
   }
 }
@@ -707,24 +719,21 @@ class _LocalSelectActionButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isBusy: model.isBusy,
-          supportsNativeDirectoryPicker: model.supportsNativeDirectoryPicker,
-        ),
-      ),
+    final supportsDirectoryPicker = ref.watch(supportsDirectoryPickerProvider);
+    final isBusy = ref.watch(
+      settingsDraftProvider.select((draft) => draft.isBusy),
     );
+
     return _LocalActionButton(
       buttonKey: const ValueKey<String>('settings_select_local_button'),
       label: localizations.actionSelectLocalFile,
       icon: Icons.file_open_outlined,
-      onPressed: slice.isBusy
+      onPressed: isBusy
           ? null
           : () => _handleSelect(
               context,
               ref,
-              supportsNativePicker: slice.supportsNativeDirectoryPicker,
+              supportsNativePicker: supportsDirectoryPicker,
             ),
     );
   }
@@ -739,7 +748,7 @@ class _LocalSelectActionButton extends ConsumerWidget {
       final locale = Localizations.localeOf(context);
       unawaited(
         ref
-            .read(settingsControllerProvider.notifier)
+            .read(settingsDraftProvider.notifier)
             .selectLocalFile(locale: locale),
       );
       return;
@@ -767,56 +776,65 @@ class _LocalStorageCard extends StatelessWidget {
 }
 
 /// Body layout inside [_LocalStorageCard] pairing path readout, 4-action grid, and watch toggle.
-class _LocalStorageCardBody extends ConsumerWidget {
+class _LocalStorageCardBody extends StatelessWidget {
   /// Creates a [_LocalStorageCardBody].
   const _LocalStorageCardBody();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
+  Widget build(BuildContext context) {
     final gap = UiThemeTokens.of(context).spacing.space3;
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          localWatchEnabled: model.localWatchEnabled,
-          resolvedLocalPath: model.resolvedLocalPath,
-        ),
-      ),
-    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        UiField(
-          key: const ValueKey<String>('settings_resolved_local_path_field'),
-          kind: UiFieldKind.readOnlyDisplay,
-          label: localizations.resolvedLocalPathLabel,
-          displayValue: slice.resolvedLocalPath,
-        ),
+        const _LocalResolvedPathField(),
         SizedBox(height: gap),
         const _LocalActionsGrid(),
         SizedBox(height: gap),
-        UiToggleRow(
-          key: const ValueKey<String>('settings_local_watch_toggle'),
-          label: localizations.localWatchLabel,
-          description: localizations.localWatchDescription,
-          value: slice.localWatchEnabled,
-          enabled: !slice.isDisabled,
-          onChanged: (enabled) => _commitLocalWatch(context, ref, enabled),
-        ),
+        const _LocalWatchToggle(),
       ],
     );
   }
+}
 
-  /// Commits external file watching preference via [SettingsController.setLocalWatchEnabled].
+/// Auto-saved external local file watching checkbox row inside [_LocalStorageCardBody].
+class _LocalWatchToggle extends ConsumerWidget {
+  /// Creates a [_LocalWatchToggle].
+  const _LocalWatchToggle();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final localWatchEnabled = _watchConfigSlice<bool>(
+      ref,
+      (config) => config.localWatchEnabled,
+      fallback: true,
+    );
+    final isStorageOperationBusy = ref.watch(
+      settingsDraftProvider.select((draft) => draft.isStorageOperationBusy),
+    );
+
+    return UiToggleRow(
+      key: const ValueKey<String>('settings_local_watch_toggle'),
+      label: localizations.localWatchLabel,
+      description: localizations.localWatchDescription,
+      value: localWatchEnabled,
+      enabled: !isStorageOperationBusy,
+      onChanged: (enabled) => _commitLocalWatch(context, ref, enabled),
+    );
+  }
+
+  /// Commits external file watching preference via [SettingsDraftNotifier.savePreference].
   void _commitLocalWatch(BuildContext context, WidgetRef ref, bool enabled) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setLocalWatchEnabled(enabled, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateLocalWatchEnabled(enabled),
+            locale: locale,
+          ),
     );
   }
 }
@@ -829,29 +847,31 @@ class _LocalWipeActionButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isBusy: model.isBusy,
-          localFileBaseName: model.localFileBaseName,
-          localFileName: model.localFileName,
-        ),
-      ),
+    final localFilePath = _watchConfigSlice<String>(
+      ref,
+      (config) => config.localFilePath,
+      fallback: WebDavConfig.defaultFileName,
     );
+    final isBusy = ref.watch(
+      settingsDraftProvider.select((draft) => draft.isBusy),
+    );
+    final localFileName = TdfFilePath.extractFileNameFromPath(localFilePath);
+    final localFileBaseName = TdfFilePath.extractFileBaseName(localFilePath);
+
     return _LocalActionButton(
       buttonKey: const ValueKey<String>('settings_wipe_local_button'),
       label: localizations.actionDelete,
       semanticLabel: localizations.actionWipeLocalFile,
       icon: Icons.delete_outline_rounded,
       variant: UiButtonVariant.danger,
-      onPressed: slice.isBusy
+      onPressed: isBusy
           ? null
           : () => unawaited(
               showWipeTdfModal(
                 context,
                 isRemote: false,
-                fileName: slice.localFileName,
-                baseName: slice.localFileBaseName,
+                fileName: localFileName,
+                baseName: localFileBaseName,
               ),
             ),
     );
@@ -1004,6 +1024,29 @@ class _SettingsDockUnsavedBadge extends StatelessWidget {
   }
 }
 
+/// Workspace-scoped page header watching only the active workspace display name.
+class _SettingsHeader extends ConsumerWidget {
+  /// Creates a [_SettingsHeader].
+  const _SettingsHeader();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final workspaceName = ref.watch(
+      activeWorkspaceProvider.select(
+        (workspace) => workspace.asData?.value.name ?? AppWorkspace.defaultName,
+      ),
+    );
+
+    return UiPageHeader(
+      backLabel: localizations.actionBackToTasks,
+      onBack: () => ref.read(shellProvider.notifier).openView(ShellView.tasks),
+      title: localizations.settingsTitle,
+      subtitle: localizations.settingsWorkspaceSubtitle(workspaceName),
+    );
+  }
+}
+
 /// Responsive 2-column (`> 820px`) grid of all 8 auto-saved Settings preference cards (`U-LAYOUT-006`).
 class _SettingsPreferenceGrid extends StatelessWidget {
   /// Creates a [_SettingsPreferenceGrid].
@@ -1032,25 +1075,14 @@ class _SettingsPreferenceGrid extends StatelessWidget {
 class _SettingsScrollContent extends StatelessWidget {
   /// Creates a [_SettingsScrollContent].
   const _SettingsScrollContent({
-    required this.workspaceName,
-    required this.statusBanner,
-    required this.storageMode,
     required this.serverUrlController,
     required this.usernameController,
     required this.passwordController,
     required this.filePathController,
-    required this.onBack,
-    required this.onDismissBanner,
   });
 
   /// Controller bound to the WebDAV remote file path input.
   final TextEditingController filePathController;
-
-  /// Callback returning to the primary Tasks view.
-  final VoidCallback onBack;
-
-  /// Callback dismissing [statusBanner].
-  final VoidCallback onDismissBanner;
 
   /// Controller bound to the WebDAV password input.
   final TextEditingController passwordController;
@@ -1058,59 +1090,54 @@ class _SettingsScrollContent extends StatelessWidget {
   /// Controller bound to the WebDAV server URL input.
   final TextEditingController serverUrlController;
 
-  /// Active top status banner, or `null` when hidden.
-  final SettingsStatusBannerViewModel? statusBanner;
-
-  /// Active workspace persistence storage mode.
-  final ShellStorageMode storageMode;
-
   /// Controller bound to the WebDAV username input.
   final TextEditingController usernameController;
 
-  /// Display name of the currently active workspace.
-  final String workspaceName;
-
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        UiPageHeader(
-          backLabel: localizations.actionBackToTasks,
-          onBack: onBack,
-          title: localizations.settingsTitle,
-          subtitle: localizations.settingsWorkspaceSubtitle(workspaceName),
-        ),
-        if (statusBanner case final banner?)
-          _SettingsStatusBannerSection(
-            banner: banner,
-            onDismiss: onDismissBanner,
-          ),
+        const _SettingsHeader(),
+        const _SettingsStatusBannerHost(),
         SizedBox(height: tokens.spacing.space4),
         const _SettingsPreferenceGrid(),
-        if (_usesLocalStorage(storageMode)) ...<Widget>[
-          SizedBox(height: tokens.spacing.sectionGridGap),
-          const _LocalStorageCard(),
-        ],
-        if (_usesWebDavStorage(storageMode)) ...<Widget>[
-          SizedBox(height: tokens.spacing.sectionGridGap),
-          _WebDavStorageCard(
-            serverUrlController: serverUrlController,
-            usernameController: usernameController,
-            passwordController: passwordController,
-            filePathController: filePathController,
-          ),
-        ],
+        _SettingsStorageSections(
+          serverUrlController: serverUrlController,
+          usernameController: usernameController,
+          passwordController: passwordController,
+          filePathController: filePathController,
+        ),
       ],
     );
   }
 }
 
-/// Top-spaced status banner section rendered inside [_SettingsScrollContent].
+/// Scoped status banner host watching only [SettingsDraftState.statusBanner].
+class _SettingsStatusBannerHost extends ConsumerWidget {
+  /// Creates a [_SettingsStatusBannerHost].
+  const _SettingsStatusBannerHost();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final statusBanner = ref.watch(
+      settingsDraftProvider.select((draft) => draft.statusBanner),
+    );
+    if (statusBanner == null) {
+      return const SizedBox.shrink();
+    }
+    return _SettingsStatusBannerSection(
+      banner: statusBanner,
+      onDismiss: () =>
+          ref.read(settingsDraftProvider.notifier).dismissStatusBanner(),
+    );
+  }
+}
+
+/// Top-spaced status banner section rendered inside [_SettingsStatusBannerHost].
 class _SettingsStatusBannerSection extends StatelessWidget {
   /// Creates a [_SettingsStatusBannerSection].
   const _SettingsStatusBannerSection({
@@ -1118,8 +1145,8 @@ class _SettingsStatusBannerSection extends StatelessWidget {
     required this.onDismiss,
   });
 
-  /// Active settings status banner projection.
-  final SettingsStatusBannerViewModel banner;
+  /// Active settings status banner snapshot.
+  final SettingsStatusBanner banner;
 
   /// Callback dismissing [banner].
   final VoidCallback onDismiss;
@@ -1134,11 +1161,64 @@ class _SettingsStatusBannerSection extends StatelessWidget {
       child: UiBanner(
         key: const ValueKey<String>('settings_status_banner'),
         variant: UiBannerVariant.status,
-        tone: UiIconMapper.bannerTone(banner.tone),
+        tone: UiDomainMappers.settingsBannerTone(banner.tone),
         message: banner.message,
         dismissTooltip: localizations.actionDismiss,
         onDismiss: onDismiss,
       ),
+    );
+  }
+}
+
+/// Conditional Local and WebDAV storage section host watching only [WebDavConfig.storageMode].
+class _SettingsStorageSections extends ConsumerWidget {
+  /// Creates a [_SettingsStorageSections].
+  const _SettingsStorageSections({
+    required this.serverUrlController,
+    required this.usernameController,
+    required this.passwordController,
+    required this.filePathController,
+  });
+
+  /// Controller bound to the WebDAV remote file path input.
+  final TextEditingController filePathController;
+
+  /// Controller bound to the WebDAV password input.
+  final TextEditingController passwordController;
+
+  /// Controller bound to the WebDAV server URL input.
+  final TextEditingController serverUrlController;
+
+  /// Controller bound to the WebDAV username input.
+  final TextEditingController usernameController;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final gap = UiThemeTokens.of(context).spacing.sectionGridGap;
+    final storageMode = _watchConfigSlice<StorageMode>(
+      ref,
+      (config) => config.storageMode,
+      fallback: StorageMode.local,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        if (storageMode.usesLocal) ...<Widget>[
+          SizedBox(height: gap),
+          const _LocalStorageCard(),
+        ],
+        if (storageMode.usesWebDav) ...<Widget>[
+          SizedBox(height: gap),
+          _WebDavStorageCard(
+            serverUrlController: serverUrlController,
+            usernameController: usernameController,
+            passwordController: passwordController,
+            filePathController: filePathController,
+          ),
+        ],
+      ],
     );
   }
 }
@@ -1153,11 +1233,11 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
   @override
   void initState() {
     super.initState();
-    final initial = ref.read(settingsControllerProvider);
-    _serverUrlController = TextEditingController(text: initial.webDavServerUrl);
-    _usernameController = TextEditingController(text: initial.webDavUsername);
-    _passwordController = TextEditingController(text: initial.webDavPassword);
-    _filePathController = TextEditingController(text: initial.webDavFilePath);
+    final initial = ref.read(settingsDraftProvider);
+    _serverUrlController = TextEditingController(text: initial.serverUrl);
+    _usernameController = TextEditingController(text: initial.username);
+    _passwordController = TextEditingController(text: initial.password);
+    _filePathController = TextEditingController(text: initial.filePath);
   }
 
   @override
@@ -1171,59 +1251,42 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<SettingsViewModel>(
-      settingsControllerProvider,
-      _handleViewModelChanged,
+    ref.listen<_WebDavDraftTextSlice>(
+      settingsDraftProvider.select(
+        (draft) => (
+          filePath: draft.filePath,
+          password: draft.password,
+          serverUrl: draft.serverUrl,
+          username: draft.username,
+        ),
+      ),
+      _handleDraftTextChanged,
     );
     final tokens = UiThemeTokens.of(context);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
-    final shellSlice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          statusBanner: model.statusBanner,
-          storageMode: model.storageMode,
-          workspaceName: model.workspaceName,
-        ),
-      ),
-    );
 
     return SingleChildScrollView(
       key: const ValueKey<String>('settings_scroll_view'),
       controller: widget.scrollController,
       padding: tokens.spacing.mainContentPadding(viewport),
       child: _SettingsScrollContent(
-        workspaceName: shellSlice.workspaceName,
-        statusBanner: shellSlice.statusBanner,
-        storageMode: shellSlice.storageMode,
         serverUrlController: _serverUrlController,
         usernameController: _usernameController,
         passwordController: _passwordController,
         filePathController: _filePathController,
-        onBack: _handleBack,
-        onDismissBanner: _handleDismissBanner,
       ),
     );
   }
 
-  /// Navigates back to the primary Tasks view via [AppShellController.openView].
-  void _handleBack() {
-    ref.read(appShellControllerProvider.notifier).openView(ShellView.tasks);
-  }
-
-  /// Dismisses the currently visible top status banner.
-  void _handleDismissBanner() {
-    ref.read(settingsControllerProvider.notifier).dismissStatusBanner();
-  }
-
   /// Synchronizes the four WebDAV controllers when external state resets or updates draft values.
-  void _handleViewModelChanged(
-    SettingsViewModel? previous,
-    SettingsViewModel next,
+  void _handleDraftTextChanged(
+    _WebDavDraftTextSlice? previous,
+    _WebDavDraftTextSlice next,
   ) {
-    _syncController(_serverUrlController, next.webDavServerUrl);
-    _syncController(_usernameController, next.webDavUsername);
-    _syncController(_passwordController, next.webDavPassword);
-    _syncController(_filePathController, next.webDavFilePath);
+    _syncController(_serverUrlController, next.serverUrl);
+    _syncController(_usernameController, next.username);
+    _syncController(_passwordController, next.password);
+    _syncController(_filePathController, next.filePath);
   }
 
   /// Updates [controller] only when its text differs from [expectedText], preserving active caret edits.
@@ -1246,13 +1309,13 @@ class _StorageModeCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          storageMode: model.storageMode,
-        ),
-      ),
+    final storageMode = _watchConfigSlice<StorageMode>(
+      ref,
+      (config) => config.storageMode,
+      fallback: StorageMode.local,
+    );
+    final isBusy = ref.watch(
+      settingsDraftProvider.select((draft) => draft.isBusy),
     );
 
     return _SettingsAutoSavedCard(
@@ -1260,10 +1323,10 @@ class _StorageModeCard extends ConsumerWidget {
       icon: Icons.layers_outlined,
       title: localizations.storageModeSectionTitle,
       description: localizations.storageModeSectionDescription,
-      child: UiSegmentedControl<ShellStorageMode>(
+      child: UiSegmentedControl<StorageMode>(
         key: const ValueKey<String>('settings_storage_mode_control'),
-        value: slice.storageMode,
-        enabled: !slice.isDisabled,
+        value: storageMode,
+        enabled: !isBusy,
         semanticLabel: localizations.storageModeSectionTitle,
         segments: _storageModeSegments(localizations),
         onChanged: (next) => _commitStorageMode(context, ref, next),
@@ -1271,16 +1334,16 @@ class _StorageModeCard extends ConsumerWidget {
     );
   }
 
-  /// Commits storage mode immediately via [SettingsController.setStorageMode].
+  /// Commits storage mode immediately via [SettingsDraftNotifier.setStorageMode].
   void _commitStorageMode(
     BuildContext context,
     WidgetRef ref,
-    ShellStorageMode next,
+    StorageMode next,
   ) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
+          .read(settingsDraftProvider.notifier)
           .setStorageMode(next, locale: locale),
     );
   }
@@ -1295,13 +1358,10 @@ class _TimeZoneCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          timeZoneMode: model.timeZoneMode,
-        ),
-      ),
+    final timeZoneMode = _watchConfigSlice<AppTimeZoneMode>(
+      ref,
+      (config) => config.timeZoneMode,
+      fallback: AppTimeZoneMode.automatic,
     );
 
     return _SettingsAutoSavedCard(
@@ -1313,15 +1373,14 @@ class _TimeZoneCard extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          UiSegmentedControl<ShellTimeZoneMode>(
+          UiSegmentedControl<AppTimeZoneMode>(
             key: const ValueKey<String>('settings_timezone_mode_control'),
-            value: slice.timeZoneMode,
-            enabled: !slice.isDisabled,
+            value: timeZoneMode,
             semanticLabel: localizations.timeZoneSectionTitle,
             segments: _timeZoneModeSegments(localizations),
             onChanged: (next) => _commitTimeZoneMode(context, ref, next),
           ),
-          if (slice.timeZoneMode == ShellTimeZoneMode.manual) ...<Widget>[
+          if (timeZoneMode == AppTimeZoneMode.manual) ...<Widget>[
             SizedBox(height: tokens.spacing.space3),
             const _TimeZoneOffsetSelect(),
           ],
@@ -1330,17 +1389,20 @@ class _TimeZoneCard extends ConsumerWidget {
     );
   }
 
-  /// Commits time zone mode immediately via [SettingsController.setTimeZoneMode].
+  /// Commits time zone mode immediately via [SettingsDraftNotifier.savePreference].
   void _commitTimeZoneMode(
     BuildContext context,
     WidgetRef ref,
-    ShellTimeZoneMode next,
+    AppTimeZoneMode next,
   ) {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setTimeZoneMode(next, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateTimeZoneMode(next),
+            locale: locale,
+          ),
     );
   }
 }
@@ -1350,31 +1412,36 @@ class _TimeZoneOffsetSelect extends ConsumerWidget {
   /// Creates a [_TimeZoneOffsetSelect].
   const _TimeZoneOffsetSelect();
 
+  /// Cached immutable list of all 37 selectable UTC offset dropdown options.
+  static final List<UiSelectOption> _utcOffsetOptions =
+      List<UiSelectOption>.unmodifiable(<UiSelectOption>[
+        for (final offsetMinutes in WebDavConfig.supportedUtcOffsetMinutes)
+          UiSelectOption(
+            value: '$offsetMinutes',
+            label: WebDavConfig.formatUtcOffset(offsetMinutes),
+          ),
+      ]);
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isDisabled: model.isPreferenceControlDisabled,
-          manualOffsetMinutes: model.manualTimeZoneOffsetMinutes,
-          supportedUtcOffsets: model.supportedUtcOffsets,
-        ),
-      ),
+    final manualOffsetMinutes = _watchConfigSlice<int>(
+      ref,
+      (config) => config.manualTimeZoneOffsetMinutes,
+      fallback: 0,
     );
 
     return UiField(
       key: const ValueKey<String>('settings_timezone_offset_select'),
       kind: UiFieldKind.select,
       label: localizations.timeZoneOffsetLabel,
-      selectValue: '${slice.manualOffsetMinutes}',
-      selectOptions: _utcOffsetOptions(slice.supportedUtcOffsets),
-      enabled: !slice.isDisabled,
+      selectValue: '$manualOffsetMinutes',
+      selectOptions: _utcOffsetOptions,
       onSelectChanged: (raw) => _commitUtcOffset(context, ref, raw),
     );
   }
 
-  /// Parses [raw] offset minutes and commits immediately via [SettingsController.setManualTimeZoneOffsetMinutes].
+  /// Parses [raw] offset minutes and commits immediately via [SettingsDraftNotifier.savePreference].
   void _commitUtcOffset(BuildContext context, WidgetRef ref, String raw) {
     final parsed = int.tryParse(raw);
     if (parsed == null) {
@@ -1383,8 +1450,11 @@ class _TimeZoneOffsetSelect extends ConsumerWidget {
     final locale = Localizations.localeOf(context);
     unawaited(
       ref
-          .read(settingsControllerProvider.notifier)
-          .setManualTimeZoneOffsetMinutes(parsed, locale: locale),
+          .read(settingsDraftProvider.notifier)
+          .savePreference(
+            (notifier) => notifier.updateManualTimeZoneOffsetMinutes(parsed),
+            locale: locale,
+          ),
     );
   }
 }
@@ -1438,10 +1508,11 @@ class _WebDavFilePathField extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (filePathError: model.filePathError, isBusy: model.isBusy),
+      settingsDraftProvider.select(
+        (draft) => (filePathError: draft.filePathError, isBusy: draft.isBusy),
       ),
     );
+
     return UiField(
       key: const ValueKey<String>('settings_webdav_file_path_field'),
       label: localizations.filePathLabel,
@@ -1451,7 +1522,7 @@ class _WebDavFilePathField extends ConsumerWidget {
       enabled: !slice.isBusy,
       errorText: slice.filePathError,
       onChanged: (value) => ref
-          .read(settingsControllerProvider.notifier)
+          .read(settingsDraftProvider.notifier)
           .updateWebDavDraft(filePath: value),
     );
   }
@@ -1469,10 +1540,11 @@ class _WebDavPasswordField extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, passwordError: model.passwordError),
+      settingsDraftProvider.select(
+        (draft) => (isBusy: draft.isBusy, passwordError: draft.passwordError),
       ),
     );
+
     return UiField(
       key: const ValueKey<String>('settings_webdav_password_field'),
       kind: UiFieldKind.password,
@@ -1483,7 +1555,7 @@ class _WebDavPasswordField extends ConsumerWidget {
       hidePasswordTooltip: localizations.tooltipHidePassword,
       errorText: slice.passwordError,
       onChanged: (value) => ref
-          .read(settingsControllerProvider.notifier)
+          .read(settingsDraftProvider.notifier)
           .updateWebDavDraft(password: value),
     );
   }
@@ -1498,10 +1570,9 @@ class _WebDavResolvedEndpointField extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final resolvedEndpoint = ref.watch(
-      settingsControllerProvider.select(
-        (model) => model.resolvedWebDavEndpoint,
-      ),
+      settingsDraftProvider.select((draft) => draft.endpointPreview),
     );
+
     return UiField(
       key: const ValueKey<String>('settings_resolved_endpoint_field'),
       kind: UiFieldKind.readOnlyDisplay,
@@ -1523,10 +1594,11 @@ class _WebDavServerUrlField extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, serverUrlError: model.serverUrlError),
+      settingsDraftProvider.select(
+        (draft) => (isBusy: draft.isBusy, serverUrlError: draft.serverUrlError),
       ),
     );
+
     return UiField(
       key: const ValueKey<String>('settings_webdav_server_url_field'),
       label: localizations.serverUrlLabel,
@@ -1537,7 +1609,7 @@ class _WebDavServerUrlField extends ConsumerWidget {
       enabled: !slice.isBusy,
       errorText: slice.serverUrlError,
       onChanged: (value) => ref
-          .read(settingsControllerProvider.notifier)
+          .read(settingsDraftProvider.notifier)
           .updateWebDavDraft(serverUrl: value),
     );
   }
@@ -1569,7 +1641,7 @@ class _WebDavStorageCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final isWebDavDirty = ref.watch(
-      settingsControllerProvider.select((model) => model.isWebDavDirty),
+      settingsDraftProvider.select((draft) => draft.isDirty),
     );
 
     return UiCard.standard(
@@ -1656,10 +1728,11 @@ class _WebDavUsernameField extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (isBusy: model.isBusy, usernameError: model.usernameError),
+      settingsDraftProvider.select(
+        (draft) => (isBusy: draft.isBusy, usernameError: draft.usernameError),
       ),
     );
+
     return UiField(
       key: const ValueKey<String>('settings_webdav_username_field'),
       label: localizations.usernameLabel,
@@ -1668,7 +1741,7 @@ class _WebDavUsernameField extends ConsumerWidget {
       enabled: !slice.isBusy,
       errorText: slice.usernameError,
       onChanged: (value) => ref
-          .read(settingsControllerProvider.notifier)
+          .read(settingsDraftProvider.notifier)
           .updateWebDavDraft(username: value),
     );
   }
@@ -1682,16 +1755,23 @@ class _WebDavWipeFooter extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsControllerProvider.select(
-        (model) => (
-          isBusy: model.isBusy,
-          isWebDavConfigured: model.isWebDavConfigured,
-          remoteFileBaseName: model.remoteFileBaseName,
-          webDavFilePath: model.webDavFilePath,
-        ),
+    final isWebDavConfigured = _watchConfigSlice<bool>(
+      ref,
+      (config) => config.isWebDavConfigured,
+      fallback: false,
+    );
+    final draftSlice = ref.watch(
+      settingsDraftProvider.select(
+        (draft) => (filePath: draft.filePath, isBusy: draft.isBusy),
       ),
     );
+    final effectiveDraftPath = draftSlice.filePath.trim().isEmpty
+        ? WebDavConfig.defaultFileName
+        : draftSlice.filePath.trim();
+    final remoteFileBaseName = TdfFilePath.extractFileBaseName(
+      effectiveDraftPath,
+    );
+
     return Align(
       alignment: Alignment.centerLeft,
       child: UiButton(
@@ -1700,11 +1780,11 @@ class _WebDavWipeFooter extends ConsumerWidget {
         leadingIcon: Icons.delete_outline_rounded,
         variant: UiButtonVariant.danger,
         density: UiButtonDensity.compact,
-        onPressed: (slice.isWebDavConfigured && !slice.isBusy)
+        onPressed: (isWebDavConfigured && !draftSlice.isBusy)
             ? () => _openWipeModal(
                 context,
-                filePath: slice.webDavFilePath,
-                baseName: slice.remoteFileBaseName,
+                filePath: draftSlice.filePath,
+                baseName: remoteFileBaseName,
               )
             : null,
       ),
@@ -1731,47 +1811,58 @@ class _WebDavWipeFooter extends ConsumerWidget {
   }
 }
 
-/// Maps [option] exhaustively to its localized deadline lead-window display label.
-String _dueLeadLabel(
-  ShellDueLeadOption option,
-  AppLocalizations localizations,
-) {
-  return switch (option) {
-    ShellDueLeadOption.off => localizations.dueLeadWindowOff,
-    ShellDueLeadOption.atDue => localizations.dueLeadWindowAtDue,
-    ShellDueLeadOption.hours12 => localizations.dueLeadWindow12Hours,
-    ShellDueLeadOption.hours24 => localizations.dueLeadWindow24Hours,
-    ShellDueLeadOption.hours48 => localizations.dueLeadWindow48Hours,
-    ShellDueLeadOption.days7 => localizations.dueLeadWindow7Days,
+/// Narrow record of dock-relevant flags projected from [SettingsDraftState].
+typedef _SettingsDockDraftSlice = ({
+  bool isBusy,
+  bool isDirty,
+  bool isSavingWebDav,
+  bool isTestingConnection,
+});
+
+/// Narrow record of the four transient WebDAV text draft fields observed for controller synchronization.
+typedef _WebDavDraftTextSlice = ({
+  String filePath,
+  String password,
+  String serverUrl,
+  String username,
+});
+
+/// Maps [window] exhaustively to its localized deadline lead-window display label.
+String _dueLeadLabel(DueLeadWindow window, AppLocalizations localizations) {
+  return switch (window) {
+    DueLeadWindow.off => localizations.dueLeadWindowOff,
+    DueLeadWindow.atDue => localizations.dueLeadWindowAtDue,
+    DueLeadWindow.hours12 => localizations.dueLeadWindow12Hours,
+    DueLeadWindow.hours24 => localizations.dueLeadWindow24Hours,
+    DueLeadWindow.hours48 => localizations.dueLeadWindow48Hours,
+    DueLeadWindow.days7 => localizations.dueLeadWindow7Days,
   };
 }
 
-/// Builds localized select options for every [ShellDueLeadOption].
+/// Builds localized select options for every [DueLeadWindow].
 List<UiSelectOption> _dueLeadOptions(AppLocalizations localizations) {
   return <UiSelectOption>[
-    for (final option in ShellDueLeadOption.values)
+    for (final window in DueLeadWindow.values)
       UiSelectOption(
-        value: option.name,
-        label: _dueLeadLabel(option, localizations),
+        value: window.name,
+        label: _dueLeadLabel(window, localizations),
       ),
   ];
 }
 
-/// Builds segmented options for [ShellLanguageOption].
-List<UiSegment<ShellLanguageOption>> _languageSegments(
-  AppLocalizations localizations,
-) {
-  return <UiSegment<ShellLanguageOption>>[
-    UiSegment<ShellLanguageOption>(
-      value: ShellLanguageOption.system,
+/// Builds segmented options for [AppLanguage].
+List<UiSegment<AppLanguage>> _languageSegments(AppLocalizations localizations) {
+  return <UiSegment<AppLanguage>>[
+    UiSegment<AppLanguage>(
+      value: AppLanguage.system,
       label: localizations.languageSystem,
     ),
-    UiSegment<ShellLanguageOption>(
-      value: ShellLanguageOption.english,
+    UiSegment<AppLanguage>(
+      value: AppLanguage.english,
       label: localizations.languageEnglish,
     ),
-    UiSegment<ShellLanguageOption>(
-      value: ShellLanguageOption.german,
+    UiSegment<AppLanguage>(
+      value: AppLanguage.german,
       label: localizations.languageGerman,
     ),
   ];
@@ -1786,23 +1877,20 @@ List<UiSegment<bool>> _locationSegments(AppLocalizations localizations) {
 }
 
 /// Maps [level] exhaustively to its localized diagnostic minimum-level label.
-String _logLevelLabel(
-  DiagnosticLogLevel level,
-  AppLocalizations localizations,
-) {
+String _logLevelLabel(LogLevel level, AppLocalizations localizations) {
   return switch (level) {
-    DiagnosticLogLevel.debug => localizations.logLevelDebug,
-    DiagnosticLogLevel.info => localizations.logLevelInfo,
-    DiagnosticLogLevel.warn => localizations.logLevelWarn,
-    DiagnosticLogLevel.error => localizations.logLevelError,
-    DiagnosticLogLevel.crash => level.label,
+    LogLevel.debug => localizations.logLevelDebug,
+    LogLevel.info => localizations.logLevelInfo,
+    LogLevel.warn => localizations.logLevelWarn,
+    LogLevel.error => localizations.logLevelError,
+    LogLevel.crash => level.label,
   };
 }
 
-/// Builds localized select options for every [DiagnosticLogLevel].
+/// Builds localized select options for every [LogLevel].
 List<UiSelectOption> _logLevelOptions(AppLocalizations localizations) {
   return <UiSelectOption>[
-    for (final level in DiagnosticLogLevel.values)
+    for (final level in LogLevel.values)
       UiSelectOption(
         value: level.name,
         label: _logLevelLabel(level, localizations),
@@ -1811,18 +1899,18 @@ List<UiSelectOption> _logLevelOptions(AppLocalizations localizations) {
 }
 
 /// Maps [mode] exhaustively to its localized diagnostic log storage label.
-String _logStorageLabel(ShellStorageMode mode, AppLocalizations localizations) {
+String _logStorageLabel(StorageMode mode, AppLocalizations localizations) {
   return switch (mode) {
-    ShellStorageMode.local => localizations.logStorageLocal,
-    ShellStorageMode.webdav => localizations.logStorageWebDav,
-    ShellStorageMode.both => localizations.logStorageBoth,
+    StorageMode.local => localizations.logStorageLocal,
+    StorageMode.webdav => localizations.logStorageWebDav,
+    StorageMode.both => localizations.logStorageBoth,
   };
 }
 
 /// Builds localized select options for diagnostic log storage modes.
 List<UiSelectOption> _logStorageOptions(AppLocalizations localizations) {
   return <UiSelectOption>[
-    for (final mode in ShellStorageMode.values)
+    for (final mode in StorageMode.values)
       UiSelectOption(
         value: mode.name,
         label: _logStorageLabel(mode, localizations),
@@ -1830,9 +1918,19 @@ List<UiSelectOption> _logStorageOptions(AppLocalizations localizations) {
   ];
 }
 
-/// Parses [raw] into a [DiagnosticLogLevel], returning `null` if unknown.
-DiagnosticLogLevel? _parseDiagnosticLogLevel(String raw) {
-  for (final level in DiagnosticLogLevel.values) {
+/// Parses [raw] into a [DueLeadWindow], returning `null` if unknown.
+DueLeadWindow? _parseDueLeadWindow(String raw) {
+  for (final window in DueLeadWindow.values) {
+    if (window.name == raw) {
+      return window;
+    }
+  }
+  return null;
+}
+
+/// Parses [raw] into a [LogLevel], returning `null` if unknown.
+LogLevel? _parseLogLevel(String raw) {
+  for (final level in LogLevel.values) {
     if (level.name == raw) {
       return level;
     }
@@ -1840,19 +1938,9 @@ DiagnosticLogLevel? _parseDiagnosticLogLevel(String raw) {
   return null;
 }
 
-/// Parses [raw] into a [ShellDueLeadOption], returning `null` if unknown.
-ShellDueLeadOption? _parseDueLeadOption(String raw) {
-  for (final option in ShellDueLeadOption.values) {
-    if (option.name == raw) {
-      return option;
-    }
-  }
-  return null;
-}
-
-/// Parses [raw] into a [ShellStorageMode], returning `null` if unknown.
-ShellStorageMode? _parseStorageMode(String raw) {
-  for (final mode in ShellStorageMode.values) {
+/// Parses [raw] into a [StorageMode], returning `null` if unknown.
+StorageMode? _parseStorageMode(String raw) {
+  for (final mode in StorageMode.values) {
     if (mode.name == raw) {
       return mode;
     }
@@ -1860,98 +1948,113 @@ ShellStorageMode? _parseStorageMode(String raw) {
   return null;
 }
 
-/// Builds segmented options for [ShellStorageMode].
-List<UiSegment<ShellStorageMode>> _storageModeSegments(
+/// Projects dock-relevant dirty and busy flags from [state] for [SettingsActionDock].
+_SettingsDockDraftSlice _selectDockDraft(SettingsDraftState state) {
+  return (
+    isBusy: state.isBusy,
+    isDirty: state.isDirty,
+    isSavingWebDav: state.isSavingWebDav,
+    isTestingConnection: state.isTestingConnection,
+  );
+}
+
+/// Builds segmented options for [StorageMode].
+List<UiSegment<StorageMode>> _storageModeSegments(
   AppLocalizations localizations,
 ) {
-  return <UiSegment<ShellStorageMode>>[
-    UiSegment<ShellStorageMode>(
-      value: ShellStorageMode.local,
+  return <UiSegment<StorageMode>>[
+    UiSegment<StorageMode>(
+      value: StorageMode.local,
       label: localizations.storageModeLocal,
     ),
-    UiSegment<ShellStorageMode>(
-      value: ShellStorageMode.webdav,
+    UiSegment<StorageMode>(
+      value: StorageMode.webdav,
       label: localizations.storageModeWebDav,
     ),
-    UiSegment<ShellStorageMode>(
-      value: ShellStorageMode.both,
+    UiSegment<StorageMode>(
+      value: StorageMode.both,
       label: localizations.storageModeBoth,
     ),
   ];
 }
 
-/// Builds segmented options for [ShellThemeMode].
-List<UiSegment<ShellThemeMode>> _themeModeSegments(
+/// Builds segmented options for [AppThemeMode].
+List<UiSegment<AppThemeMode>> _themeModeSegments(
   AppLocalizations localizations,
 ) {
-  return <UiSegment<ShellThemeMode>>[
-    UiSegment<ShellThemeMode>(
-      value: ShellThemeMode.system,
+  return <UiSegment<AppThemeMode>>[
+    UiSegment<AppThemeMode>(
+      value: AppThemeMode.system,
       label: localizations.themeSystem,
     ),
-    UiSegment<ShellThemeMode>(
-      value: ShellThemeMode.light,
+    UiSegment<AppThemeMode>(
+      value: AppThemeMode.light,
       label: localizations.themeLight,
     ),
-    UiSegment<ShellThemeMode>(
-      value: ShellThemeMode.dark,
+    UiSegment<AppThemeMode>(
+      value: AppThemeMode.dark,
       label: localizations.themeDark,
     ),
   ];
 }
 
-/// Builds segmented options for [AppThemePresetKey].
-List<UiSegment<AppThemePresetKey>> _themePaletteSegments(
+/// Builds segmented options for [AppThemePalette].
+List<UiSegment<AppThemePalette>> _themePaletteSegments(
   AppLocalizations localizations,
 ) {
-  return <UiSegment<AppThemePresetKey>>[
-    UiSegment<AppThemePresetKey>(
-      value: AppThemePresetKey.calm,
+  return <UiSegment<AppThemePalette>>[
+    UiSegment<AppThemePalette>(
+      value: AppThemePalette.calm,
       label: localizations.themePaletteCalm,
     ),
-    UiSegment<AppThemePresetKey>(
-      value: AppThemePresetKey.plumUmber,
+    UiSegment<AppThemePalette>(
+      value: AppThemePalette.plumUmber,
       label: localizations.themePalettePlumUmber,
     ),
   ];
 }
 
-/// Builds segmented options for [ShellTimeZoneMode].
-List<UiSegment<ShellTimeZoneMode>> _timeZoneModeSegments(
+/// Builds segmented options for [AppTimeZoneMode].
+List<UiSegment<AppTimeZoneMode>> _timeZoneModeSegments(
   AppLocalizations localizations,
 ) {
-  return <UiSegment<ShellTimeZoneMode>>[
-    UiSegment<ShellTimeZoneMode>(
-      value: ShellTimeZoneMode.automatic,
+  return <UiSegment<AppTimeZoneMode>>[
+    UiSegment<AppTimeZoneMode>(
+      value: AppTimeZoneMode.automatic,
       label: localizations.timeZoneModeAutomatic,
     ),
-    UiSegment<ShellTimeZoneMode>(
-      value: ShellTimeZoneMode.manual,
+    UiSegment<AppTimeZoneMode>(
+      value: AppTimeZoneMode.manual,
       label: localizations.timeZoneModeManual,
     ),
   ];
 }
 
-/// Returns `true` when [mode] persists tasks in a local `.tdf` file.
-bool _usesLocalStorage(ShellStorageMode mode) {
-  return switch (mode) {
-    ShellStorageMode.local || ShellStorageMode.both => true,
-    ShellStorageMode.webdav => false,
-  };
-}
-
-/// Returns `true` when [mode] synchronizes tasks with a WebDAV server.
-bool _usesWebDavStorage(ShellStorageMode mode) {
-  return switch (mode) {
-    ShellStorageMode.webdav || ShellStorageMode.both => true,
-    ShellStorageMode.local => false,
-  };
-}
-
-/// Maps all 37 [offsets] into [UiSelectOption] entries keyed by signed offset minutes.
-List<UiSelectOption> _utcOffsetOptions(List<UtcOffsetOptionViewModel> offsets) {
-  return <UiSelectOption>[
-    for (final offset in offsets)
-      UiSelectOption(value: '${offset.offsetMinutes}', label: offset.label),
-  ];
+/// Watches a single narrow field from [webDavConfigProvider], falling back to
+/// [activeWorkspaceProvider] or [fallback] while initial configuration loads.
+T _watchConfigSlice<T extends Object>(
+  WidgetRef ref,
+  T Function(WebDavConfig config) select, {
+  required T fallback,
+}) {
+  final fromConfig = ref.watch(
+    webDavConfigProvider.select((asyncConfig) {
+      if (asyncConfig.asData?.value case final config?) {
+        return select(config);
+      }
+      return null;
+    }),
+  );
+  if (fromConfig != null) {
+    return fromConfig;
+  }
+  return ref.watch(
+        activeWorkspaceProvider.select((asyncWorkspace) {
+          if (asyncWorkspace.asData?.value.config case final config?) {
+            return select(config);
+          }
+          return null;
+        }),
+      ) ??
+      fallback;
 }

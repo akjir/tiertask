@@ -40,10 +40,96 @@ import '../services/sha256_service.dart';
 import 'config_providers.dart';
 import 'workspace_providers.dart';
 
+/// Provides per-entity `TDF-DEL-003` deletion conflict choices keyed solely by active conflict outcome.
+final conflictDecisionsProvider =
+    NotifierProvider.autoDispose<
+      ConflictDecisionsNotifier,
+      Map<String, TdfDeletionResolution>
+    >(ConflictDecisionsNotifier.new);
+
+/// Provides per-entity `TDF-REC-002` generation recovery choices keyed solely by active recovery outcome.
+final recoveryDecisionsProvider =
+    NotifierProvider.autoDispose<
+      RecoveryDecisionsNotifier,
+      Map<String, TdfRecoveryResolution>
+    >(RecoveryDecisionsNotifier.new);
+
 /// Provides the current [SyncState] for local and WebDAV persistence operations.
 final syncStateProvider = NotifierProvider<SyncStateNotifier, SyncState>(
   SyncStateNotifier.new,
 );
+
+/// Manages per-entity deletion conflict choices defaulting every item to [TdfDeletionResolution.undelete].
+class ConflictDecisionsNotifier
+    extends Notifier<Map<String, TdfDeletionResolution>> {
+  @override
+  Map<String, TdfDeletionResolution> build() {
+    final outcome = ref.watch(
+      syncStateProvider.select((syncState) => syncState.syncOutcome),
+    );
+    if (outcome == null ||
+        outcome.kind != TdfSyncOutcomeKind.deletionConflict) {
+      return const <String, TdfDeletionResolution>{};
+    }
+    return Map<String, TdfDeletionResolution>.unmodifiable(
+      <String, TdfDeletionResolution>{
+        for (final id in outcome.conflictedTaskIds)
+          resolutionDecisionKey('task', id): TdfDeletionResolution.undelete,
+        for (final id in outcome.conflictedLabelIds)
+          resolutionDecisionKey('label', id): TdfDeletionResolution.undelete,
+        for (final id in outcome.conflictedLocationIds)
+          resolutionDecisionKey('location', id): TdfDeletionResolution.undelete,
+      },
+    );
+  }
+
+  /// Updates the resolution [choice] for the conflicted entity identified by [decisionKey].
+  void selectDecision(String decisionKey, TdfDeletionResolution choice) {
+    if (state[decisionKey] == choice) {
+      return;
+    }
+    state = Map<String, TdfDeletionResolution>.unmodifiable(
+      <String, TdfDeletionResolution>{...state, decisionKey: choice},
+    );
+  }
+}
+
+/// Manages per-entity generation recovery choices defaulting every item to [TdfRecoveryResolution.recoverAsNew].
+class RecoveryDecisionsNotifier
+    extends Notifier<Map<String, TdfRecoveryResolution>> {
+  @override
+  Map<String, TdfRecoveryResolution> build() {
+    final outcome = ref.watch(
+      syncStateProvider.select((syncState) => syncState.syncOutcome),
+    );
+    if (outcome == null ||
+        outcome.kind != TdfSyncOutcomeKind.recoveryRequired) {
+      return const <String, TdfRecoveryResolution>{};
+    }
+    return Map<String, TdfRecoveryResolution>.unmodifiable(
+      <String, TdfRecoveryResolution>{
+        for (final id in outcome.ambiguousTaskIds)
+          resolutionDecisionKey('task', id): TdfRecoveryResolution.recoverAsNew,
+        for (final id in outcome.ambiguousLabelIds)
+          resolutionDecisionKey('label', id):
+              TdfRecoveryResolution.recoverAsNew,
+        for (final id in outcome.ambiguousLocationIds)
+          resolutionDecisionKey('location', id):
+              TdfRecoveryResolution.recoverAsNew,
+      },
+    );
+  }
+
+  /// Updates the recovery [choice] for the ambiguous entity identified by [decisionKey].
+  void selectDecision(String decisionKey, TdfRecoveryResolution choice) {
+    if (state[decisionKey] == choice) {
+      return;
+    }
+    state = Map<String, TdfRecoveryResolution>.unmodifiable(
+      <String, TdfRecoveryResolution>{...state, decisionKey: choice},
+    );
+  }
+}
 
 /// Represents the current synchronization state for local and WebDAV storage.
 @immutable
@@ -2884,3 +2970,6 @@ class _SyncResolutions {
       labelRecoveries.isNotEmpty ||
       locationRecoveries.isNotEmpty;
 }
+
+/// Builds the canonical map key (`<kind>:<id>`) correlating conflict/recovery decision state entries.
+String resolutionDecisionKey(String kindName, String id) => '$kindName:$id';

@@ -22,7 +22,6 @@ analyzer:
     - android/**
     - linux/**
     - windows/**
-    - packages/**
     - lib/l10n/app_localizations*.dart
 
 linter:

@@ -18,20 +18,41 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../l10n/app_localizations.dart';
-import '../presentation/app_shell_controller.dart';
-import '../presentation/board_boundary_timer.dart';
-import '../presentation/floating_notice_controller.dart';
-import '../presentation/shell_chrome_view_models.dart';
-import '../presentation/shell_models.dart';
-import '../presentation/sync_controller.dart';
-import '../presentation/tasks_view_model.dart';
-import '../presentation/window_control_controller.dart';
+import '../l10n/tier_localization_extension.dart';
+import '../models/app_workspace.dart';
+import '../models/location_state.dart';
+import '../models/task_board.dart';
+import '../models/task_board_evaluator.dart';
+import '../models/task_tier.dart';
+import '../models/tdf_location.dart';
+import '../models/tdf_metadata.dart';
+import '../models/tdf_sync_metadata.dart';
+import '../models/webdav_config.dart';
+import '../providers/board_providers.dart';
+import '../providers/config_providers.dart';
+import '../providers/entity_actions_provider.dart';
+import '../providers/floating_notice_providers.dart';
+import '../providers/location_providers.dart';
+import '../providers/shell_providers.dart';
+import '../providers/sync_providers.dart';
+import '../providers/task_providers.dart';
+import '../providers/task_schedule_helper.dart';
+import '../providers/workspace_providers.dart';
 import 'dialogs/location_status_modal.dart';
 import 'dialogs/workspaces_modal.dart';
-import 'ui_icon_mapper.dart';
+import 'layout/ui_adaptive_app_shell.dart';
+import 'layout/ui_sidebar_section.dart';
+import 'primitives/ui_app_logo.dart';
+import 'primitives/ui_banner.dart';
+import 'primitives/ui_button.dart';
+import 'primitives/ui_field.dart';
+import 'primitives/ui_pill.dart';
+import 'tokens/ui_breakpoints.dart';
+import 'tokens/ui_theme_tokens.dart';
+import 'tokens/ui_typography_tokens.dart';
+import 'ui_domain_mappers.dart';
 import 'views/labels_view.dart';
 import 'views/locations_view.dart';
 import 'views/log_viewer_view.dart';
@@ -71,7 +92,7 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
         return;
       }
       ref
-          .read(floatingNoticeControllerProvider.notifier)
+          .read(floatingNoticeProvider.notifier)
           .showStartupRecoveryNoticeIfPending();
     });
   }
@@ -125,9 +146,7 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
   void _focusQuickAddComposer() {
     final isCompact = UiBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
     if (isCompact) {
-      ref
-          .read(appShellControllerProvider.notifier)
-          .setCompactComposerOpen(true);
+      ref.read(shellProvider.notifier).setCompactComposerOpen(true);
     }
     if (!isCompact &&
         _quickAddFocusNode.context != null &&
@@ -162,10 +181,11 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
     final primaryPressed =
         HardwareKeyboard.instance.isControlPressed ||
         HardwareKeyboard.instance.isMetaPressed;
-    final shell = ref.read(appShellControllerProvider);
-    final tasksVm = ref.read(tasksViewModelProvider);
-    final blockedByLoadOrError =
-        tasksVm.isLoading || tasksVm.fullScreenFileReadError != null;
+    final shell = ref.read(shellProvider);
+    final blockedByLoadOrError = _isTasksViewBlocked(
+      ref.read(activeWorkspaceProvider),
+      ref.read(taskNotifierProvider),
+    );
 
     if (primaryPressed && key == LogicalKeyboardKey.keyF) {
       if (blockedByLoadOrError) {
@@ -176,9 +196,7 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
     }
 
     if (key == LogicalKeyboardKey.escape) {
-      final outcome = ref
-          .read(appShellControllerProvider.notifier)
-          .handleEscape();
+      final outcome = ref.read(shellProvider.notifier).handleEscape();
       return outcome == ShellDismissOutcome.handled
           ? KeyEventResult.handled
           : KeyEventResult.ignored;
@@ -194,16 +212,14 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
     }
     if (primaryPressed &&
         key == LogicalKeyboardKey.keyZ &&
-        shell.view == ShellView.tasks) {
-      final chrome = ref.read(boardChromeViewModelProvider);
-      if (chrome.canUndo) {
-        unawaited(
-          ref
-              .read(floatingNoticeControllerProvider.notifier)
-              .undoLatest(fromShortcut: true),
-        );
-        return KeyEventResult.handled;
-      }
+        shell.view == ShellView.tasks &&
+        ref.read(taskUndoStateProvider).canUndo) {
+      unawaited(
+        ref
+            .read(floatingNoticeProvider.notifier)
+            .undoLatest(fromShortcut: true),
+      );
+      return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.keyN &&
         shell.view == ShellView.tasks &&
@@ -215,22 +231,20 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
     }
     if (shell.view == ShellView.tasks && !shell.searchOpen) {
       if (key == LogicalKeyboardKey.arrowLeft) {
-        ref.read(appShellControllerProvider.notifier).stepTier(-1);
+        ref.read(shellProvider.notifier).stepTier(-1);
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.arrowRight) {
-        ref.read(appShellControllerProvider.notifier).stepTier(1);
+        ref.read(shellProvider.notifier).stepTier(1);
         return KeyEventResult.handled;
       }
     }
     return KeyEventResult.ignored;
   }
 
-  /// Delegates Android system Back presses to `AppShellController.handleSystemBack()`.
+  /// Delegates Android system Back presses to `ShellNotifier.handleSystemBack()`.
   void _handleSystemBack() {
-    final outcome = ref
-        .read(appShellControllerProvider.notifier)
-        .handleSystemBack();
+    final outcome = ref.read(shellProvider.notifier).handleSystemBack();
     if (outcome == ShellDismissOutcome.allowSystemPop) {
       unawaited(SystemNavigator.pop());
     }
@@ -250,8 +264,8 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
 
   /// Opens Global Search on Tasks view and focuses the search input after layout.
   void _openSearchAndFocus() {
-    final wasOpen = ref.read(appShellControllerProvider).searchOpen;
-    ref.read(appShellControllerProvider.notifier).openSearch();
+    final wasOpen = ref.read(shellProvider).searchOpen;
+    ref.read(shellProvider.notifier).openSearch();
     if (wasOpen &&
         _searchFocusNode.context != null &&
         _searchFocusNode.canRequestFocus) {
@@ -267,31 +281,37 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
 
   /// Registers listeners preserving scroll offsets and syncing the search text controller (`U-LAYOUT-007`).
   void _registerScopeListeners() {
-    ref.listen<String>(
-      boardChromeViewModelProvider.select((chrome) => chrome.activeWorkspaceId),
+    ref.listen<String?>(
+      activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
       (previous, next) {
-        if (previous != null && previous != next) {
+        if (previous != null && next != null && previous != next) {
           _resetScrollController(_sidebarScrollController);
           _resetScrollController(_tasksScrollController);
         }
       },
     );
-    ref.listen<AppShellState>(appShellControllerProvider, (previous, next) {
-      if (_searchController.text != next.searchQuery) {
-        _searchController.text = next.searchQuery;
-      }
-      if (previous == null) {
-        return;
-      }
-      final scopeChanged =
-          previous.view != next.view ||
-          previous.activeTier != next.activeTier ||
-          previous.activeLabelId != next.activeLabelId ||
-          previous.searchOpen != next.searchOpen;
-      if (scopeChanged) {
-        _resetScrollController(_tasksScrollController);
+    ref.listen<String>(searchQueryProvider, (_, next) {
+      if (_searchController.text != next) {
+        _searchController.text = next;
       }
     });
+    ref.listen<
+      ({ShellView view, TaskTier tier, String? labelId, bool searchOpen})
+    >(
+      shellProvider.select(
+        (shell) => (
+          view: shell.view,
+          tier: shell.activeTier,
+          labelId: shell.activeLabelId,
+          searchOpen: shell.searchOpen,
+        ),
+      ),
+      (previous, next) {
+        if (previous != null && previous != next) {
+          _resetScrollController(_tasksScrollController);
+        }
+      },
+    );
   }
 
   /// Resets [controller] to offset `0` when currently attached to a scroll position.
@@ -342,7 +362,7 @@ class _ShellControllers {
   final ScrollController tasksScroll;
 }
 
-/// Watches root shell, chrome, and task blocking providers for [_ShellAdaptiveView].
+/// Watches narrow shell chrome slices so search, sidebar filter, or card-expand edits never rebuild [UiAdaptiveAppShell].
 class _ShellAdaptiveScaffold extends ConsumerWidget {
   /// Creates a [_ShellAdaptiveScaffold].
   const _ShellAdaptiveScaffold({
@@ -358,23 +378,53 @@ class _ShellAdaptiveScaffold extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final shell = ref.watch(appShellControllerProvider);
-    final chrome = ref.watch(boardChromeViewModelProvider);
-    final isTasksBlocked = ref.watch(
-      tasksViewModelProvider.select(_isTasksViewBlocked),
+    final shellSlice = ref.watch(
+      shellProvider.select(
+        (shell) => (
+          view: shell.view,
+          searchOpen: shell.searchOpen,
+          compactDrawerOpen: shell.compactDrawerOpen,
+          hasTaskDraft: shell.activeDraft == EntityDraftKind.task,
+          activeLabelId: shell.activeLabelId,
+        ),
+      ),
     );
+    final isTasksBlocked =
+        shellSlice.view == ShellView.tasks &&
+            ref.watch(
+              activeWorkspaceProvider.select((workspace) => workspace.hasError),
+            ) ||
+        (shellSlice.view == ShellView.tasks &&
+            ref.watch(
+              taskNotifierProvider.select(
+                (boardAsync) =>
+                    (boardAsync.isLoading || boardAsync.hasError) &&
+                    !boardAsync.hasValue,
+              ),
+            ));
     final isCompact = UiBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
-    final filterLabel = _activeMobileFilterLabel(shell, chrome);
-    final showDock = _hasBottomDock(shell, isTasksBlocked: isTasksBlocked);
+    final mobileFilterName = _watchMobileFilterLabelName(
+      ref,
+      view: shellSlice.view,
+      searchOpen: shellSlice.searchOpen,
+      activeLabelId: shellSlice.activeLabelId,
+    );
+    final showDock = _hasBottomDock(
+      view: shellSlice.view,
+      searchOpen: shellSlice.searchOpen,
+      hasTaskDraft: shellSlice.hasTaskDraft,
+      isTasksBlocked: isTasksBlocked,
+    );
 
     return _ShellAdaptiveView(
-      shell: shell,
-      chrome: chrome,
+      view: shellSlice.view,
+      isSearchOpen: shellSlice.searchOpen,
+      isDrawerOpen: shellSlice.compactDrawerOpen,
       isCompact: isCompact,
       sidebarScrollController: controllers.sidebarScroll,
-      mobileActiveFilter: filterLabel == null
+      mobileActiveFilter: mobileFilterName == null
           ? null
-          : _MobileActiveFilterButton(labelName: filterLabel),
+          : _MobileActiveFilterButton(labelName: mobileFilterName),
       searchWidget: _ShellSearchControl(
         isCompact: isCompact,
         controllers: controllers,
@@ -382,11 +432,11 @@ class _ShellAdaptiveScaffold extends ConsumerWidget {
       ),
       bottomDock: showDock
           ? _ShellBottomDock(
-              view: shell.view,
+              view: shellSlice.view,
               quickAddFocusNode: controllers.quickAddFocus,
             )
           : null,
-      body: _ShellMainBody(view: shell.view, controllers: controllers),
+      body: _ShellMainBody(view: shellSlice.view, controllers: controllers),
     );
   }
 }
@@ -395,8 +445,9 @@ class _ShellAdaptiveScaffold extends ConsumerWidget {
 class _ShellAdaptiveView extends ConsumerWidget {
   /// Creates a [_ShellAdaptiveView].
   const _ShellAdaptiveView({
-    required this.shell,
-    required this.chrome,
+    required this.view,
+    required this.isSearchOpen,
+    required this.isDrawerOpen,
     required this.isCompact,
     required this.sidebarScrollController,
     required this.mobileActiveFilter,
@@ -411,11 +462,14 @@ class _ShellAdaptiveView extends ConsumerWidget {
   /// Optional pinned bottom dock widget.
   final Widget? bottomDock;
 
-  /// Live top chrome view model.
-  final BoardChromeViewModel chrome;
-
   /// Whether viewport is in compact mode.
   final bool isCompact;
+
+  /// Whether the compact navigation drawer is open.
+  final bool isDrawerOpen;
+
+  /// Whether Global Search is open.
+  final bool isSearchOpen;
 
   /// Optional compact active-label filter chip.
   final Widget? mobileActiveFilter;
@@ -423,36 +477,42 @@ class _ShellAdaptiveView extends ConsumerWidget {
   /// Top chrome global search control widget.
   final Widget searchWidget;
 
-  /// Live shell navigation state.
-  final AppShellState shell;
-
   /// Preserved sidebar scroll controller.
   final ScrollController sidebarScrollController;
+
+  /// Active route view.
+  final ShellView view;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final hasNotice = ref.watch(
-      floatingNoticeControllerProvider.select((notice) => notice != null),
+    final isDevBuild = ref.watch(
+      appBuildProfileProvider.select((profile) => profile.isDev),
     );
-    final showWindow = chrome.showWindowControls;
+    final locationEnabled = ref.watch(locationEnabledProvider);
+    final showWindow = ref.watch(
+      desktopWindowActionsProvider.select((actions) => actions.isSupported),
+    );
+    final hasNotice = ref.watch(
+      floatingNoticeProvider.select((notice) => notice != null),
+    );
 
     return UiAdaptiveAppShell(
       brand: const _ShellBrandButton(),
       mobileActiveFilter: mobileActiveFilter,
       workspaceTrigger: const _WorkspaceChromeTrigger(),
-      buildBadge: chrome.isDevBuild ? const _ShellDevBadge() : null,
+      buildBadge: isDevBuild ? const _ShellDevBadge() : null,
       searchWidget: searchWidget,
-      isSearchOpen: shell.searchOpen,
+      isSearchOpen: isSearchOpen,
       trailingActions: <Widget>[
-        if (chrome.locationEnabled) const _ChromeLocationButton(),
+        if (locationEnabled) const _ChromeLocationButton(),
         _ChromeSyncButton(isCompact: isCompact),
         if (showWindow) const _ChromeCloseWindowButton(),
       ],
       onChromeDragStart: showWindow ? () => _startWindowDrag(ref) : null,
       onChromeDoubleTap: showWindow ? () => _toggleWindowMaximize(ref) : null,
-      isDrawerOpen: shell.compactDrawerOpen,
-      onToggleDrawer: () => _toggleCompactDrawer(ref, shell),
+      isDrawerOpen: isDrawerOpen,
+      onToggleDrawer: () => _toggleCompactDrawer(ref, isDrawerOpen),
       menuOpenTooltip: localizations.tooltipMenu,
       menuCloseTooltip: localizations.actionClose,
       sidebarHeader: const _CompactDrawerWorkspaceCard(),
@@ -508,7 +568,7 @@ class _ChromeCloseWindowButton extends ConsumerWidget {
       isDangerHover: true,
       tooltip: localizations.tooltipCloseApp,
       onPressed: () =>
-          unawaited(ref.read(windowControlControllerProvider).closeWindow()),
+          unawaited(ref.read(desktopWindowActionsProvider).closeWindow()),
     );
   }
 }
@@ -520,22 +580,19 @@ class _ChromeLocationButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final slice = ref.watch(
-      boardChromeViewModelProvider.select(
-        (chrome) => (
-          statusKind: chrome.locationStatusKind,
-          tooltip: chrome.locationTooltip,
-        ),
-      ),
+    final localizations = AppLocalizations.of(context);
+    final status = ref.watch(
+      locationStateProvider.select((state) => state.status),
     );
+
     return UiButton(
       key: const ValueKey<String>('chrome_location_button'),
       variant: UiButtonVariant.icon,
       density: UiButtonDensity.standard,
-      tone: UiIconMapper.locationButtonTone(slice.statusKind),
-      leadingIcon: UiIconMapper.locationIcon(slice.statusKind),
-      isLoading: slice.statusKind == ShellLocationStatusKind.searching,
-      tooltip: slice.tooltip,
+      tone: UiDomainMappers.locationButtonTone(status),
+      leadingIcon: UiDomainMappers.locationIcon(status),
+      isLoading: status == LocationStatus.searching,
+      tooltip: localizations.tooltipLocationStatus,
       onPressed: () => unawaited(showLocationStatusModal(context)),
     );
   }
@@ -551,40 +608,64 @@ class _ChromeSyncButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final chrome = ref.watch(boardChromeViewModelProvider);
+    final localizations = AppLocalizations.of(context);
+    final storageMode = ref.watch(
+      webDavConfigProvider.select(
+        (configAsync) =>
+            configAsync.asData?.value.storageMode ?? StorageMode.local,
+      ),
+    );
+    final syncState = ref.watch(syncStateProvider);
+    final statusKind = resolveSyncStatusKind(
+      storageMode: storageMode,
+      syncState: syncState,
+    );
+    final statusLabel = UiDomainMappers.syncStatusLabel(
+      statusKind,
+      localizations,
+    );
+
     return UiButton(
       key: const ValueKey<String>('chrome_sync_button'),
       variant: UiButtonVariant.secondary,
       density: UiButtonDensity.chrome,
-      tone: UiIconMapper.syncButtonTone(chrome.syncStatusKind),
-      leadingIcon: UiIconMapper.syncIcon(chrome.syncStatusKind),
-      label: isCompact ? null : chrome.syncStatusLabel,
-      isLoading: chrome.syncStatusKind == ShellSyncStatusKind.syncing,
-      tooltip: chrome.syncStatusLabel,
-      onPressed: () => unawaited(_handleSyncChromeTap(ref, chrome)),
+      tone: UiDomainMappers.syncButtonTone(statusKind),
+      leadingIcon: UiDomainMappers.syncIcon(statusKind),
+      label: isCompact ? null : statusLabel,
+      isLoading: statusKind == SyncStatusKind.syncing,
+      tooltip: statusLabel,
+      onPressed: () => unawaited(
+        _handleSyncChromeTap(
+          ref,
+          statusKind: statusKind,
+          hasWebDav: storageMode.usesWebDav,
+        ),
+      ),
     );
   }
 
   /// Handles top chrome Sync button taps (Conflict routing, Settings fallback, or manual Sync).
   Future<void> _handleSyncChromeTap(
-    WidgetRef ref,
-    BoardChromeViewModel chrome,
-  ) async {
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
-    if (chrome.syncStatusKind == ShellSyncStatusKind.conflict) {
-      final recoveryViewModel = ref.read(recoveryResolutionViewModelProvider);
-      if (recoveryViewModel.hasItems) {
+    WidgetRef ref, {
+    required SyncStatusKind statusKind,
+    required bool hasWebDav,
+  }) async {
+    final shellNotifier = ref.read(shellProvider.notifier);
+    if (statusKind == SyncStatusKind.conflict) {
+      final outcome = ref.read(syncStateProvider).syncOutcome;
+      if (outcome != null &&
+          outcome.kind == TdfSyncOutcomeKind.recoveryRequired) {
         shellNotifier.openView(ShellView.recovery);
         return;
       }
       shellNotifier.openView(ShellView.conflict);
       return;
     }
-    if (!chrome.hasWebDav) {
+    if (!hasWebDav) {
       shellNotifier.openView(ShellView.settings);
       return;
     }
-    await ref.read(syncControllerProvider.notifier).syncNow();
+    await ref.read(syncActionsProvider.notifier).syncNow();
   }
 }
 
@@ -599,9 +680,7 @@ class _ShellBrandButton extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     return InkWell(
       key: const ValueKey<String>('chrome_brand_button'),
-      onTap: () => ref
-          .read(appShellControllerProvider.notifier)
-          .openView(ShellView.tasks),
+      onTap: () => ref.read(shellProvider.notifier).openView(ShellView.tasks),
       borderRadius: BorderRadius.circular(tokens.radii.md),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 4.0),
@@ -661,9 +740,7 @@ class _MobileActiveFilterButton extends ConsumerWidget {
       message: localizations.activeFilterClearTooltip,
       child: InkWell(
         key: const ValueKey<String>('mobile_active_filter_button'),
-        onTap: () => ref
-            .read(appShellControllerProvider.notifier)
-            .selectLabelFilter(null),
+        onTap: () => ref.read(shellProvider.notifier).selectLabelFilter(null),
         borderRadius: BorderRadius.circular(tokens.radii.sm),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 6.0),
@@ -699,8 +776,8 @@ class _WorkspaceChromeTrigger extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final workspaceName = ref.watch(
-      boardChromeViewModelProvider.select(
-        (chrome) => chrome.activeWorkspaceName,
+      activeWorkspaceProvider.select(
+        (workspace) => workspace.asData?.value.name ?? AppWorkspace.defaultName,
       ),
     );
     return UiButton(
@@ -725,8 +802,8 @@ class _CompactDrawerWorkspaceCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final workspaceName = ref.watch(
-      boardChromeViewModelProvider.select(
-        (chrome) => chrome.activeWorkspaceName,
+      activeWorkspaceProvider.select(
+        (workspace) => workspace.asData?.value.name ?? AppWorkspace.defaultName,
       ),
     );
     return UiButton(
@@ -739,9 +816,7 @@ class _CompactDrawerWorkspaceCard extends ConsumerWidget {
       trailingIcon: Icons.unfold_more_rounded,
       tooltip: localizations.tooltipManageWorkspaces,
       onPressed: () {
-        ref
-            .read(appShellControllerProvider.notifier)
-            .setCompactDrawerOpen(false);
+        ref.read(shellProvider.notifier).setCompactDrawerOpen(false);
         unawaited(showWorkspacesModal(context));
       },
     );
@@ -769,9 +844,7 @@ class _ShellSearchControl extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final isOpen = ref.watch(
-      appShellControllerProvider.select((shell) => shell.searchOpen),
-    );
+    final isOpen = ref.watch(shellProvider.select((shell) => shell.searchOpen));
     if (!isOpen) {
       return UiButton(
         key: const ValueKey<String>('chrome_search_open_button'),
@@ -813,7 +886,6 @@ class _ShellSearchInputRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final notifier = ref.read(appShellControllerProvider.notifier);
 
     return Row(
       children: <Widget>[
@@ -826,7 +898,7 @@ class _ShellSearchInputRow extends ConsumerWidget {
             height: 36.0,
             hintText: localizations.searchHint,
             clearTooltip: localizations.tooltipClearSearch,
-            onChanged: notifier.updateSearchQuery,
+            onChanged: ref.read(searchQueryProvider.notifier).setQuery,
           ),
         ),
         const SizedBox(width: 6.0),
@@ -836,7 +908,7 @@ class _ShellSearchInputRow extends ConsumerWidget {
           density: UiButtonDensity.chrome,
           leadingIcon: Icons.close_rounded,
           tooltip: localizations.searchCloseTooltip,
-          onPressed: notifier.closeSearch,
+          onPressed: ref.read(shellProvider.notifier).closeSearch,
         ),
       ],
     );
@@ -844,43 +916,65 @@ class _ShellSearchInputRow extends ConsumerWidget {
 }
 
 /// Four-section sidebar navigation tree (`Tasks`, `Labels`, `Locations`, `Tools`) (`U-UX-001`).
-class _ShellSidebarBody extends ConsumerWidget {
+class _ShellSidebarBody extends StatelessWidget {
   /// Creates a [_ShellSidebarBody].
   const _ShellSidebarBody();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final sidebar = ref.watch(sidebarViewModelProvider);
-    final shell = ref.watch(appShellControllerProvider);
-    final notifier = ref.read(appShellControllerProvider.notifier);
-
-    return Column(
+  Widget build(BuildContext context) {
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        UiSidebarSection(
-          title: localizations.sectionTasksTitle,
-          items: <UiSidebarNavItem>[
-            for (final item in sidebar.tierItems)
-              UiSidebarNavItem(
-                id: 'tier_${item.tier.name}',
-                label: item.label,
-                icon: UiIconMapper.tierIcon(item.tier),
-                countLabel: '${item.count}',
-                isSelected:
-                    shell.view == ShellView.tasks &&
-                    !shell.searchOpen &&
-                    shell.activeTier == item.tier,
-                onTap: () => notifier.selectTier(item.tier),
-              ),
-          ],
+        _SidebarTasksSection(),
+        SizedBox(height: 12.0),
+        _SidebarLabelsSection(),
+        SizedBox(height: 12.0),
+        _SidebarLocationsSection(),
+        SizedBox(height: 12.0),
+        _SidebarToolsSection(),
+      ],
+    );
+  }
+}
+
+/// Six-tier Tasks navigation sidebar section watching only tier counts and active tier selection.
+class _SidebarTasksSection extends ConsumerWidget {
+  /// Creates a [_SidebarTasksSection].
+  const _SidebarTasksSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final nav = ref.watch(
+      shellProvider.select(
+        (shell) => (
+          view: shell.view,
+          searchOpen: shell.searchOpen,
+          activeTier: shell.activeTier,
+          activeLabelId: shell.activeLabelId,
         ),
-        const SizedBox(height: 12.0),
-        _SidebarLabelsSection(sidebar: sidebar, shell: shell),
-        const SizedBox(height: 12.0),
-        _SidebarLocationsSection(sidebar: sidebar, shell: shell),
-        const SizedBox(height: 12.0),
-        _SidebarToolsSection(sidebar: sidebar, shell: shell),
+      ),
+    );
+    final board =
+        ref.watch(evaluatedBoardProvider(nav.activeLabelId)).asData?.value ??
+        TaskBoard.empty();
+    final notifier = ref.read(shellProvider.notifier);
+
+    return UiSidebarSection(
+      title: localizations.sectionTasksTitle,
+      items: <UiSidebarNavItem>[
+        for (final tier in TaskTier.values)
+          UiSidebarNavItem(
+            id: 'tier_${tier.name}',
+            label: localizations.tierName(tier),
+            icon: UiDomainMappers.tierIcon(tier),
+            countLabel: '${board.tasksForTier(tier).length}',
+            isSelected:
+                nav.view == ShellView.tasks &&
+                !nav.searchOpen &&
+                nav.activeTier == tier,
+            onTap: () => notifier.selectTier(tier),
+          ),
       ],
     );
   }
@@ -889,212 +983,168 @@ class _ShellSidebarBody extends ConsumerWidget {
 /// Collapsible, filterable Labels sidebar section (`U-UX-001`).
 class _SidebarLabelsSection extends ConsumerWidget {
   /// Creates a [_SidebarLabelsSection].
-  const _SidebarLabelsSection({required this.sidebar, required this.shell});
-
-  /// Current shell navigation state.
-  final AppShellState shell;
-
-  /// Current sidebar view model.
-  final SidebarViewModel sidebar;
+  const _SidebarLabelsSection();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final notifier = ref.read(appShellControllerProvider.notifier);
+    final slice = ref.watch(
+      shellProvider.select(
+        (shell) => (
+          view: shell.view,
+          activeLabelId: shell.activeLabelId,
+          isCollapsed: shell.sidebarLabelsCollapsed,
+          isFilterOpen: shell.sidebarLabelsFilterOpen,
+          expandedLabelId: shell.expandedEntity?.kind == EntityKind.label
+              ? shell.expandedEntity?.id
+              : null,
+        ),
+      ),
+    );
+    final filterQuery = slice.isFilterOpen
+        ? ref.watch(sidebarLabelsFilterQueryProvider)
+        : '';
+    final rawBoard =
+        ref.watch(taskNotifierProvider.select((a) => a.asData?.value)) ??
+        TaskBoard.empty();
+    final notifier = ref.read(shellProvider.notifier);
+    final sortedLabels = TaskBoardEvaluator.sortLabelsAlphabetically(
+      rawBoard.labels,
+    );
+    final activeColor = _resolveActiveLabelColor(
+      sortedLabels,
+      slice.activeLabelId,
+    );
 
     return UiSidebarSection(
       title: localizations.drawerLabels,
       isCollapsible: true,
-      isCollapsed: shell.sidebarLabelsCollapsed,
+      isCollapsed: slice.isCollapsed,
       onToggleCollapse: notifier.toggleSidebarLabelsCollapsed,
-      collapsedCountLabel: '${sidebar.totalLabelCount}',
-      collapsedActiveColorDot: _colorFromArgb(sidebar.activeLabelColorValue),
+      collapsedCountLabel: '${sortedLabels.length}',
+      collapsedActiveColorDot: activeColor,
       isFilterable: true,
-      isFilterOpen: shell.sidebarLabelsFilterOpen,
+      isFilterOpen: slice.isFilterOpen,
       onToggleFilter: notifier.toggleSidebarLabelsFilter,
-      filterQuery: shell.sidebarLabelsFilterQuery,
-      onFilterChanged: notifier.setSidebarLabelsFilterQuery,
+      filterQuery: filterQuery,
+      onFilterChanged: ref
+          .read(sidebarLabelsFilterQueryProvider.notifier)
+          .setQuery,
       filterPlaceholder: localizations.sidebarFilterLabelsPlaceholder,
       filterClearTooltip: localizations.tooltipClearSearch,
       filterEmptyText: localizations.sidebarFilterLabelsEmpty,
       onManage: () => notifier.openView(ShellView.labels),
-      isManageActive: shell.view == ShellView.labels,
+      isManageActive: slice.view == ShellView.labels,
       filterTooltip: localizations.sidebarFilterLabelsToggle,
       manageTooltip: localizations.sidebarManageLabels,
       collapseTooltip: localizations.sidebarCollapseLabels,
       expandTooltip: localizations.sidebarExpandLabels,
-      items: _buildLabelItems(localizations, notifier),
+      items: _buildLabelItems(
+        rawBoard: rawBoard,
+        sortedLabels: sortedLabels,
+        view: slice.view,
+        activeLabelId: slice.activeLabelId,
+        expandedLabelId: slice.expandedLabelId,
+        filterQuery: filterQuery,
+        localizations: localizations,
+        notifier: notifier,
+      ),
     );
-  }
-
-  /// Builds label filter and manager-navigation items for the Labels sidebar section.
-  List<UiSidebarNavItem> _buildLabelItems(
-    AppLocalizations localizations,
-    AppShellController notifier,
-  ) {
-    final hasFilterQuery =
-        shell.sidebarLabelsFilterOpen &&
-        shell.sidebarLabelsFilterQuery.trim().isNotEmpty;
-    return <UiSidebarNavItem>[
-      if (!hasFilterQuery)
-        UiSidebarNavItem(
-          id: 'label_all_tasks',
-          label: localizations.allTasksLabel,
-          icon: Icons.layers_outlined,
-          countLabel: '${sidebar.allTasksCount}',
-          isSelected:
-              shell.view == ShellView.tasks && shell.activeLabelId == null,
-          onTap: () => notifier.selectLabelFilter(null),
-        ),
-      for (final label in sidebar.labels)
-        UiSidebarNavItem(
-          id: 'label_${label.id}',
-          label: label.name,
-          colorDot: _colorFromArgb(label.colorValue),
-          subtitle: label.isScoped ? localizations.scopedQueueLabel : null,
-          countLabel: '${label.openCount}',
-          isSelected: shell.view == ShellView.tasks && label.isSelected,
-          onTap: () => notifier.selectLabelFilter(label.id),
-          trailingIcon: Icons.info_outline_rounded,
-          trailingTooltip: localizations.openLabelInManagerTooltip,
-          isTrailingActive:
-              shell.view == ShellView.labels &&
-              shell.expandedEntity ==
-                  EntityRef(kind: EntityKind.label, id: label.id),
-          onTrailingTap: () => notifier.openEntityInManager(
-            EntityRef(kind: EntityKind.label, id: label.id),
-            preserveReturnContext: shell.view == ShellView.tasks,
-          ),
-        ),
-    ];
   }
 }
 
 /// Collapsible, filterable Locations sidebar section (`U-UX-001`).
 class _SidebarLocationsSection extends ConsumerWidget {
   /// Creates a [_SidebarLocationsSection].
-  const _SidebarLocationsSection({required this.sidebar, required this.shell});
-
-  /// Current shell navigation state.
-  final AppShellState shell;
-
-  /// Current sidebar view model.
-  final SidebarViewModel sidebar;
+  const _SidebarLocationsSection();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final notifier = ref.read(appShellControllerProvider.notifier);
+    final slice = ref.watch(
+      shellProvider.select(
+        (shell) => (
+          view: shell.view,
+          isCollapsed: shell.sidebarLocationsCollapsed,
+          isFilterOpen: shell.sidebarLocationsFilterOpen,
+          expandedLocationId: shell.expandedEntity?.kind == EntityKind.location
+              ? shell.expandedEntity?.id
+              : null,
+        ),
+      ),
+    );
+    final filterQuery = slice.isFilterOpen
+        ? ref.watch(sidebarLocationsFilterQueryProvider)
+        : '';
+    final rawBoard =
+        ref.watch(taskNotifierProvider.select((a) => a.asData?.value)) ??
+        TaskBoard.empty();
+    final notifier = ref.read(shellProvider.notifier);
+    final sortedLocations = TaskBoardEvaluator.sortLocationsAlphabetically(
+      rawBoard.locations,
+    );
 
     return UiSidebarSection(
       title: localizations.drawerLocations,
       isCollapsible: true,
-      isCollapsed: shell.sidebarLocationsCollapsed,
+      isCollapsed: slice.isCollapsed,
       onToggleCollapse: notifier.toggleSidebarLocationsCollapsed,
-      collapsedCountLabel: '${sidebar.totalLocationCount}',
+      collapsedCountLabel: '${sortedLocations.length}',
       isFilterable: true,
-      isFilterOpen: shell.sidebarLocationsFilterOpen,
+      isFilterOpen: slice.isFilterOpen,
       onToggleFilter: notifier.toggleSidebarLocationsFilter,
-      filterQuery: shell.sidebarLocationsFilterQuery,
-      onFilterChanged: notifier.setSidebarLocationsFilterQuery,
+      filterQuery: filterQuery,
+      onFilterChanged: ref
+          .read(sidebarLocationsFilterQueryProvider.notifier)
+          .setQuery,
       filterPlaceholder: localizations.sidebarFilterLocationsPlaceholder,
       filterClearTooltip: localizations.tooltipClearSearch,
       filterEmptyText: localizations.sidebarFilterLocationsEmpty,
       onManage: () => notifier.openView(ShellView.locations),
-      isManageActive: shell.view == ShellView.locations,
+      isManageActive: slice.view == ShellView.locations,
       filterTooltip: localizations.sidebarFilterLocationsToggle,
       manageTooltip: localizations.sidebarManageLocations,
       collapseTooltip: localizations.sidebarCollapseLocations,
       expandTooltip: localizations.sidebarExpandLocations,
-      items: _buildLocationItems(notifier),
+      items: _buildLocationItems(
+        rawBoard: rawBoard,
+        sortedLocations: sortedLocations,
+        view: slice.view,
+        expandedLocationId: slice.expandedLocationId,
+        filterQuery: filterQuery,
+        notifier: notifier,
+      ),
     );
-  }
-
-  /// Builds location manager-navigation items for the Locations sidebar section.
-  List<UiSidebarNavItem> _buildLocationItems(AppShellController notifier) {
-    return <UiSidebarNavItem>[
-      for (final location in sidebar.locations)
-        UiSidebarNavItem(
-          id: 'location_${location.id}',
-          label: location.name,
-          icon: Icons.location_on_outlined,
-          countLabel: '${location.openCount}',
-          trailingHintIcon: Icons.chevron_right_rounded,
-          isSelected:
-              shell.view == ShellView.locations &&
-              shell.expandedEntity ==
-                  EntityRef(kind: EntityKind.location, id: location.id),
-          onTap: () => notifier.openEntityInManager(
-            EntityRef(kind: EntityKind.location, id: location.id),
-            preserveReturnContext: shell.view == ShellView.tasks,
-          ),
-        ),
-    ];
   }
 }
 
 /// Tools sidebar section with conditional WebDAV sync and Diagnostic Log entries (`U-UX-001`).
 class _SidebarToolsSection extends ConsumerWidget {
   /// Creates a [_SidebarToolsSection].
-  const _SidebarToolsSection({required this.sidebar, required this.shell});
-
-  /// Current shell navigation state.
-  final AppShellState shell;
-
-  /// Current sidebar view model.
-  final SidebarViewModel sidebar;
+  const _SidebarToolsSection();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
+    final view = ref.watch(shellProvider.select((shell) => shell.view));
+    final showSyncWebDav = ref.watch(
+      webDavConfigProvider.select(
+        (config) => config.asData?.value.storageMode.usesWebDav ?? false,
+      ),
+    );
+    final showDiagnosticLog = ref.watch(diagnosticsEnabledProvider);
 
     return UiSidebarSection(
       title: localizations.sectionToolsTitle,
       showTopDivider: true,
-      items: _buildToolItems(localizations, ref),
+      items: _buildToolItems(
+        view: view,
+        showSyncWebDav: showSyncWebDav,
+        showDiagnosticLog: showDiagnosticLog,
+        localizations: localizations,
+        ref: ref,
+      ),
     );
-  }
-
-  /// Builds conditional sync, log, raw TDF, and settings navigation items.
-  List<UiSidebarNavItem> _buildToolItems(
-    AppLocalizations localizations,
-    WidgetRef ref,
-  ) {
-    final notifier = ref.read(appShellControllerProvider.notifier);
-    return <UiSidebarNavItem>[
-      if (sidebar.showSyncWebDav)
-        UiSidebarNavItem(
-          id: 'tool_sync_webdav',
-          label: localizations.tooltipSyncWebDav,
-          icon: Icons.sync_rounded,
-          onTap: () {
-            notifier.setCompactDrawerOpen(false);
-            unawaited(ref.read(syncControllerProvider.notifier).syncNow());
-          },
-        ),
-      if (sidebar.showDiagnosticLog)
-        UiSidebarNavItem(
-          id: 'tool_diagnostic_log',
-          label: localizations.diagnosticLogTitle,
-          icon: Icons.terminal_rounded,
-          isSelected: shell.view == ShellView.logs,
-          onTap: () => notifier.openView(ShellView.logs),
-        ),
-      UiSidebarNavItem(
-        id: 'tool_raw_tdf',
-        label: localizations.rawTdfPreviewTitle,
-        icon: Icons.code_rounded,
-        isSelected: shell.view == ShellView.rawTdf,
-        onTap: () => notifier.openView(ShellView.rawTdf),
-      ),
-      UiSidebarNavItem(
-        id: 'tool_settings',
-        label: localizations.settingsTitle,
-        icon: Icons.settings_outlined,
-        isSelected: shell.view == ShellView.settings,
-        onTap: () => notifier.openView(ShellView.settings),
-      ),
-    ];
   }
 }
 
@@ -1106,25 +1156,20 @@ class _ShellSidebarFooter extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tokens = UiThemeTokens.of(context);
-    final versionLabel = ref.watch(
-      sidebarViewModelProvider.select((sidebar) => sidebar.versionLabel),
-    );
-    final buildSuffix = ref.watch(
-      sidebarViewModelProvider.select((sidebar) => sidebar.buildSuffix),
-    );
+    final version = ref.watch(appVersionDisplayProvider);
     final baseStyle = UiTypographyTokens.mono(
       tokens.typography.eyebrow.copyWith(color: tokens.colors.muted),
     );
 
     return Row(
       children: <Widget>[
-        Text(versionLabel, style: baseStyle),
-        if (buildSuffix.isNotEmpty)
+        Text(version.versionLabel, style: baseStyle),
+        if (version.buildSuffix.isNotEmpty)
           Flexible(
             child: Opacity(
               opacity: 0.65,
               child: Text(
-                buildSuffix,
+                version.buildSuffix,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: baseStyle,
@@ -1143,17 +1188,17 @@ class _ShellFloatingNotice extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final notice = ref.watch(floatingNoticeControllerProvider);
+    final notice = ref.watch(floatingNoticeProvider);
     if (notice == null) {
       return const SizedBox.shrink();
     }
     final localizations = AppLocalizations.of(context);
-    final controller = ref.read(floatingNoticeControllerProvider.notifier);
+    final controller = ref.read(floatingNoticeProvider.notifier);
 
     return UiBanner(
       key: ValueKey<String>('floating_notice_${notice.id}'),
       variant: UiBannerVariant.toast,
-      tone: UiIconMapper.noticeTone(notice.tone),
+      tone: UiDomainMappers.noticeTone(notice.tone),
       message: notice.message,
       actionLabel: notice.actionLabel,
       onAction: notice.hasUndoAction
@@ -1198,27 +1243,156 @@ class _ShellMainBody extends StatelessWidget {
   }
 }
 
-/// Returns the active label filter name on compact Tasks view, or `null` when hidden (`U-LAYOUT-004`).
-String? _activeMobileFilterLabel(
-  AppShellState shell,
-  BoardChromeViewModel chrome,
-) {
-  if (shell.view != ShellView.tasks || shell.searchOpen) {
-    return null;
+/// Builds label filter and manager-navigation items for the Labels sidebar section.
+List<UiSidebarNavItem> _buildLabelItems({
+  required TaskBoard rawBoard,
+  required List<TdfLabel> sortedLabels,
+  required ShellView view,
+  required String? activeLabelId,
+  required String? expandedLabelId,
+  required String filterQuery,
+  required AppLocalizations localizations,
+  required ShellNotifier notifier,
+}) {
+  final needle = filterQuery.trim().toLowerCase();
+  final items = <UiSidebarNavItem>[];
+  if (needle.isEmpty) {
+    var globalOpenCount = 0;
+    for (final task in rawBoard.allTasks) {
+      if (!task.isCompleted) {
+        globalOpenCount++;
+      }
+    }
+    items.add(
+      UiSidebarNavItem(
+        id: 'label_all_tasks',
+        label: localizations.allTasksLabel,
+        icon: Icons.layers_outlined,
+        countLabel: '$globalOpenCount',
+        isSelected: view == ShellView.tasks && activeLabelId == null,
+        onTap: () => notifier.selectLabelFilter(null),
+      ),
+    );
   }
-  return chrome.activeFilterLabelName;
+  for (final label in sortedLabels) {
+    if (needle.isNotEmpty && !label.name.toLowerCase().contains(needle)) {
+      continue;
+    }
+    final colorValue = TaskScheduleHelper.parseLabelColorValue(label.color);
+    items.add(
+      UiSidebarNavItem(
+        id: 'label_${label.id}',
+        label: label.name,
+        colorDot: _colorFromArgb(colorValue),
+        subtitle: label.isScoped ? localizations.scopedQueueLabel : null,
+        countLabel: '${rawBoard.openTaskCountForLabel(label.id)}',
+        isSelected: view == ShellView.tasks && label.id == activeLabelId,
+        onTap: () => notifier.selectLabelFilter(label.id),
+        trailingIcon: Icons.info_outline_rounded,
+        trailingTooltip: localizations.openLabelInManagerTooltip,
+        isTrailingActive:
+            view == ShellView.labels && expandedLabelId == label.id,
+        onTrailingTap: () => notifier.openEntityInManager(
+          EntityRef(kind: EntityKind.label, id: label.id),
+          preserveReturnContext: view == ShellView.tasks,
+        ),
+      ),
+    );
+  }
+  return items;
+}
+
+/// Builds location manager-navigation items for the Locations sidebar section.
+List<UiSidebarNavItem> _buildLocationItems({
+  required TaskBoard rawBoard,
+  required List<TdfLocation> sortedLocations,
+  required ShellView view,
+  required String? expandedLocationId,
+  required String filterQuery,
+  required ShellNotifier notifier,
+}) {
+  final needle = filterQuery.trim().toLowerCase();
+  final items = <UiSidebarNavItem>[];
+  for (final location in sortedLocations) {
+    if (needle.isNotEmpty && !location.name.toLowerCase().contains(needle)) {
+      continue;
+    }
+    items.add(
+      UiSidebarNavItem(
+        id: 'location_${location.id}',
+        label: location.name,
+        icon: Icons.location_on_outlined,
+        countLabel: '${rawBoard.openTaskCountForLocation(location.id)}',
+        trailingHintIcon: Icons.chevron_right_rounded,
+        isSelected:
+            view == ShellView.locations && expandedLocationId == location.id,
+        onTap: () => notifier.openEntityInManager(
+          EntityRef(kind: EntityKind.location, id: location.id),
+          preserveReturnContext: view == ShellView.tasks,
+        ),
+      ),
+    );
+  }
+  return items;
+}
+
+/// Builds conditional sync, log, raw TDF, and settings navigation items.
+List<UiSidebarNavItem> _buildToolItems({
+  required ShellView view,
+  required bool showSyncWebDav,
+  required bool showDiagnosticLog,
+  required AppLocalizations localizations,
+  required WidgetRef ref,
+}) {
+  final notifier = ref.read(shellProvider.notifier);
+  return <UiSidebarNavItem>[
+    if (showSyncWebDav)
+      UiSidebarNavItem(
+        id: 'tool_sync_webdav',
+        label: localizations.tooltipSyncWebDav,
+        icon: Icons.sync_rounded,
+        onTap: () {
+          notifier.setCompactDrawerOpen(false);
+          unawaited(ref.read(syncActionsProvider.notifier).syncNow());
+        },
+      ),
+    if (showDiagnosticLog)
+      UiSidebarNavItem(
+        id: 'tool_diagnostic_log',
+        label: localizations.diagnosticLogTitle,
+        icon: Icons.terminal_rounded,
+        isSelected: view == ShellView.logs,
+        onTap: () => notifier.openView(ShellView.logs),
+      ),
+    UiSidebarNavItem(
+      id: 'tool_raw_tdf',
+      label: localizations.rawTdfPreviewTitle,
+      icon: Icons.code_rounded,
+      isSelected: view == ShellView.rawTdf,
+      onTap: () => notifier.openView(ShellView.rawTdf),
+    ),
+    UiSidebarNavItem(
+      id: 'tool_settings',
+      label: localizations.settingsTitle,
+      icon: Icons.settings_outlined,
+      isSelected: view == ShellView.settings,
+      onTap: () => notifier.openView(ShellView.settings),
+    ),
+  ];
 }
 
 /// Converts an optional ARGB integer into a Flutter [Color], or returns `null`.
 Color? _colorFromArgb(int? argb) => argb != null ? Color(argb) : null;
 
-/// Returns whether the active [shell] route displays a pinned bottom dock (`U-LAYOUT-005`).
-bool _hasBottomDock(AppShellState shell, {required bool isTasksBlocked}) {
-  return switch (shell.view) {
-    ShellView.tasks =>
-      !shell.searchOpen &&
-          shell.activeDraft != EntityDraftKind.task &&
-          !isTasksBlocked,
+/// Returns whether the active route displays a pinned bottom dock (`U-LAYOUT-005`).
+bool _hasBottomDock({
+  required ShellView view,
+  required bool searchOpen,
+  required bool hasTaskDraft,
+  required bool isTasksBlocked,
+}) {
+  return switch (view) {
+    ShellView.tasks => !searchOpen && !hasTaskDraft && !isTasksBlocked,
     ShellView.settings || ShellView.conflict || ShellView.recovery => true,
     ShellView.labels ||
     ShellView.locations ||
@@ -1228,22 +1402,59 @@ bool _hasBottomDock(AppShellState shell, {required bool isTasksBlocked}) {
 }
 
 /// Returns whether [TasksView] is currently blocked by initial load or a full-screen read error.
-bool _isTasksViewBlocked(TasksViewModel viewModel) =>
-    viewModel.isLoading || viewModel.fullScreenFileReadError != null;
+bool _isTasksViewBlocked(
+  AsyncValue<AppWorkspace> workspaceAsync,
+  AsyncValue<TaskBoard> boardAsync,
+) {
+  if (workspaceAsync.hasError) {
+    return true;
+  }
+  return (boardAsync.isLoading || boardAsync.hasError) && !boardAsync.hasValue;
+}
+
+/// Resolves the color dot for [activeId] when the Labels section is collapsed.
+Color? _resolveActiveLabelColor(List<TdfLabel> sortedLabels, String? activeId) {
+  if (activeId == null) {
+    return null;
+  }
+  for (final label in sortedLabels) {
+    if (label.id == activeId) {
+      return _colorFromArgb(
+        TaskScheduleHelper.parseLabelColorValue(label.color),
+      );
+    }
+  }
+  return null;
+}
 
 /// Initiates native desktop window drag from empty top chrome space.
 void _startWindowDrag(WidgetRef ref) {
-  unawaited(ref.read(windowControlControllerProvider).startDragging());
+  unawaited(ref.read(desktopWindowActionsProvider).startDragging());
 }
 
 /// Toggles the compact slide-over navigation drawer state.
-void _toggleCompactDrawer(WidgetRef ref, AppShellState shell) {
-  ref
-      .read(appShellControllerProvider.notifier)
-      .setCompactDrawerOpen(!shell.compactDrawerOpen);
+void _toggleCompactDrawer(WidgetRef ref, bool isCurrentlyOpen) {
+  ref.read(shellProvider.notifier).setCompactDrawerOpen(!isCurrentlyOpen);
 }
 
 /// Toggles native desktop window maximize/restore from top chrome double-tap.
 void _toggleWindowMaximize(WidgetRef ref) {
-  unawaited(ref.read(windowControlControllerProvider).toggleMaximize());
+  unawaited(ref.read(desktopWindowActionsProvider).toggleMaximize());
+}
+
+/// Watches the active label filter name for compact Tasks view, or returns `null` when hidden (`U-LAYOUT-004`).
+String? _watchMobileFilterLabelName(
+  WidgetRef ref, {
+  required ShellView view,
+  required bool searchOpen,
+  required String? activeLabelId,
+}) {
+  if (view != ShellView.tasks || searchOpen || activeLabelId == null) {
+    return null;
+  }
+  return ref.watch(
+    taskNotifierProvider.select(
+      (boardAsync) => boardAsync.asData?.value.findLabel(activeLabelId)?.name,
+    ),
+  );
 }

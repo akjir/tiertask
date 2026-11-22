@@ -18,18 +18,28 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/task_controller.dart';
-import '../../presentation/tasks_view_model.dart';
-import '../../presentation/ui_telemetry.dart';
-import '../../presentation/view_model_primitives.dart';
+import '../../models/location_state.dart';
+import '../../models/task_board_evaluator.dart';
+import '../../models/task_item.dart';
+import '../../models/task_tier.dart';
+import '../../models/tdf_location.dart';
+import '../../models/tdf_metadata.dart';
+import '../../models/webdav_config.dart';
+import '../../providers/board_actions_provider.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../../providers/ui_telemetry.dart';
 import '../dialogs/compact_label_picker_sheet.dart';
-import '../ui_icon_mapper.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_pill.dart';
+import '../primitives/ui_segmented_control.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../ui_domain_mappers.dart';
 import '../widgets/entity_card_chrome.dart';
 import '../widgets/entity_conditions_section.dart';
 import '../widgets/entity_label_picker.dart';
@@ -38,58 +48,106 @@ import '../widgets/entity_note_section.dart';
 import 'task_detail_editors.dart';
 import 'task_schedule_editors.dart';
 
-/// Expandable card rendering a single projected task and its inline editors (`U-CARD-001`..`005`).
+/// Expandable card rendering a single domain [TaskItem] and its inline editors (`U-CARD-001`..`005`).
 class TaskCard extends ConsumerWidget {
   /// Creates a [TaskCard].
   const TaskCard({
     super.key,
     required this.task,
+    required this.tier,
+    required this.labelsById,
+    required this.locationsById,
+    required this.tasksById,
     required this.allLabels,
     required this.allLocations,
-    required this.hasBothScopedAndGlobalLabels,
-    required this.currentLocalDateTimeHint,
+    required this.openLabelCounts,
+    required this.isSearchMode,
+    required this.activeLabelId,
+    required this.configuration,
+    required this.nowUtc,
+    required this.localNow,
+    required this.activeFix,
   });
 
-  /// All workspace label options supplied to inline and sheet label pickers.
-  final List<LabelPickerOptionViewModel> allLabels;
+  /// Active foreground GPS fix when status is [LocationStatus.found], or `null`.
+  final LocationFix? activeFix;
 
-  /// All workspace locations supplied to activation condition pickers.
-  final List<LocationOptionViewModel> allLocations;
+  /// Active sidebar label filter identifier, or `null` for `All Tasks`.
+  final String? activeLabelId;
 
-  /// Current workspace local wall-clock timestamp (`YYYY-MM-DD HH:MM`) seeding pickers.
-  final String currentLocalDateTimeHint;
+  /// All sorted workspace labels supplied to inline and sheet label pickers.
+  final List<TdfLabel> allLabels;
 
-  /// Whether workspace has both scoped and global labels (`U-COMP-005`).
-  final bool hasBothScopedAndGlobalLabels;
+  /// All sorted workspace locations supplied to activation condition pickers.
+  final List<TdfLocation> allLocations;
 
-  /// Projected immutable task view model.
-  final TaskCardViewModel task;
+  /// Active workspace configuration supplying timezone and due lead-window settings.
+  final WebDavConfig configuration;
+
+  /// Whether Global Search mode is active (adds a tier pill to collapsed badges).
+  final bool isSearchMode;
+
+  /// Lookup map of workspace labels by identifier.
+  final Map<String, TdfLabel> labelsById;
+
+  /// Current local wall-clock evaluation timestamp in the workspace timezone.
+  final DateTime localNow;
+
+  /// Lookup map of workspace locations by identifier.
+  final Map<String, TdfLocation> locationsById;
+
+  /// Current evaluation UTC timestamp.
+  final DateTime nowUtc;
+
+  /// Precomputed map of open task counts keyed by label identifier.
+  final Map<String, int> openLabelCounts;
+
+  /// Domain task item rendered by this card.
+  final TaskItem task;
+
+  /// Lookup map of all workspace tasks by identifier for prerequisite evaluation.
+  final Map<String, TaskItem> tasksById;
+
+  /// Evaluated tier containing [task].
+  final TaskTier tier;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final entityRef = EntityRef(kind: EntityKind.task, id: task.id);
-    final isExpanded = ref.watch(
-      appShellControllerProvider.select(
-        (shell) => shell.expandedEntity == entityRef,
+    final headerSlice = ref.watch(
+      shellProvider.select(
+        (shell) => (
+          isExpanded: shell.expandedEntity == entityRef,
+          isTitleEditActive:
+              shell.activeInlineEdit?.entity == entityRef &&
+              shell.activeInlineEdit?.sectionKey == TaskSectionKind.title.name,
+        ),
       ),
     );
-    final isTitleEditActive = ref.watch(
-      appShellControllerProvider.select(
-        (shell) =>
-            shell.activeInlineEdit?.entity == entityRef &&
-            shell.activeInlineEdit?.sectionKey == TaskSectionKind.title.name,
-      ),
-    );
-    final isEditingTitle = isExpanded && !task.isCompleted && isTitleEditActive;
+    final isEditingTitle =
+        headerSlice.isExpanded &&
+        !task.isCompleted &&
+        headerSlice.isTitleEditActive;
 
     return _TaskCardFrame(
-      task: task,
-      allLabels: allLabels,
-      allLocations: allLocations,
-      hasBothScopedAndGlobalLabels: hasBothScopedAndGlobalLabels,
-      currentLocalDateTimeHint: currentLocalDateTimeHint,
+      contextData: _TaskCardContext(
+        task: task,
+        tier: tier,
+        labelsById: labelsById,
+        locationsById: locationsById,
+        tasksById: tasksById,
+        allLabels: allLabels,
+        allLocations: allLocations,
+        openLabelCounts: openLabelCounts,
+        isSearchMode: isSearchMode,
+        activeLabelId: activeLabelId,
+        configuration: configuration,
+        nowUtc: nowUtc,
+        localNow: localNow,
+        activeFix: activeFix,
+      ),
       entityRef: entityRef,
-      isExpanded: isExpanded,
+      isExpanded: headerSlice.isExpanded,
       isEditingTitle: isEditingTitle,
     );
   }
@@ -100,6 +158,8 @@ class _TaskAddFieldsBar extends StatelessWidget {
   /// Creates a [_TaskAddFieldsBar].
   const _TaskAddFieldsBar({
     required this.task,
+    required this.assignedLabels,
+    required this.flags,
     required this.activeSection,
     required this.isInlineLabelPickerOpen,
     required this.isBusy,
@@ -109,6 +169,12 @@ class _TaskAddFieldsBar extends StatelessWidget {
 
   /// Currently open inline section editor on this task, if any.
   final TaskSectionKind? activeSection;
+
+  /// Resolved labels currently assigned to [task].
+  final List<TdfLabel> assignedLabels;
+
+  /// Lazily computed suspension, conditions, and placement flags.
+  final _ExpandedPanelFlags flags;
 
   /// Whether a task mutation is currently in flight.
   final bool isBusy;
@@ -120,10 +186,10 @@ class _TaskAddFieldsBar extends StatelessWidget {
   final ValueChanged<TaskSectionKind> onAddSection;
 
   /// Callback immediately switching task placement (`Priority` or `Someday`).
-  final ValueChanged<TaskPlacementOption> onSetPlacement;
+  final ValueChanged<QuickAddMode> onSetPlacement;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
@@ -143,11 +209,45 @@ class _TaskAddFieldsBar extends StatelessWidget {
     );
   }
 
+  /// Appends solid 1-click `Priority` and `Someday` toggle chips (`isDirect: true`).
+  void _appendDirectPlacementChips(
+    List<Widget> chips,
+    AppLocalizations localizations,
+  ) {
+    chips.add(
+      UiPill(
+        key: ValueKey<String>('task_direct_priority_${task.id}'),
+        label: localizations.quickAddPriority,
+        icon: Icons.bolt_outlined,
+        variant: UiPillVariant.addField,
+        isDirect: true,
+        enabled: !isBusy,
+        onPressed: isBusy ? null : () => onSetPlacement(QuickAddMode.priority),
+      ),
+    );
+    chips.add(
+      UiPill(
+        key: ValueKey<String>('task_direct_someday_${task.id}'),
+        label: localizations.tier5Name,
+        icon: Icons.lightbulb_outline_rounded,
+        variant: UiPillVariant.addField,
+        isDirect: true,
+        enabled: !isBusy,
+        onPressed: isBusy ? null : () => onSetPlacement(QuickAddMode.someday),
+      ),
+    );
+  }
+
   /// Builds unset dashed `+ Add` chips interleaved with direct `Priority`/`Someday` toggles in canonical order.
   List<Widget> _buildOrderedChips(AppLocalizations localizations) {
-    final unset = task.unsetSections;
+    final unset = _collectUnsetTaskSections(
+      task: task,
+      hasAssignedLabels: assignedLabels.isNotEmpty,
+      isSuspended: flags.isSuspended,
+      hasConditions: flags.hasConditions,
+    );
     final chips = <Widget>[];
-    final showDirectPlacement = task.placement == TaskPlacementOption.queue;
+    final showDirectPlacement = flags.placement == QuickAddMode.standard;
     var insertedDirect = false;
 
     for (final section in unset) {
@@ -175,39 +275,6 @@ class _TaskAddFieldsBar extends StatelessWidget {
     }
     return chips;
   }
-
-  /// Appends solid 1-click `Priority` and `Someday` toggle chips (`isDirect: true`).
-  void _appendDirectPlacementChips(
-    List<Widget> chips,
-    AppLocalizations localizations,
-  ) {
-    chips.add(
-      UiPill(
-        key: ValueKey<String>('task_direct_priority_${task.id}'),
-        label: localizations.quickAddPriority,
-        icon: Icons.bolt_outlined,
-        variant: UiPillVariant.addField,
-        isDirect: true,
-        enabled: !isBusy,
-        onPressed: isBusy
-            ? null
-            : () => onSetPlacement(TaskPlacementOption.priority),
-      ),
-    );
-    chips.add(
-      UiPill(
-        key: ValueKey<String>('task_direct_someday_${task.id}'),
-        label: localizations.tier5Name,
-        icon: Icons.lightbulb_outline_rounded,
-        variant: UiPillVariant.addField,
-        isDirect: true,
-        enabled: !isBusy,
-        onPressed: isBusy
-            ? null
-            : () => onSetPlacement(TaskPlacementOption.someday),
-      ),
-    );
-  }
 }
 
 /// Assigned label chips and `+ Add` trigger rendered inside [_TaskLabelsReadCard].
@@ -215,11 +282,15 @@ class _TaskAssignedLabelsWrap extends StatelessWidget {
   /// Creates a [_TaskAssignedLabelsWrap].
   const _TaskAssignedLabelsWrap({
     required this.task,
+    required this.assignedLabels,
     required this.isBusy,
     required this.onToggleLabel,
     required this.onOpenLabelInfo,
     required this.onOpenPicker,
   });
+
+  /// Resolved labels currently assigned to [task].
+  final List<TdfLabel> assignedLabels;
 
   /// Whether a task mutation is in flight.
   final bool isBusy;
@@ -233,8 +304,8 @@ class _TaskAssignedLabelsWrap extends StatelessWidget {
   /// Callback toggling label assignment on the task.
   final ValueChanged<String> onToggleLabel;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
@@ -245,18 +316,18 @@ class _TaskAssignedLabelsWrap extends StatelessWidget {
       spacing: 6.0,
       runSpacing: 6.0,
       children: <Widget>[
-        for (final chip in task.assignedLabels)
+        for (final label in assignedLabels)
           UiPill(
-            key: ValueKey<String>('task_expanded_label_${task.id}_${chip.id}'),
-            label: chip.name,
+            key: ValueKey<String>('task_expanded_label_${task.id}_${label.id}'),
+            label: label.name,
             variant: UiPillVariant.splitChip,
-            colorDot: _resolveLabelColor(chip.colorValue, tokens),
+            colorDot: _resolveLabelColor(label.color, tokens),
             tooltip: localizations.openLabelInManagerTooltip,
-            removeTooltip: localizations.labelPickerRemoveTooltip(chip.name),
-            onPressed: () => onOpenLabelInfo(chip.id),
+            removeTooltip: localizations.labelPickerRemoveTooltip(label.name),
+            onPressed: () => onOpenLabelInfo(label.id),
             onRemove: task.isCompleted || isBusy
                 ? null
-                : () => onToggleLabel(chip.id),
+                : () => onToggleLabel(label.id),
           ),
         if (!task.isCompleted)
           UiPill(
@@ -272,34 +343,95 @@ class _TaskAssignedLabelsWrap extends StatelessWidget {
   }
 }
 
+/// Immutable domain bundle passed across [TaskCard] private subtrees.
+@immutable
+class _TaskCardContext {
+  /// Creates a [_TaskCardContext].
+  const _TaskCardContext({
+    required this.task,
+    required this.tier,
+    required this.labelsById,
+    required this.locationsById,
+    required this.tasksById,
+    required this.allLabels,
+    required this.allLocations,
+    required this.openLabelCounts,
+    required this.isSearchMode,
+    required this.activeLabelId,
+    required this.configuration,
+    required this.nowUtc,
+    required this.localNow,
+    required this.activeFix,
+  });
+
+  /// Active foreground GPS fix when status is [LocationStatus.found], or `null`.
+  final LocationFix? activeFix;
+
+  /// Active sidebar label filter identifier, or `null` for `All Tasks`.
+  final String? activeLabelId;
+
+  /// All sorted workspace labels.
+  final List<TdfLabel> allLabels;
+
+  /// All sorted workspace locations.
+  final List<TdfLocation> allLocations;
+
+  /// Active workspace configuration.
+  final WebDavConfig configuration;
+
+  /// Whether Global Search mode is active.
+  final bool isSearchMode;
+
+  /// Lookup map of workspace labels by identifier.
+  final Map<String, TdfLabel> labelsById;
+
+  /// Current local wall-clock evaluation timestamp.
+  final DateTime localNow;
+
+  /// Lookup map of workspace locations by identifier.
+  final Map<String, TdfLocation> locationsById;
+
+  /// Current evaluation UTC timestamp.
+  final DateTime nowUtc;
+
+  /// Precomputed map of open task counts keyed by label identifier.
+  final Map<String, int> openLabelCounts;
+
+  /// Domain task item.
+  final TaskItem task;
+
+  /// Lookup map of all workspace tasks by identifier.
+  final Map<String, TaskItem> tasksById;
+
+  /// Evaluated tier containing [task].
+  final TaskTier tier;
+
+  /// Whether the downgrade chevron action is available for [task].
+  bool get canDowngrade =>
+      !task.isCompleted &&
+      (tier == TaskTier.focus ||
+          tier == TaskTier.ready ||
+          tier == TaskTier.planned);
+
+  /// Whether [task] currently resides in Tier 5 (`Someday`).
+  bool get isSomeday => tier == TaskTier.someday;
+}
+
 /// Expandable card chrome wiring header controls, collapsed metadata, and expanded panel for [TaskCard].
 class _TaskCardFrame extends ConsumerWidget {
   /// Creates a [_TaskCardFrame].
   const _TaskCardFrame({
-    required this.task,
-    required this.allLabels,
-    required this.allLocations,
-    required this.hasBothScopedAndGlobalLabels,
-    required this.currentLocalDateTimeHint,
+    required this.contextData,
     required this.entityRef,
     required this.isExpanded,
     required this.isEditingTitle,
   });
 
-  /// All workspace label options supplied to inline and sheet label pickers.
-  final List<LabelPickerOptionViewModel> allLabels;
-
-  /// All workspace locations supplied to activation condition pickers.
-  final List<LocationOptionViewModel> allLocations;
-
-  /// Current workspace local wall-clock timestamp (`YYYY-MM-DD HH:MM`) seeding pickers.
-  final String currentLocalDateTimeHint;
+  /// Domain context bundle for the rendered task.
+  final _TaskCardContext contextData;
 
   /// Entity reference identifying this task inside shell state.
   final EntityRef entityRef;
-
-  /// Whether workspace has both scoped and global labels (`U-COMP-005`).
-  final bool hasBothScopedAndGlobalLabels;
 
   /// Whether the inline title editor is currently active.
   final bool isEditingTitle;
@@ -307,11 +439,14 @@ class _TaskCardFrame extends ConsumerWidget {
   /// Whether this task card is currently expanded.
   final bool isExpanded;
 
-  /// Projected immutable task view model.
-  final TaskCardViewModel task;
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final task = contextData.task;
+    final assignedLabels = _resolveAssignedLabels(task, contextData.labelsById);
+    final collapsedMetadata = isExpanded
+        ? null
+        : _buildCollapsedMetadata(context, assignedLabels);
+
     return UiCard.expandable(
       title: task.title,
       isExpanded: isExpanded,
@@ -331,31 +466,66 @@ class _TaskCardFrame extends ConsumerWidget {
           : <Widget>[
               if (isExpanded && !task.isCompleted)
                 _TaskEditTitleButton(taskId: task.id),
-              if (task.canDowngrade) _TaskDowngradeButton(taskId: task.id),
+              if (contextData.canDowngrade)
+                _TaskDowngradeButton(taskId: task.id),
             ],
-      collapsedMetadata: _hasCollapsedMetadata(task)
-          ? _TaskCollapsedMetadataStrip(task: task, entityRef: entityRef)
-          : null,
+      collapsedMetadata: collapsedMetadata,
       expandedChild: isExpanded
           ? _TaskExpandedPanel(
-              task: task,
-              allLabels: allLabels,
-              allLocations: allLocations,
-              hasBothScopedAndGlobalLabels: hasBothScopedAndGlobalLabels,
-              currentLocalDateTimeHint: currentLocalDateTimeHint,
+              contextData: contextData,
+              assignedLabels: assignedLabels,
             )
           : null,
     );
   }
 
+  /// Lazily builds the collapsed badge strip only when the card is collapsed.
+  Widget? _buildCollapsedMetadata(
+    BuildContext context,
+    List<TdfLabel> assignedLabels,
+  ) {
+    final localizations = AppLocalizations.of(context);
+    final badges = UiDomainMappers.buildTaskCollapsedBadges(
+      task: contextData.task,
+      tier: contextData.tier,
+      isSearchMode: contextData.isSearchMode,
+      activeLabelId: contextData.activeLabelId,
+      labelsById: contextData.labelsById,
+      locationsById: contextData.locationsById,
+      tasksById: contextData.tasksById,
+      config: contextData.configuration,
+      nowUtc: contextData.nowUtc,
+      localNow: contextData.localNow,
+      activeFix: contextData.activeFix,
+      localizations: localizations,
+    );
+    final hasAny =
+        assignedLabels.isNotEmpty ||
+        badges.primary.isNotEmpty ||
+        badges.visibleSecondary.isNotEmpty ||
+        badges.overflowCount > 0;
+    if (!hasAny) {
+      return null;
+    }
+    return _TaskCollapsedMetadataStrip(
+      taskId: contextData.task.id,
+      entityRef: entityRef,
+      isSearchMode: contextData.isSearchMode,
+      assignedLabels: assignedLabels,
+      primaryBadges: badges.primary,
+      visibleSecondaryBadges: badges.visibleSecondary,
+      overflowSecondaryCount: badges.overflowCount,
+    );
+  }
+
   /// Closes the currently active inline title editor in shell state.
   void _closeInlineEdit(WidgetRef ref) {
-    ref.read(appShellControllerProvider.notifier).closeInlineEdit();
+    ref.read(shellProvider.notifier).closeInlineEdit();
   }
 
   /// Toggles card expansion for [entityRef].
   void _toggleExpand(WidgetRef ref) {
-    ref.read(appShellControllerProvider.notifier).toggleExpandEntity(entityRef);
+    ref.read(shellProvider.notifier).toggleExpandEntity(entityRef);
   }
 }
 
@@ -364,8 +534,8 @@ class _TaskCollapsedBadgePill extends StatelessWidget {
   /// Creates a [_TaskCollapsedBadgePill].
   const _TaskCollapsedBadgePill({required this.badge, required this.onPressed});
 
-  /// Projected card badge view model.
-  final CardBadgeViewModel badge;
+  /// Mapped domain task badge.
+  final TaskCardBadge badge;
 
   /// Optional tap callback toggling card expansion.
   final VoidCallback? onPressed;
@@ -374,9 +544,9 @@ class _TaskCollapsedBadgePill extends StatelessWidget {
   Widget build(BuildContext context) {
     return UiPill(
       label: badge.label,
-      icon: UiIconMapper.badgeIcon(badge.iconKey),
+      icon: badge.icon,
       variant: UiPillVariant.meta,
-      tone: UiIconMapper.pillTone(badge.tone),
+      tone: badge.tone,
       onPressed: onPressed,
     );
   }
@@ -391,8 +561,8 @@ class _TaskCollapsedLabelPill extends StatelessWidget {
     required this.onOpenLabel,
   });
 
-  /// Assigned label chip projection.
-  final EntityLabelChipViewModel label;
+  /// Assigned domain label.
+  final TdfLabel label;
 
   /// Callback navigating to this label in Labels manager.
   final ValueChanged<String> onOpenLabel;
@@ -409,7 +579,7 @@ class _TaskCollapsedLabelPill extends StatelessWidget {
       key: ValueKey<String>('task_label_chip_${taskId}_${label.id}'),
       label: label.name,
       variant: UiPillVariant.tag,
-      colorDot: _resolveLabelColor(label.colorValue, tokens),
+      colorDot: _resolveLabelColor(label.color, tokens),
       tooltip: localizations.openLabelInManagerTooltip,
       onPressed: () => onOpenLabel(label.id),
     );
@@ -420,49 +590,65 @@ class _TaskCollapsedLabelPill extends StatelessWidget {
 class _TaskCollapsedMetadataStrip extends ConsumerWidget {
   /// Creates a [_TaskCollapsedMetadataStrip].
   const _TaskCollapsedMetadataStrip({
-    required this.task,
+    required this.taskId,
     required this.entityRef,
+    required this.isSearchMode,
+    required this.assignedLabels,
+    required this.primaryBadges,
+    required this.visibleSecondaryBadges,
+    required this.overflowSecondaryCount,
   });
+
+  /// Assigned domain labels (exempt from secondary overflow cap).
+  final List<TdfLabel> assignedLabels;
 
   /// Entity reference identifying this task for expand toggling.
   final EntityRef entityRef;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Whether Global Search mode is active (index `0` in [primaryBadges] is the tier pill).
+  final bool isSearchMode;
+
+  /// Number of hidden secondary badges beyond the 3-pill cap.
+  final int overflowSecondaryCount;
+
+  /// Primary badges exempt from secondary overflow (Search tier pill and Due/Overdue badge).
+  final List<TaskCardBadge> primaryBadges;
+
+  /// Owning task identifier for deterministic keys.
+  final String taskId;
+
+  /// Up to 3 visible secondary badges in strict `U-CARD-005` priority order.
+  final List<TaskCardBadge> visibleSecondaryBadges;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
 
     return Wrap(
-      key: ValueKey<String>('task_collapsed_metadata_${task.id}'),
+      key: ValueKey<String>('task_collapsed_metadata_$taskId'),
       spacing: 6.0,
       runSpacing: 6.0,
       children: <Widget>[
-        for (final label in task.assignedLabels)
+        for (final label in assignedLabels)
           _TaskCollapsedLabelPill(
-            taskId: task.id,
+            taskId: taskId,
             label: label,
             onOpenLabel: (labelId) => _openLabel(ref, labelId),
           ),
-        for (final badge in task.primaryBadges)
+        for (var i = 0; i < primaryBadges.length; i++)
           _TaskCollapsedBadgePill(
-            badge: badge,
-            onPressed: badge.iconKey == CardBadgeIconKey.due
-                ? () => _toggleExpand(ref)
-                : null,
+            badge: primaryBadges[i],
+            onPressed: isSearchMode && i == 0 ? null : () => _toggleExpand(ref),
           ),
-        for (final badge in task.visibleSecondaryBadges)
+        for (final badge in visibleSecondaryBadges)
           _TaskCollapsedBadgePill(
             badge: badge,
             onPressed: () => _toggleExpand(ref),
           ),
-        if (task.overflowSecondaryCount > 0)
+        if (overflowSecondaryCount > 0)
           UiPill(
-            key: ValueKey<String>('task_more_badges_${task.id}'),
-            label: localizations.badgeMoreIndicators(
-              '${task.overflowSecondaryCount}',
-            ),
+            key: ValueKey<String>('task_more_badges_$taskId'),
+            label: localizations.badgeMoreIndicators('$overflowSecondaryCount'),
             variant: UiPillVariant.meta,
             onPressed: () => _toggleExpand(ref),
           ),
@@ -477,7 +663,7 @@ class _TaskCollapsedMetadataStrip extends ConsumerWidget {
 
   /// Toggles expansion for [entityRef].
   void _toggleExpand(WidgetRef ref) {
-    ref.read(appShellControllerProvider.notifier).toggleExpandEntity(entityRef);
+    ref.read(shellProvider.notifier).toggleExpandEntity(entityRef);
   }
 }
 
@@ -486,14 +672,14 @@ class _TaskCompleteAction extends ConsumerWidget {
   /// Creates a [_TaskCompleteAction].
   const _TaskCompleteAction({required this.task});
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final isBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final actionLabel = task.isCompleted
         ? localizations.actionRestore
@@ -508,14 +694,14 @@ class _TaskCompleteAction extends ConsumerWidget {
     );
   }
 
-  /// Triggers completion or restoration of [task] through [TaskController].
+  /// Triggers completion or restoration of [task] through [BoardActionsNotifier].
   void _completeOrRestore(BuildContext context, WidgetRef ref) {
     final locale = Localizations.localeOf(context);
     unawaited(
       _reportTaskActionFailure(
         ref,
         ref
-            .read(taskControllerProvider.notifier)
+            .read(boardActionsProvider.notifier)
             .completeOrRestoreTask(task.id, locale: locale),
       ),
     );
@@ -741,7 +927,7 @@ class _TaskDowngradeButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final isBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
 
     return UiButton(
@@ -754,14 +940,14 @@ class _TaskDowngradeButton extends ConsumerWidget {
     );
   }
 
-  /// Triggers downgrade of active task [taskId] through [TaskController].
+  /// Triggers downgrade of active task [taskId] through [BoardActionsNotifier].
   void _downgrade(BuildContext context, WidgetRef ref) {
     final locale = Localizations.localeOf(context);
     unawaited(
       _reportTaskActionFailure(
         ref,
         ref
-            .read(taskControllerProvider.notifier)
+            .read(boardActionsProvider.notifier)
             .downgradeTask(taskId, locale: locale),
       ),
     );
@@ -780,7 +966,7 @@ class _TaskEditTitleButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final isBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
 
     return UiButton(
@@ -796,7 +982,7 @@ class _TaskEditTitleButton extends ConsumerWidget {
   /// Opens the inline title editor for [taskId].
   void _openTitleEdit(WidgetRef ref) {
     ref
-        .read(appShellControllerProvider.notifier)
+        .read(shellProvider.notifier)
         .openInlineEdit(InlineEditTarget.task(taskId, TaskSectionKind.title));
   }
 }
@@ -806,19 +992,17 @@ class _TaskExpandedMetaBar extends ConsumerWidget {
   /// Creates a [_TaskExpandedMetaBar].
   const _TaskExpandedMetaBar({required this.task});
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final entityRef = EntityRef(kind: EntityKind.task, id: task.id);
     final isConfirmingDelete = ref.watch(
-      appShellControllerProvider.select(
-        (shell) => shell.activeDeleteConfirm == entityRef,
-      ),
+      shellProvider.select((shell) => shell.activeDeleteConfirm == entityRef),
     );
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
+    final shellNotifier = ref.read(shellProvider.notifier);
 
     return EntityCardMetaBar(
       entityId: task.id,
@@ -842,14 +1026,14 @@ class _TaskExpandedMetaBar extends ConsumerWidget {
     unawaited(_performCopyTaskId(ref, task.id, copiedMessage));
   }
 
-  /// Deletes [task] via [TaskController.deleteTask].
+  /// Deletes [task] via [BoardActionsNotifier.deleteTask].
   void _deleteTask(BuildContext context, WidgetRef ref) {
     final locale = Localizations.localeOf(context);
     unawaited(
       _reportTaskActionFailure(
         ref,
         ref
-            .read(taskControllerProvider.notifier)
+            .read(boardActionsProvider.notifier)
             .deleteTask(task.id, locale: locale),
       ),
     );
@@ -860,34 +1044,23 @@ class _TaskExpandedMetaBar extends ConsumerWidget {
 class _TaskExpandedPanel extends ConsumerWidget {
   /// Creates a [_TaskExpandedPanel].
   const _TaskExpandedPanel({
-    required this.task,
-    required this.allLabels,
-    required this.allLocations,
-    required this.hasBothScopedAndGlobalLabels,
-    required this.currentLocalDateTimeHint,
+    required this.contextData,
+    required this.assignedLabels,
   });
 
-  /// All workspace labels.
-  final List<LabelPickerOptionViewModel> allLabels;
+  /// Resolved labels assigned to the task.
+  final List<TdfLabel> assignedLabels;
 
-  /// All workspace locations.
-  final List<LocationOptionViewModel> allLocations;
-
-  /// Current local wall-clock timestamp seeding pickers.
-  final String currentLocalDateTimeHint;
-
-  /// Whether both scoped and global labels exist.
-  final bool hasBothScopedAndGlobalLabels;
-
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain context bundle for the expanded task.
+  final _TaskCardContext contextData;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final task = contextData.task;
     final entityRef = EntityRef(kind: EntityKind.task, id: task.id);
     final isCompact = UiBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
     final editState = ref.watch(
-      appShellControllerProvider.select(
+      shellProvider.select(
         (shell) => (
           sectionKey: shell.activeInlineEdit?.entity == entityRef
               ? shell.activeInlineEdit?.sectionKey
@@ -897,7 +1070,7 @@ class _TaskExpandedPanel extends ConsumerWidget {
       ),
     );
     final isBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final activeSection = _parseTaskSectionKind(editState.sectionKey);
     final isInlineLabelPickerOpen =
@@ -907,11 +1080,8 @@ class _TaskExpandedPanel extends ConsumerWidget {
         editState.labelPickerOpen;
 
     return _TaskExpandedPanelBody(
-      task: task,
-      allLabels: allLabels,
-      allLocations: allLocations,
-      hasBothScopedAndGlobalLabels: hasBothScopedAndGlobalLabels,
-      currentLocalDateTimeHint: currentLocalDateTimeHint,
+      contextData: contextData,
+      assignedLabels: assignedLabels,
       activeSection: activeSection,
       isInlineLabelPickerOpen: isInlineLabelPickerOpen,
       isCompact: isCompact,
@@ -924,11 +1094,8 @@ class _TaskExpandedPanel extends ConsumerWidget {
 class _TaskExpandedPanelBody extends ConsumerWidget {
   /// Creates a [_TaskExpandedPanelBody].
   const _TaskExpandedPanelBody({
-    required this.task,
-    required this.allLabels,
-    required this.allLocations,
-    required this.hasBothScopedAndGlobalLabels,
-    required this.currentLocalDateTimeHint,
+    required this.contextData,
+    required this.assignedLabels,
     required this.activeSection,
     required this.isInlineLabelPickerOpen,
     required this.isCompact,
@@ -938,17 +1105,11 @@ class _TaskExpandedPanelBody extends ConsumerWidget {
   /// Currently open inline section editor on this task, if any.
   final TaskSectionKind? activeSection;
 
-  /// All workspace labels.
-  final List<LabelPickerOptionViewModel> allLabels;
+  /// Resolved labels assigned to the task.
+  final List<TdfLabel> assignedLabels;
 
-  /// All workspace locations.
-  final List<LocationOptionViewModel> allLocations;
-
-  /// Current local wall-clock timestamp seeding pickers.
-  final String currentLocalDateTimeHint;
-
-  /// Whether both scoped and global labels exist.
-  final bool hasBothScopedAndGlobalLabels;
+  /// Domain context bundle for the expanded task.
+  final _TaskCardContext contextData;
 
   /// Whether a task mutation is in flight.
   final bool isBusy;
@@ -959,12 +1120,11 @@ class _TaskExpandedPanelBody extends ConsumerWidget {
   /// Whether the desktop inline label picker is currently expanded.
   final bool isInlineLabelPickerOpen;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tokens = UiThemeTokens.of(context);
+    final task = contextData.task;
+    final flags = _resolvePanelFlags();
 
     return Column(
       key: ValueKey<String>('task_expanded_panel_${task.id}'),
@@ -974,11 +1134,9 @@ class _TaskExpandedPanelBody extends ConsumerWidget {
         _TaskExpandedMetaBar(task: task),
         SizedBox(height: tokens.spacing.space2),
         _TaskExpandedSectionsList(
-          task: task,
-          allLabels: allLabels,
-          allLocations: allLocations,
-          hasBothScopedAndGlobalLabels: hasBothScopedAndGlobalLabels,
-          currentLocalDateTimeHint: currentLocalDateTimeHint,
+          contextData: contextData,
+          assignedLabels: assignedLabels,
+          flags: flags,
           activeSection: activeSection,
           isInlineLabelPickerOpen: isInlineLabelPickerOpen,
           isBusy: isBusy,
@@ -988,12 +1146,14 @@ class _TaskExpandedPanelBody extends ConsumerWidget {
           SizedBox(height: tokens.spacing.space2),
           _TaskAddFieldsBar(
             task: task,
+            assignedLabels: assignedLabels,
+            flags: flags,
             activeSection: activeSection,
             isInlineLabelPickerOpen: isInlineLabelPickerOpen,
             isBusy: isBusy,
             onAddSection: (section) => _handleAddSection(context, ref, section),
-            onSetPlacement: (placement) =>
-                _setPlacement(context, ref, placement),
+            onSetPlacement: (nextPlacement) =>
+                _setPlacement(context, ref, nextPlacement),
           ),
         ],
       ],
@@ -1011,15 +1171,16 @@ class _TaskExpandedPanelBody extends ConsumerWidget {
       return;
     }
     ref
-        .read(appShellControllerProvider.notifier)
-        .openInlineEdit(InlineEditTarget.task(task.id, section));
+        .read(shellProvider.notifier)
+        .openInlineEdit(InlineEditTarget.task(contextData.task.id, section));
   }
 
   /// Opens the desktop inline label picker or compact mobile bottom sheet.
   void _openLabelPicker(BuildContext context, WidgetRef ref) {
+    final task = contextData.task;
     if (!isCompact) {
       ref
-          .read(appShellControllerProvider.notifier)
+          .read(shellProvider.notifier)
           .openInlineEdit(
             InlineEditTarget.task(task.id, TaskSectionKind.labels),
           );
@@ -1031,24 +1192,20 @@ class _TaskExpandedPanelBody extends ConsumerWidget {
       showCompactLabelPickerSheet(
         context,
         title: localizations.taskLabelsSectionTitle,
-        allLabels: allLabels,
-        hasBothScopedAndGlobal: hasBothScopedAndGlobalLabels,
-        selectedIds: <String>{for (final chip in task.assignedLabels) chip.id},
+        taskId: task.id,
         onToggleLabel: (labelId) => unawaited(
           _reportTaskActionFailure(
             ref,
             ref
-                .read(taskControllerProvider.notifier)
+                .read(boardActionsProvider.notifier)
                 .toggleLabel(task.id, labelId, locale: locale),
           ),
         ),
-        onCreateAndAssign: (rawName) => unawaited(
-          _reportTaskActionFailure(
-            ref,
-            ref
-                .read(taskControllerProvider.notifier)
-                .createAndAssignLabel(task.id, rawName, locale: locale),
-          ),
+        onCreateLabel: (rawName) => _createAndAssignLabelForSheet(
+          ref,
+          task.id,
+          rawName,
+          locale: locale,
         ),
         onOpenLabelInfo: (labelId) => _openEntityInManager(
           ref,
@@ -1058,19 +1215,41 @@ class _TaskExpandedPanelBody extends ConsumerWidget {
     );
   }
 
-  /// Updates live task placement via [TaskController.setPlacement].
+  /// Computes expanded-panel suspension, condition, and placement flags lazily.
+  _ExpandedPanelFlags _resolvePanelFlags() {
+    final task = contextData.task;
+    final inheritedConditions = _collectInheritedConditions(
+      task,
+      contextData.labelsById,
+    );
+    return (
+      isSuspended:
+          task.isSuspendedForever ||
+          task.hasActiveSuspendedAt(contextData.nowUtc),
+      inheritedConditions: inheritedConditions,
+      hasConditions:
+          task.conditions.isNotEmpty || inheritedConditions.isNotEmpty,
+      placement: task.isPriority
+          ? QuickAddMode.priority
+          : (contextData.isSomeday
+                ? QuickAddMode.someday
+                : QuickAddMode.standard),
+    );
+  }
+
+  /// Updates live task placement via [BoardActionsNotifier.setPlacement].
   void _setPlacement(
     BuildContext context,
     WidgetRef ref,
-    TaskPlacementOption placement,
+    QuickAddMode placement,
   ) {
     final locale = Localizations.localeOf(context);
     unawaited(
       _reportTaskActionFailure(
         ref,
         ref
-            .read(taskControllerProvider.notifier)
-            .setPlacement(task.id, placement, locale: locale),
+            .read(boardActionsProvider.notifier)
+            .setPlacement(contextData.task.id, placement, locale: locale),
       ),
     );
   }
@@ -1080,11 +1259,9 @@ class _TaskExpandedPanelBody extends ConsumerWidget {
 class _TaskExpandedSectionsList extends ConsumerWidget {
   /// Creates a [_TaskExpandedSectionsList].
   const _TaskExpandedSectionsList({
-    required this.task,
-    required this.allLabels,
-    required this.allLocations,
-    required this.hasBothScopedAndGlobalLabels,
-    required this.currentLocalDateTimeHint,
+    required this.contextData,
+    required this.assignedLabels,
+    required this.flags,
     required this.activeSection,
     required this.isInlineLabelPickerOpen,
     required this.isBusy,
@@ -1094,17 +1271,14 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
   /// Currently active inline section editor on this task, if any.
   final TaskSectionKind? activeSection;
 
-  /// Workspace labels for the searchable label picker.
-  final List<LabelPickerOptionViewModel> allLabels;
+  /// Resolved labels assigned to the task.
+  final List<TdfLabel> assignedLabels;
 
-  /// Workspace locations for the activation conditions section.
-  final List<LocationOptionViewModel> allLocations;
+  /// Domain context bundle for the expanded task.
+  final _TaskCardContext contextData;
 
-  /// Current local wall-clock timestamp hint.
-  final String currentLocalDateTimeHint;
-
-  /// Whether both scoped and global labels exist.
-  final bool hasBothScopedAndGlobalLabels;
+  /// Lazily computed suspension, conditions, and placement flags.
+  final _ExpandedPanelFlags flags;
 
   /// Whether a task mutation is in flight.
   final bool isBusy;
@@ -1114,9 +1288,6 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
 
   /// Callback opening the inline label picker or compact bottom sheet.
   final VoidCallback onOpenLabelPicker;
-
-  /// Projected task card view model.
-  final TaskCardViewModel task;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1136,11 +1307,76 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     );
   }
 
+  /// Lazily builds the [EntityConditionsSection] only when conditions exist or are being edited.
+  Widget _buildConditionsSection(
+    BuildContext context,
+    WidgetRef ref, {
+    required Locale locale,
+  }) {
+    final localizations = AppLocalizations.of(context);
+    final task = contextData.task;
+    final shellNotifier = ref.read(shellProvider.notifier);
+    final boardActions = ref.read(boardActionsProvider.notifier);
+    final conditionsSatisfied =
+        !flags.hasConditions ||
+        TaskBoardEvaluator.areTaskConditionsSatisfied(
+          task,
+          contextData.labelsById,
+          contextData.locationsById,
+          contextData.localNow,
+          contextData.activeLabelId,
+          contextData.activeFix?.latitude,
+          contextData.activeFix?.longitude,
+        );
+    final conditionsSummary = TaskScheduleHelper.buildConditionSummaryChips(
+      ownRules: task.conditions,
+      inheritedRules: flags.inheritedConditions,
+      locationsById: contextData.locationsById,
+      localizations: localizations,
+    );
+    final conditionDraft = TaskScheduleHelper.buildConditionDraft(
+      task.conditions,
+      isTask: true,
+    );
+
+    return EntityConditionsSection(
+      isTask: true,
+      hasConditions: flags.hasConditions,
+      conditionsSummary: conditionsSummary,
+      conditionDraft: conditionDraft,
+      allLocations: contextData.allLocations,
+      isEditing:
+          activeSection == TaskSectionKind.conditions && !task.isCompleted,
+      canEdit: !task.isCompleted,
+      isSuspended: flags.isSuspended,
+      conditionsStatusLabel: conditionsSatisfied
+          ? localizations.conditionSatisfiedStatus
+          : localizations.conditionBlockedStatus,
+      isBusy: isBusy,
+      onOpenLocation: (locationId) => _openEntityInManager(
+        ref,
+        EntityRef(kind: EntityKind.location, id: locationId),
+      ),
+      onStartEdit: () => shellNotifier.openInlineEdit(
+        InlineEditTarget.task(task.id, TaskSectionKind.conditions),
+      ),
+      onCancelEdit: shellNotifier.closeInlineEdit,
+      onSave: (draft) =>
+          boardActions.saveConditions(task.id, draft, locale: locale),
+      onClear: () => boardActions.clearConditions(task.id, locale: locale),
+    );
+  }
+
   /// Collects only populated or actively edited sections in canonical `U-CARD-002` order.
   List<Widget> _collectVisibleSections(BuildContext context, WidgetRef ref) {
     final locale = Localizations.localeOf(context);
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
-    final taskNotifier = ref.read(taskControllerProvider.notifier);
+    final task = contextData.task;
+    final shellNotifier = ref.read(shellProvider.notifier);
+    final boardActions = ref.read(boardActionsProvider.notifier);
+    final currentLocalDateTimeHint = TaskScheduleHelper.formatLocalTimestamp(
+      contextData.nowUtc,
+      contextData.configuration,
+    );
     final sections = <Widget>[];
     final hasNote =
         task.note != null && (task.note?.trim().isNotEmpty ?? false);
@@ -1157,8 +1393,8 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
           ),
           onCancelEdit: shellNotifier.closeInlineEdit,
           onSave: (rawNote) =>
-              taskNotifier.saveNote(task.id, rawNote, locale: locale),
-          onClear: () => taskNotifier.clearNote(task.id, locale: locale),
+              boardActions.saveNote(task.id, rawNote, locale: locale),
+          onClear: () => boardActions.clearNote(task.id, locale: locale),
           onNoteCopied: () =>
               UiTelemetry.logTaskNoteCopied((task.note ?? '').length),
         ),
@@ -1178,10 +1414,8 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
             InlineEditTarget.task(task.id, TaskSectionKind.links),
           ),
           onCancelEdit: shellNotifier.closeInlineEdit,
-          onSave: (links) => taskNotifier.saveLinks(task.id, <EntityLinkInput>[
-            for (final link in links)
-              EntityLinkInput(title: link.title, uri: link.uri),
-          ], locale: locale),
+          onSave: (links) =>
+              boardActions.saveLinks(task.id, links, locale: locale),
         ),
       );
     }
@@ -1204,29 +1438,30 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     sections.add(
       TaskHistorySection(
         task: task,
+        configuration: contextData.configuration,
         currentLocalDateTimeHint: currentLocalDateTimeHint,
       ),
     );
 
-    if (task.assignedLabels.isNotEmpty || isInlineLabelPickerOpen) {
+    if (assignedLabels.isNotEmpty || isInlineLabelPickerOpen) {
       sections.add(
         _TaskLabelsSection(
           task: task,
-          allLabels: allLabels,
-          hasBothScopedAndGlobal: hasBothScopedAndGlobalLabels,
+          assignedLabels: assignedLabels,
+          allLabels: contextData.allLabels,
+          openLabelCounts: contextData.openLabelCounts,
           isInlinePickerOpen: isInlineLabelPickerOpen,
           isBusy: isBusy,
-          onQueryChanged: shellNotifier.setLabelPickerQuery,
           onToggleLabel: (labelId) => unawaited(
             _reportTaskActionFailure(
               ref,
-              taskNotifier.toggleLabel(task.id, labelId, locale: locale),
+              boardActions.toggleLabel(task.id, labelId, locale: locale),
             ),
           ),
           onCreateAndAssign: (rawName) => unawaited(
             _reportTaskActionFailure(
               ref,
-              taskNotifier.createAndAssignLabel(
+              boardActions.createAndAssignLabel(
                 task.id,
                 rawName,
                 locale: locale,
@@ -1243,11 +1478,14 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
       );
     }
 
-    if (task.dueFormatted != null || activeSection == TaskSectionKind.due) {
+    if (task.dueAt != null || activeSection == TaskSectionKind.due) {
       sections.add(
         TaskDueSection(
           task: task,
+          isSomeday: contextData.isSomeday,
           isEditing: activeSection == TaskSectionKind.due && !task.isCompleted,
+          configuration: contextData.configuration,
+          nowUtc: contextData.nowUtc,
           currentLocalDateTimeHint: currentLocalDateTimeHint,
           onStartEdit: () => shellNotifier.openInlineEdit(
             InlineEditTarget.task(task.id, TaskSectionKind.due),
@@ -1257,23 +1495,23 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
       );
     }
 
-    if (!task.isCompleted && (task.isPriority || task.isSomeday)) {
+    if (!task.isCompleted && (task.isPriority || contextData.isSomeday)) {
       sections.add(
         _TaskPlacementSection(
           taskId: task.id,
-          placement: task.placement,
+          placement: flags.placement,
           isBusy: isBusy,
           onChanged: (nextPlacement) => unawaited(
             _reportTaskActionFailure(
               ref,
-              taskNotifier.setPlacement(task.id, nextPlacement, locale: locale),
+              boardActions.setPlacement(task.id, nextPlacement, locale: locale),
             ),
           ),
         ),
       );
     }
 
-    if (task.repeatSummary != null || activeSection == TaskSectionKind.repeat) {
+    if (task.repeatRule != null || activeSection == TaskSectionKind.repeat) {
       sections.add(
         TaskRepeatSection(
           task: task,
@@ -1287,12 +1525,14 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
       );
     }
 
-    if (task.isSuspended || activeSection == TaskSectionKind.suspended) {
+    if (flags.isSuspended || activeSection == TaskSectionKind.suspended) {
       sections.add(
         TaskSuspendedSection(
           task: task,
           isEditing:
               activeSection == TaskSectionKind.suspended && !task.isCompleted,
+          configuration: contextData.configuration,
+          nowUtc: contextData.nowUtc,
           currentLocalDateTimeHint: currentLocalDateTimeHint,
           onStartEdit: () => shellNotifier.openInlineEdit(
             InlineEditTarget.task(task.id, TaskSectionKind.suspended),
@@ -1302,11 +1542,12 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
       );
     }
 
-    if (task.prerequisites.isNotEmpty ||
+    if (task.dependencies.isNotEmpty ||
         activeSection == TaskSectionKind.prerequisites) {
       sections.add(
         TaskPrerequisitesSection(
           task: task,
+          tasksById: contextData.tasksById,
           isEditing:
               activeSection == TaskSectionKind.prerequisites &&
               !task.isCompleted,
@@ -1318,33 +1559,8 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
       );
     }
 
-    if (task.hasConditions || activeSection == TaskSectionKind.conditions) {
-      sections.add(
-        EntityConditionsSection(
-          isTask: true,
-          hasConditions: task.hasConditions,
-          conditionsSummary: task.conditionsSummary,
-          conditionDraft: task.conditionDraft,
-          allLocations: allLocations,
-          isEditing:
-              activeSection == TaskSectionKind.conditions && !task.isCompleted,
-          canEdit: !task.isCompleted,
-          isSuspended: task.isSuspended,
-          conditionsStatusLabel: task.conditionsStatusLabel,
-          isBusy: isBusy,
-          onOpenLocation: (locationId) => _openEntityInManager(
-            ref,
-            EntityRef(kind: EntityKind.location, id: locationId),
-          ),
-          onStartEdit: () => shellNotifier.openInlineEdit(
-            InlineEditTarget.task(task.id, TaskSectionKind.conditions),
-          ),
-          onCancelEdit: shellNotifier.closeInlineEdit,
-          onSave: (draft) =>
-              taskNotifier.saveConditions(task.id, draft, locale: locale),
-          onClear: () => taskNotifier.clearConditions(task.id, locale: locale),
-        ),
-      );
+    if (flags.hasConditions || activeSection == TaskSectionKind.conditions) {
+      sections.add(_buildConditionsSection(context, ref, locale: locale));
     }
 
     return sections;
@@ -1352,13 +1568,13 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
 }
 
 /// Inline desktop label picker inset card rendered when [_TaskLabelsSection] is actively editing.
-class _TaskLabelsPickerCard extends ConsumerWidget {
+class _TaskLabelsPickerCard extends StatelessWidget {
   /// Creates a [_TaskLabelsPickerCard].
   const _TaskLabelsPickerCard({
-    required this.task,
+    required this.taskId,
+    required this.assignedLabels,
     required this.allLabels,
-    required this.hasBothScopedAndGlobal,
-    required this.onQueryChanged,
+    required this.openLabelCounts,
     required this.onToggleLabel,
     required this.onCreateAndAssign,
     required this.onOpenLabelInfo,
@@ -1366,10 +1582,10 @@ class _TaskLabelsPickerCard extends ConsumerWidget {
   });
 
   /// Workspace labels for the searchable picker.
-  final List<LabelPickerOptionViewModel> allLabels;
+  final List<TdfLabel> allLabels;
 
-  /// Whether both scoped and global labels exist.
-  final bool hasBothScopedAndGlobal;
+  /// Resolved labels currently assigned to the task.
+  final List<TdfLabel> assignedLabels;
 
   /// Callback closing the desktop inline label picker.
   final VoidCallback onClosePicker;
@@ -1380,34 +1596,31 @@ class _TaskLabelsPickerCard extends ConsumerWidget {
   /// Callback navigating to a label in Labels manager preserving `returnContext`.
   final ValueChanged<String> onOpenLabelInfo;
 
-  /// Callback synchronizing label picker query with shell state.
-  final ValueChanged<String> onQueryChanged;
-
   /// Callback toggling label assignment on the task.
   final ValueChanged<String> onToggleLabel;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Precomputed map of open task counts keyed by label identifier.
+  final Map<String, int> openLabelCounts;
 
-  /// Identifiers of labels currently assigned to [task].
+  /// Canonical task identifier for deterministic widget keys.
+  final String taskId;
+
+  /// Identifiers of labels currently assigned to the task.
   Set<String> get _selectedIds => <String>{
-    for (final chip in task.assignedLabels) chip.id,
+    for (final label in assignedLabels) label.id,
   };
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final pickerQuery = ref.watch(
-      appShellControllerProvider.select((shell) => shell.labelPickerQuery),
-    );
 
     return UiCard.inset(
-      key: ValueKey<String>('task_labels_picker_${task.id}'),
+      key: ValueKey<String>('task_labels_picker_$taskId'),
       isEditing: true,
       headerIcon: Icons.label_outline_rounded,
       headerTitle: localizations.taskLabelsSectionTitle,
       headerBadge: UiPill(
-        label: '${task.assignedLabels.length}',
+        label: '${assignedLabels.length}',
         variant: UiPillVariant.count,
       ),
       headerTrailing: UiButton(
@@ -1419,10 +1632,9 @@ class _TaskLabelsPickerCard extends ConsumerWidget {
       child: EntitySearchableLabelPicker(
         allLabels: allLabels,
         selectedIds: _selectedIds,
-        hasBothScopedAndGlobal: hasBothScopedAndGlobal,
+        openCountsByLabelId: openLabelCounts,
         autoFocusSearch: true,
-        query: pickerQuery,
-        onQueryChanged: onQueryChanged,
+        useSharedQuery: true,
         onToggleLabel: onToggleLabel,
         onCreateAndAssign: onCreateAndAssign,
         onOpenLabelInfo: onOpenLabelInfo,
@@ -1437,11 +1649,15 @@ class _TaskLabelsReadCard extends StatelessWidget {
   /// Creates a [_TaskLabelsReadCard].
   const _TaskLabelsReadCard({
     required this.task,
+    required this.assignedLabels,
     required this.isBusy,
     required this.onToggleLabel,
     required this.onOpenLabelInfo,
     required this.onOpenPicker,
   });
+
+  /// Resolved labels currently assigned to [task].
+  final List<TdfLabel> assignedLabels;
 
   /// Whether a task mutation is in flight.
   final bool isBusy;
@@ -1455,8 +1671,8 @@ class _TaskLabelsReadCard extends StatelessWidget {
   /// Callback toggling label assignment on the task.
   final ValueChanged<String> onToggleLabel;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
@@ -1467,11 +1683,12 @@ class _TaskLabelsReadCard extends StatelessWidget {
       headerIcon: Icons.label_outline_rounded,
       headerTitle: localizations.taskLabelsSectionTitle,
       headerBadge: UiPill(
-        label: '${task.assignedLabels.length}',
+        label: '${assignedLabels.length}',
         variant: UiPillVariant.count,
       ),
       child: _TaskAssignedLabelsWrap(
         task: task,
+        assignedLabels: assignedLabels,
         isBusy: isBusy,
         onToggleLabel: onToggleLabel,
         onOpenLabelInfo: onOpenLabelInfo,
@@ -1486,11 +1703,11 @@ class _TaskLabelsSection extends StatelessWidget {
   /// Creates a [_TaskLabelsSection].
   const _TaskLabelsSection({
     required this.task,
+    required this.assignedLabels,
     required this.allLabels,
-    required this.hasBothScopedAndGlobal,
+    required this.openLabelCounts,
     required this.isInlinePickerOpen,
     required this.isBusy,
-    required this.onQueryChanged,
     required this.onToggleLabel,
     required this.onCreateAndAssign,
     required this.onOpenLabelInfo,
@@ -1499,10 +1716,10 @@ class _TaskLabelsSection extends StatelessWidget {
   });
 
   /// Workspace labels for the searchable picker.
-  final List<LabelPickerOptionViewModel> allLabels;
+  final List<TdfLabel> allLabels;
 
-  /// Whether both scoped and global labels exist.
-  final bool hasBothScopedAndGlobal;
+  /// Resolved labels currently assigned to [task].
+  final List<TdfLabel> assignedLabels;
 
   /// Whether a task mutation is in flight.
   final bool isBusy;
@@ -1522,23 +1739,23 @@ class _TaskLabelsSection extends StatelessWidget {
   /// Callback opening the label picker (desktop inline or compact sheet).
   final VoidCallback onOpenPicker;
 
-  /// Callback synchronizing label picker query with shell state.
-  final ValueChanged<String> onQueryChanged;
-
   /// Callback toggling label assignment on the task.
   final ValueChanged<String> onToggleLabel;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Precomputed map of open task counts keyed by label identifier.
+  final Map<String, int> openLabelCounts;
+
+  /// Domain task item.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
     if (isInlinePickerOpen && !task.isCompleted) {
       return _TaskLabelsPickerCard(
-        task: task,
+        taskId: task.id,
+        assignedLabels: assignedLabels,
         allLabels: allLabels,
-        hasBothScopedAndGlobal: hasBothScopedAndGlobal,
-        onQueryChanged: onQueryChanged,
+        openLabelCounts: openLabelCounts,
         onToggleLabel: onToggleLabel,
         onCreateAndAssign: onCreateAndAssign,
         onOpenLabelInfo: onOpenLabelInfo,
@@ -1548,6 +1765,7 @@ class _TaskLabelsSection extends StatelessWidget {
 
     return _TaskLabelsReadCard(
       task: task,
+      assignedLabels: assignedLabels,
       isBusy: isBusy,
       onToggleLabel: onToggleLabel,
       onOpenLabelInfo: onOpenLabelInfo,
@@ -1570,10 +1788,10 @@ class _TaskPlacementSection extends StatelessWidget {
   final bool isBusy;
 
   /// Callback committing the new placement immediately.
-  final ValueChanged<TaskPlacementOption> onChanged;
+  final ValueChanged<QuickAddMode> onChanged;
 
-  /// Current task placement option.
-  final TaskPlacementOption placement;
+  /// Current task placement mode.
+  final QuickAddMode placement;
 
   /// Owning task identifier for deterministic keys.
   final String taskId;
@@ -1585,19 +1803,19 @@ class _TaskPlacementSection extends StatelessWidget {
       key: ValueKey<String>('task_placement_section_$taskId'),
       headerIcon: Icons.bolt_outlined,
       headerTitle: localizations.inlinePlacementSectionTitle,
-      child: UiSegmentedControl<TaskPlacementOption>(
+      child: UiSegmentedControl<QuickAddMode>(
         key: ValueKey<String>('task_placement_control_$taskId'),
-        segments: <UiSegment<TaskPlacementOption>>[
-          UiSegment<TaskPlacementOption>(
-            value: TaskPlacementOption.queue,
+        segments: <UiSegment<QuickAddMode>>[
+          UiSegment<QuickAddMode>(
+            value: QuickAddMode.standard,
             label: localizations.placementQueueOption,
           ),
-          UiSegment<TaskPlacementOption>(
-            value: TaskPlacementOption.priority,
+          UiSegment<QuickAddMode>(
+            value: QuickAddMode.priority,
             label: localizations.quickAddPriority,
           ),
-          UiSegment<TaskPlacementOption>(
-            value: TaskPlacementOption.someday,
+          UiSegment<QuickAddMode>(
+            value: QuickAddMode.someday,
             label: localizations.tier5Name,
           ),
         ],
@@ -1610,6 +1828,46 @@ class _TaskPlacementSection extends StatelessWidget {
   }
 }
 
+/// Lazily computed expanded-panel suspension, condition, and placement flags.
+typedef _ExpandedPanelFlags = ({
+  bool isSuspended,
+  List<TaskCondition> inheritedConditions,
+  bool hasConditions,
+  QuickAddMode placement,
+});
+
+/// Collects activation condition rules inherited from labels assigned to [task].
+List<TaskCondition> _collectInheritedConditions(
+  TaskItem task,
+  Map<String, TdfLabel> labelsById,
+) {
+  return <TaskCondition>[
+    for (final labelId in task.labelIds)
+      if (labelsById[labelId] case final label?) ...label.conditions,
+  ];
+}
+
+/// Collects visible unset editable sections for the bottom `+ Add` chips bar on open tasks.
+List<TaskSectionKind> _collectUnsetTaskSections({
+  required TaskItem task,
+  required bool hasAssignedLabels,
+  required bool isSuspended,
+  required bool hasConditions,
+}) {
+  final taskNote = task.note;
+  return <TaskSectionKind>[
+    if (taskNote == null || taskNote.trim().isEmpty) TaskSectionKind.note,
+    if (task.links.isEmpty) TaskSectionKind.links,
+    if (task.subtasks.isEmpty) TaskSectionKind.subtasks,
+    if (!hasAssignedLabels) TaskSectionKind.labels,
+    if (task.dueAt == null) TaskSectionKind.due,
+    if (task.repeatRule == null) TaskSectionKind.repeat,
+    if (!isSuspended) TaskSectionKind.suspended,
+    if (task.dependencies.isEmpty) TaskSectionKind.prerequisites,
+    if (!hasConditions) TaskSectionKind.conditions,
+  ];
+}
+
 /// Returns `true` when [section] renders after Due in the canonical `+ Add` chips order.
 bool _comesAfterDue(TaskSectionKind section) {
   return section == TaskSectionKind.repeat ||
@@ -1618,18 +1876,37 @@ bool _comesAfterDue(TaskSectionKind section) {
       section == TaskSectionKind.conditions;
 }
 
-/// Returns `true` when [task] has at least one collapsed label chip or badge to render.
-bool _hasCollapsedMetadata(TaskCardViewModel task) {
-  return task.assignedLabels.isNotEmpty ||
-      task.primaryBadges.isNotEmpty ||
-      task.visibleSecondaryBadges.isNotEmpty ||
-      task.overflowSecondaryCount > 0;
+/// Creates and assigns a label from the compact label sheet, emitting a danger toast on failure.
+Future<ActionResult> _createAndAssignLabelForSheet(
+  WidgetRef ref,
+  String taskId,
+  String rawName, {
+  required Locale locale,
+}) async {
+  final result = await ref
+      .read(boardActionsProvider.notifier)
+      .createAndAssignLabel(taskId, rawName, locale: locale);
+  if (!ref.context.mounted) {
+    return result;
+  }
+  switch (result) {
+    case ActionSucceeded():
+      break;
+    case ActionValidationFailed(:final message):
+    case ActionPersistFailed(:final message):
+      if (message.isNotEmpty) {
+        ref
+            .read(floatingNoticeProvider.notifier)
+            .showNotice(message, tone: FloatingNoticeTone.danger);
+      }
+  }
+  return result;
 }
 
 /// Navigates to [entity] in its manager view while preserving Tasks/Search `returnContext`.
 void _openEntityInManager(WidgetRef ref, EntityRef entity) {
   ref
-      .read(appShellControllerProvider.notifier)
+      .read(shellProvider.notifier)
       .openEntityInManager(entity, preserveReturnContext: true);
 }
 
@@ -1657,7 +1934,7 @@ Future<void> _performCopyTaskId(
   if (!ref.context.mounted) {
     return;
   }
-  ref.read(floatingNoticeControllerProvider.notifier).showNotice(copiedMessage);
+  ref.read(floatingNoticeProvider.notifier).showNotice(copiedMessage);
 }
 
 /// Awaits [actionFuture] and presents a floating danger toast if validation or persistence failed.
@@ -1676,15 +1953,23 @@ Future<void> _reportTaskActionFailure(
     case ActionPersistFailed(:final message):
       if (message.isNotEmpty) {
         ref
-            .read(floatingNoticeControllerProvider.notifier)
-            .showNotice(message, tone: NoticeTone.danger);
+            .read(floatingNoticeProvider.notifier)
+            .showNotice(message, tone: FloatingNoticeTone.danger);
       }
   }
 }
 
-/// Resolves an optional ARGB label color value, falling back to `tokens.colors.accent`.
-Color _resolveLabelColor(int? colorValue, UiThemeTokens tokens) {
-  return switch (colorValue) {
+/// Resolves assigned [TdfLabel] entries on [task] in assignment order.
+List<TdfLabel> _resolveAssignedLabels(
+  TaskItem task,
+  Map<String, TdfLabel> labelsById,
+) {
+  return <TdfLabel>[for (final labelId in task.labelIds) ?labelsById[labelId]];
+}
+
+/// Resolves an optional `#RRGGBB` label color string, falling back to `tokens.colors.accent`.
+Color _resolveLabelColor(String? colorHex, UiThemeTokens tokens) {
+  return switch (TaskScheduleHelper.parseLabelColorValue(colorHex)) {
     final value? => Color(value),
     null => tokens.colors.accent,
   };

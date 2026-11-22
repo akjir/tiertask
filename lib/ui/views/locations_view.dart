@@ -17,18 +17,28 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/entity_controller.dart';
-import '../../presentation/entity_view_models.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/shell_models.dart';
+import '../../models/location_state.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_location.dart';
+import '../../providers/entity_actions_provider.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/location_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_providers.dart';
+import '../components/ui_quick_composer.dart';
+import '../layout/ui_page_header.dart';
+import '../primitives/ui_banner.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
 import 'location_card.dart';
 
-/// Maximum Unicode scalar length for single-line location names.
-const int _maxLocationNameLength = 500;
+/// Estimated vertical extent per collapsed location card used to pre-scroll offscreen reveals.
+const double _estimatedCardExtent = 84.0;
+
+/// Duration for smooth scroll-to-card reveals (`U-CARD-001`).
+const Duration _revealScrollDuration = Duration(milliseconds: 220);
 
 /// Expandable Locations manager view with inline Quick-Create, uncommitted Draft Card,
 /// single-expand location cards, coordinates/geocoding editing, and context-preserving Back navigation (`U-CARD-001`..`006`, `U-UX-002`).
@@ -49,17 +59,17 @@ class _LocationsCardListSliver extends StatelessWidget {
   const _LocationsCardListSliver({
     required this.locations,
     required this.contentPadding,
-    required this.isBusy,
+    required this.cardKeyFor,
   });
+
+  /// Lookup returning the reveal [GlobalKey] for a location card.
+  final GlobalKey Function(String locationId) cardKeyFor;
 
   /// Responsive viewport content padding applied around the card list.
   final EdgeInsets contentPadding;
 
-  /// Whether an entity mutation is currently running.
-  final bool isBusy;
-
-  /// Alphabetically sorted location card view models.
-  final List<LocationCardViewModel> locations;
+  /// Alphabetically sorted domain locations.
+  final List<TdfLocation> locations;
 
   @override
   Widget build(BuildContext context) {
@@ -84,9 +94,10 @@ class _LocationsCardListSliver extends StatelessWidget {
           padding: EdgeInsets.only(
             bottom: index + 1 < locations.length ? cardGap : 0.0,
           ),
-          child: _LocationsCardSliverItem(
+          child: LocationCard(
+            key: ValueKey<String>('location_card_${locations[index].id}'),
+            cardScrollKey: cardKeyFor(locations[index].id),
             location: locations[index],
-            isBusy: isBusy,
           ),
         ),
       ),
@@ -94,67 +105,12 @@ class _LocationsCardListSliver extends StatelessWidget {
   }
 }
 
-/// Per-card selective shell-state subscriber wiring one [LocationCardViewModel] to [LocationCard] (`P-SELECT-REBUILDS`).
-class _LocationsCardSliverItem extends ConsumerWidget {
-  /// Creates a [_LocationsCardSliverItem].
-  const _LocationsCardSliverItem({
-    required this.location,
-    required this.isBusy,
-  });
-
-  /// Whether an entity mutation is currently running.
-  final bool isBusy;
-
-  /// Projected location view model for this card.
-  final LocationCardViewModel location;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final locationRef = EntityRef(kind: EntityKind.location, id: location.id);
-    final isExpanded = ref.watch(
-      appShellControllerProvider.select(
-        (shell) => shell.expandedEntity == locationRef,
-      ),
-    );
-    final activeInlineSection = ref.watch(
-      appShellControllerProvider.select(
-        (shell) => shell.activeInlineEdit?.entity == locationRef
-            ? shell.activeInlineEdit?.sectionKey
-            : null,
-      ),
-    );
-    final isConfirmingDelete = ref.watch(
-      appShellControllerProvider.select(
-        (shell) => shell.activeDeleteConfirm == locationRef,
-      ),
-    );
-    final shouldReveal = ref.watch(
-      appShellControllerProvider.select(
-        (shell) => shell.revealEntityRequest == locationRef,
-      ),
-    );
-
-    return LocationCard(
-      key: ValueKey<String>('location_card_${location.id}'),
-      location: location,
-      isExpanded: isExpanded,
-      activeInlineSection: activeInlineSection,
-      isConfirmingDelete: isConfirmingDelete,
-      shouldReveal: shouldReveal,
-      isBusy: isBusy,
-    );
-  }
-}
-
 /// Renders either the uncommitted Location Draft Card or the inline Quick-Create composer (`U-CARD-006`).
-class _LocationsComposerSlot extends StatelessWidget {
+class _LocationsComposerSlot extends ConsumerWidget {
   /// Creates a [_LocationsComposerSlot].
   const _LocationsComposerSlot({
     required this.isDraftOpen,
     required this.draftSeedTitle,
-    required this.hasActiveGpsFix,
-    required this.activeGpsLatitudeText,
-    required this.activeGpsLongitudeText,
     required this.quickCreateController,
     required this.quickCreateFocusNode,
     required this.isBusy,
@@ -162,17 +118,8 @@ class _LocationsComposerSlot extends StatelessWidget {
     required this.onSubmitQuickCreate,
   });
 
-  /// Active foreground GPS latitude formatted to 6 decimal places, if available.
-  final String? activeGpsLatitudeText;
-
-  /// Active foreground GPS longitude formatted to 6 decimal places, if available.
-  final String? activeGpsLongitudeText;
-
   /// Initial location name transferred from Quick-Create.
   final String draftSeedTitle;
-
-  /// Whether a valid foreground GPS fix is currently available.
-  final bool hasActiveGpsFix;
 
   /// Whether an entity mutation is currently running.
   final bool isBusy;
@@ -193,13 +140,18 @@ class _LocationsComposerSlot extends StatelessWidget {
   final FocusNode quickCreateFocusNode;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (isDraftOpen) {
+      final hasActiveGpsFix = ref.watch(
+        locationStateProvider.select(
+          (state) =>
+              state.status == LocationStatus.found &&
+              (state.fix?.hasCoordinates ?? false),
+        ),
+      );
       return LocationDraftCard(
         seedTitle: draftSeedTitle,
         hasActiveGpsFix: hasActiveGpsFix,
-        activeGpsLatitudeText: activeGpsLatitudeText,
-        activeGpsLongitudeText: activeGpsLongitudeText,
         isBusy: isBusy,
       );
     }
@@ -209,7 +161,7 @@ class _LocationsComposerSlot extends StatelessWidget {
       controller: quickCreateController,
       focusNode: quickCreateFocusNode,
       isCollapsibleOnCompact: false,
-      maxLength: _maxLocationNameLength,
+      maxLength: maxTdfTextLength,
       placeholder: localizations.quickCreateLocationHint,
       submitLabel: localizations.actionAdd,
       expandDraftLabel: localizations.actionOpenAsDraft,
@@ -228,9 +180,6 @@ class _LocationsHeaderColumn extends StatelessWidget {
     required this.backLabel,
     required this.isDraftOpen,
     required this.draftSeedTitle,
-    required this.hasActiveGpsFix,
-    required this.activeGpsLatitudeText,
-    required this.activeGpsLongitudeText,
     required this.quickCreateController,
     required this.quickCreateFocusNode,
     required this.isBusy,
@@ -240,12 +189,6 @@ class _LocationsHeaderColumn extends StatelessWidget {
     required this.onSubmitQuickCreate,
   });
 
-  /// Active foreground GPS latitude formatted to 6 decimal places, if available.
-  final String? activeGpsLatitudeText;
-
-  /// Active foreground GPS longitude formatted to 6 decimal places, if available.
-  final String? activeGpsLongitudeText;
-
   /// Optional context-preserving Back button label (`U-UX-002`).
   final String? backLabel;
 
@@ -254,9 +197,6 @@ class _LocationsHeaderColumn extends StatelessWidget {
 
   /// Vertical section spacing between header, composer, and list.
   final double gap;
-
-  /// Whether a valid foreground GPS fix is currently available.
-  final bool hasActiveGpsFix;
 
   /// Whether an entity mutation is currently running.
   final bool isBusy;
@@ -300,9 +240,6 @@ class _LocationsHeaderColumn extends StatelessWidget {
         _LocationsComposerSlot(
           isDraftOpen: isDraftOpen,
           draftSeedTitle: draftSeedTitle,
-          hasActiveGpsFix: hasActiveGpsFix,
-          activeGpsLatitudeText: activeGpsLatitudeText,
-          activeGpsLongitudeText: activeGpsLongitudeText,
           quickCreateController: quickCreateController,
           quickCreateFocusNode: quickCreateFocusNode,
           isBusy: isBusy,
@@ -321,21 +258,20 @@ class _LocationsHeaderColumn extends StatelessWidget {
   }
 }
 
-/// Selective shell-state subscriber wiring header and draft state into [_LocationsHeaderColumn].
+/// Selective shell-state subscriber wiring header, busy flag, and draft state into [_LocationsHeaderColumn].
 class _LocationsHeaderContent extends ConsumerWidget {
   /// Creates a [_LocationsHeaderContent].
   const _LocationsHeaderContent({
-    required this.viewModel,
+    required this.locationsCount,
     required this.quickCreateController,
     required this.quickCreateFocusNode,
-    required this.isBusy,
     required this.onBack,
     required this.onExpandDraft,
     required this.onSubmitQuickCreate,
   });
 
-  /// Whether an entity mutation is currently running.
-  final bool isBusy;
+  /// Total number of persisted locations.
+  final int locationsCount;
 
   /// Callback restoring [ReturnContext] back to Tasks or Global Search.
   final VoidCallback onBack;
@@ -352,33 +288,30 @@ class _LocationsHeaderContent extends ConsumerWidget {
   /// Focus node for the Quick-Create composer.
   final FocusNode quickCreateFocusNode;
 
-  /// Projected Locations manager view model.
-  final LocationsManagerViewModel viewModel;
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
     final isDraftOpen = ref.watch(
-      appShellControllerProvider.select(
+      shellProvider.select(
         (shell) => shell.activeDraft == EntityDraftKind.location,
       ),
     );
     final returnContext = ref.watch(
-      appShellControllerProvider.select((shell) => shell.returnContext),
+      shellProvider.select((shell) => shell.returnContext),
     );
     final draftSeedTitle = ref.watch(
-      appShellControllerProvider.select((shell) => shell.draftSeedTitle),
+      shellProvider.select((shell) => shell.draftSeedTitle),
+    );
+    final isBusy = ref.watch(
+      entityActionsProvider.select((state) => state.isBusy),
     );
 
     return _LocationsHeaderColumn(
-      locationsCount: viewModel.locations.length,
+      locationsCount: locationsCount,
       backLabel: _resolveBackLabel(returnContext, localizations),
       isDraftOpen: isDraftOpen,
       draftSeedTitle: draftSeedTitle,
-      hasActiveGpsFix: viewModel.hasActiveGpsFix,
-      activeGpsLatitudeText: viewModel.activeGpsLatitudeText,
-      activeGpsLongitudeText: viewModel.activeGpsLongitudeText,
       quickCreateController: quickCreateController,
       quickCreateFocusNode: quickCreateFocusNode,
       isBusy: isBusy,
@@ -394,11 +327,10 @@ class _LocationsHeaderContent extends ConsumerWidget {
 class _LocationsHeaderSliver extends StatelessWidget {
   /// Creates a [_LocationsHeaderSliver].
   const _LocationsHeaderSliver({
-    required this.viewModel,
+    required this.locationsCount,
     required this.contentPadding,
     required this.quickCreateController,
     required this.quickCreateFocusNode,
-    required this.isBusy,
     required this.onBack,
     required this.onExpandDraft,
     required this.onSubmitQuickCreate,
@@ -407,8 +339,8 @@ class _LocationsHeaderSliver extends StatelessWidget {
   /// Responsive viewport content padding.
   final EdgeInsets contentPadding;
 
-  /// Whether an entity mutation is currently running.
-  final bool isBusy;
+  /// Total number of persisted locations.
+  final int locationsCount;
 
   /// Callback restoring [ReturnContext] back to Tasks or Global Search.
   final VoidCallback onBack;
@@ -425,9 +357,6 @@ class _LocationsHeaderSliver extends StatelessWidget {
   /// Focus node for the Quick-Create composer.
   final FocusNode quickCreateFocusNode;
 
-  /// Projected Locations manager view model.
-  final LocationsManagerViewModel viewModel;
-
   @override
   Widget build(BuildContext context) {
     return SliverPadding(
@@ -439,10 +368,9 @@ class _LocationsHeaderSliver extends StatelessWidget {
       ),
       sliver: SliverToBoxAdapter(
         child: _LocationsHeaderContent(
-          viewModel: viewModel,
+          locationsCount: locationsCount,
           quickCreateController: quickCreateController,
           quickCreateFocusNode: quickCreateFocusNode,
-          isBusy: isBusy,
           onBack: onBack,
           onExpandDraft: onExpandDraft,
           onSubmitQuickCreate: onSubmitQuickCreate,
@@ -457,15 +385,18 @@ class _LocationsScrollView extends StatelessWidget {
   /// Creates a [_LocationsScrollView].
   const _LocationsScrollView({
     required this.controller,
-    required this.viewModel,
+    required this.locations,
     required this.contentPadding,
     required this.quickCreateController,
     required this.quickCreateFocusNode,
-    required this.isBusy,
+    required this.cardKeyFor,
     required this.onBack,
     required this.onExpandDraft,
     required this.onSubmitQuickCreate,
   });
+
+  /// Lookup returning the reveal [GlobalKey] for a location card.
+  final GlobalKey Function(String locationId) cardKeyFor;
 
   /// Responsive viewport content padding.
   final EdgeInsets contentPadding;
@@ -473,8 +404,8 @@ class _LocationsScrollView extends StatelessWidget {
   /// Active scroll controller for the Locations manager viewport.
   final ScrollController controller;
 
-  /// Whether an entity mutation is currently running.
-  final bool isBusy;
+  /// Alphabetically sorted domain locations.
+  final List<TdfLocation> locations;
 
   /// Callback restoring [ReturnContext] back to Tasks or Global Search.
   final VoidCallback onBack;
@@ -491,40 +422,38 @@ class _LocationsScrollView extends StatelessWidget {
   /// Focus node for the Quick-Create composer.
   final FocusNode quickCreateFocusNode;
 
-  /// Projected Locations manager view model.
-  final LocationsManagerViewModel viewModel;
-
   @override
   Widget build(BuildContext context) {
     return CustomScrollView(
       controller: controller,
       slivers: <Widget>[
         _LocationsHeaderSliver(
-          viewModel: viewModel,
+          locationsCount: locations.length,
           contentPadding: contentPadding,
           quickCreateController: quickCreateController,
           quickCreateFocusNode: quickCreateFocusNode,
-          isBusy: isBusy,
           onBack: onBack,
           onExpandDraft: onExpandDraft,
           onSubmitQuickCreate: onSubmitQuickCreate,
         ),
         _LocationsCardListSliver(
-          locations: viewModel.locations,
+          locations: locations,
           contentPadding: contentPadding,
-          isBusy: isBusy,
+          cardKeyFor: cardKeyFor,
         ),
       ],
     );
   }
 }
 
-/// Manages Quick-Create composer state, fallback scroll ownership, and top-level view coordination for [LocationsView].
+/// Manages Quick-Create composer state, card reveal keys, fallback scroll ownership, and view coordination for [LocationsView].
 class _LocationsViewState extends ConsumerState<LocationsView> {
+  final Map<String, GlobalKey> _ownedCardKeys = <String, GlobalKey>{};
   final TextEditingController _quickCreateController = TextEditingController();
   final FocusNode _quickCreateFocusNode = FocusNode();
 
   ScrollController? _ownedScrollController;
+  String? _pendingRevealLocationId;
 
   /// Active scroll controller, creating a private fallback only when caller omits [LocationsView.scrollController].
   ScrollController get _scrollController {
@@ -532,6 +461,17 @@ class _LocationsViewState extends ConsumerState<LocationsView> {
       return external;
     }
     return _ownedScrollController ??= ScrollController();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      _scheduleReveal(ref.read(shellProvider).revealEntityRequest);
+    });
   }
 
   @override
@@ -555,31 +495,34 @@ class _LocationsViewState extends ConsumerState<LocationsView> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<EntityDraftKind?>(
-      appShellControllerProvider.select((shell) => shell.activeDraft),
-      _handleActiveDraftChanged,
-    );
-
+    _registerShellListeners();
     final tokens = UiThemeTokens.of(context);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
     final contentPadding = tokens.spacing.mainContentPadding(viewport);
-    final viewModel = ref.watch(locationsManagerViewModelProvider);
-    final isBusy = ref.watch(
-      entityControllerProvider.select((state) => state.isBusy),
+    final locations = ref.watch(
+      taskNotifierProvider.select(
+        (boardAsync) =>
+            boardAsync.asData?.value.sortedLocations ?? const <TdfLocation>[],
+      ),
     );
+    _pruneOwnedCardKeys(locations);
 
     return _LocationsScrollView(
       controller: _scrollController,
-      viewModel: viewModel,
+      locations: locations,
       contentPadding: contentPadding,
       quickCreateController: _quickCreateController,
       quickCreateFocusNode: _quickCreateFocusNode,
-      isBusy: isBusy,
+      cardKeyFor: _cardKeyFor,
       onBack: _handleBackNavigation,
       onExpandDraft: _handleOpenDraft,
       onSubmitQuickCreate: _handleQuickCreateSubmit,
     );
   }
+
+  /// Returns a stable [GlobalKey] mapped to [locationId] for smooth reveal scrolling.
+  GlobalKey _cardKeyFor(String locationId) =>
+      _ownedCardKeys.putIfAbsent(locationId, GlobalKey.new);
 
   /// Scrolls back to the top when a location draft card transitions open.
   void _handleActiveDraftChanged(
@@ -594,9 +537,7 @@ class _LocationsViewState extends ConsumerState<LocationsView> {
 
   /// Restores the saved [ReturnContext] back to Tasks or Global Search.
   void _handleBackNavigation() {
-    ref
-        .read(appShellControllerProvider.notifier)
-        .navigateBackFromReturnContext();
+    ref.read(shellProvider.notifier).navigateBackFromReturnContext();
   }
 
   /// Transfers Quick-Create text into an uncommitted Location Draft Card and clears the bar.
@@ -604,7 +545,7 @@ class _LocationsViewState extends ConsumerState<LocationsView> {
     final seedTitle = _quickCreateController.text.trim();
     _quickCreateController.clear();
     ref
-        .read(appShellControllerProvider.notifier)
+        .read(shellProvider.notifier)
         .openDraft(EntityDraftKind.location, seedTitle: seedTitle);
     _scrollToTop();
   }
@@ -612,6 +553,104 @@ class _LocationsViewState extends ConsumerState<LocationsView> {
   /// Quick-creates a location seeded from the active foreground GPS fix.
   void _handleQuickCreateSubmit() {
     unawaited(_submitQuickCreate());
+  }
+
+  /// Executes smooth `Scrollable.ensureVisible` to [locationId], pre-scrolling if offscreen in the lazy list.
+  Future<void> _performReveal(String locationId) async {
+    final targetContext = _ownedCardKeys[locationId]?.currentContext;
+    if (targetContext != null) {
+      _pendingRevealLocationId = null;
+      ref.read(shellProvider.notifier).clearRevealRequest();
+      await Scrollable.ensureVisible(
+        targetContext,
+        duration: _revealScrollDuration,
+        curve: Curves.easeOut,
+        alignment: 0.12,
+      );
+      return;
+    }
+
+    final locations =
+        ref.read(taskNotifierProvider).asData?.value.sortedLocations ??
+        const <TdfLocation>[];
+    final targetIndex = locations.indexWhere(
+      (location) => location.id == locationId,
+    );
+    final controller = _scrollController;
+    if (targetIndex < 0 || !controller.hasClients) {
+      _pendingRevealLocationId = null;
+      ref.read(shellProvider.notifier).clearRevealRequest();
+      return;
+    }
+
+    final estimatedOffset = (targetIndex * _estimatedCardExtent).clamp(
+      0.0,
+      controller.position.maxScrollExtent,
+    );
+    controller.jumpTo(estimatedOffset);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _revealMaterializedCard(locationId),
+    );
+  }
+
+  /// Removes card [GlobalKey] entries for locations no longer present on the board.
+  void _pruneOwnedCardKeys(List<TdfLocation> locations) {
+    if (_ownedCardKeys.isEmpty) {
+      return;
+    }
+    final activeIds = <String>{for (final location in locations) location.id};
+    _ownedCardKeys.removeWhere((id, _) => !activeIds.contains(id));
+  }
+
+  /// Registers Riverpod listeners coordinating smooth card reveal and draft scroll-to-top behavior.
+  void _registerShellListeners() {
+    ref.listen<EntityRef?>(
+      shellProvider.select((shell) => shell.revealEntityRequest),
+      (previous, next) {
+        _scheduleReveal(next);
+      },
+    );
+    ref.listen<EntityDraftKind?>(
+      shellProvider.select((shell) => shell.activeDraft),
+      _handleActiveDraftChanged,
+    );
+  }
+
+  /// Completes smooth reveal after an offscreen card materializes in the sliver viewport.
+  void _revealMaterializedCard(String locationId) {
+    if (!mounted) {
+      return;
+    }
+    _pendingRevealLocationId = null;
+    ref.read(shellProvider.notifier).clearRevealRequest();
+    final materializedContext = _ownedCardKeys[locationId]?.currentContext;
+    if (materializedContext == null) {
+      return;
+    }
+    unawaited(
+      Scrollable.ensureVisible(
+        materializedContext,
+        duration: _revealScrollDuration,
+        curve: Curves.easeOut,
+        alignment: 0.12,
+      ),
+    );
+  }
+
+  /// Schedules a post-frame reveal scroll when [request] targets a location card.
+  void _scheduleReveal(EntityRef? request) {
+    if (request == null ||
+        request.kind != EntityKind.location ||
+        _pendingRevealLocationId == request.id) {
+      return;
+    }
+    _pendingRevealLocationId = request.id;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) {
+        return;
+      }
+      unawaited(_performReveal(request.id));
+    });
   }
 
   /// Scrolls smoothly back to the top of the manager view when opening a Draft Card.
@@ -626,21 +665,21 @@ class _LocationsViewState extends ConsumerState<LocationsView> {
       unawaited(
         _scrollController.animateTo(
           0.0,
-          duration: UiThemeTokens.of(context).focus.expandDuration,
+          duration: _revealScrollDuration,
           curve: Curves.easeOut,
         ),
       );
     });
   }
 
-  /// Dispatches Quick-Create persistence through [EntityController.quickCreateLocation].
+  /// Dispatches Quick-Create persistence through [EntityActionsNotifier.quickCreateLocation].
   Future<void> _submitQuickCreate() async {
-    final isBusy = ref.read(entityControllerProvider).isBusy;
+    final isBusy = ref.read(entityActionsProvider).isBusy;
     if (isBusy) {
       return;
     }
     final result = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .quickCreateLocation(
           _quickCreateController.text,
           locale: Localizations.localeOf(context),
@@ -654,14 +693,14 @@ class _LocationsViewState extends ConsumerState<LocationsView> {
       case ActionValidationFailed(:final message, :final fieldErrors):
         if (!fieldErrors.containsKey('limit')) {
           ref
-              .read(floatingNoticeControllerProvider.notifier)
-              .showNotice(message, tone: NoticeTone.danger);
+              .read(floatingNoticeProvider.notifier)
+              .showNotice(message, tone: FloatingNoticeTone.danger);
         }
         _quickCreateFocusNode.requestFocus();
       case ActionPersistFailed(:final message):
         ref
-            .read(floatingNoticeControllerProvider.notifier)
-            .showNotice(message, tone: NoticeTone.danger);
+            .read(floatingNoticeProvider.notifier)
+            .showNotice(message, tone: FloatingNoticeTone.danger);
     }
   }
 }

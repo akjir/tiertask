@@ -1,11 +1,11 @@
 ---
 name: ui-design-system
-description: Enforces TierTask UI Design System and UX guidelines (spec/UI_DESIGN_SYSTEM.md) derived from .agents/prototypes/ui_v2/. Activate whenever designing, building, editing, reviewing, or testing packages/tiertask_ui/, lib/ui/, themes, tokens, layouts, widgets, dialogs, keyboard shortcuts, or UI proposals.
+description: Enforces TierTask UI Design System and UX guidelines (spec/UI_DESIGN_SYSTEM.md) derived from .agents/prototypes/ui_v2/. Activate whenever designing, building, editing, reviewing, or testing lib/ui/{tokens,primitives,layout,components}/, app lib/ui/, themes, tokens, layouts, widgets, dialogs, keyboard shortcuts, or UI proposals.
 ---
 
 # TierTask UI Design System Workflow
 
-Follow `AGENTS.md` and `spec/UI_DESIGN_SYSTEM.md` (`P-UI-DESIGN-SYSTEM`) for every task touching `packages/tiertask_ui/`, `lib/ui/`, UI themes, or UI proposals.
+Follow `AGENTS.md` and `spec/UI_DESIGN_SYSTEM.md` (`P-UI-DESIGN-SYSTEM`) for every task touching `lib/ui/` (including `lib/ui/{tokens,primitives,layout,components}/`), UI themes, or UI proposals.
 
 ## 1. Authoritative References & Token-Efficient Lookup
 - **Normative Guidelines:** `spec/UI_DESIGN_SYSTEM.md` (`U-FIDELITY-*`, `U-SURFACE-*`, `U-TOKEN-*`, `U-LAYOUT-*`, `U-BRAND-*`, `U-COMP-*`, `U-CARD-*`, `U-UX-*`, `U-A11Y-*`, `U-GATE-*`).
@@ -16,7 +16,7 @@ Follow `AGENTS.md` and `spec/UI_DESIGN_SYSTEM.md` (`P-UI-DESIGN-SYSTEM`) for eve
 Verify every UI design, component, screen, or PR against these baseline rules before writing code:
 1. **Flat Borders & Shadow Allowlist (`U-SURFACE-001`..`004`):** Resting cards, chrome, sidebar, docks, and consoles are flat with `1px` `line` borders and zero drop shadows. Shadows appear ONLY on active segmented tabs, floating toasts, desktop popovers, mobile bottom sheets, and modal dialogs. Keep entity card containers neutral (`panel`/`line`); use semantic badges for status.
 2. **Surface Alternation & WCAG AA Contrast (`U-SURFACE-003`, `U-TOKEN-005`..`006`):** Alternate `bg` and `panel` (re-elevating inputs inside `bg` inline-edit wells back to `panel`). Ship `Calm` (default) and `Plum Umber` in Light and Dark with exact hex tokens (including dark-mode `onAccent` polarity flip) and verified `>= 4.5:1` contrast.
-3. **17-Widget Reuse Cap & Package Isolation (`U-FIDELITY-003`, `U-COMP-001`):** Keep `packages/tiertask_ui/` strictly isolated (zero `tiertask`, `flutter_riverpod`, `dart:io`, `dart:ffi`) around its 17 orthogonal widgets (`8` primitives, `4` layouts, `5` composites) behind one package barrel (`lib/tiertask_ui.dart`). Compose feature views from those widgets instead of creating one-off duplicates.
+3. **17-Widget Reuse Cap & Design System Isolation (`U-FIDELITY-003`, `U-COMP-001`):** Keep `lib/ui/{tokens,primitives,layout,components}/` strictly isolated in internal sub-rank order `tokens (0) < primitives (1) < layout (2) < components (3)` (zero imports from `lib/ui/{widgets,dialogs,views}/`, `tier_task_shell_screen.dart`, `ui_domain_mappers.dart`, `lib/models/`, `lib/l10n/`, `lib/services/`, `lib/repositories/`, `lib/providers/`, `flutter_riverpod`, `dart:io`, or `dart:ffi`; zero `export`/`part`/`part of` shims) around its 17 orthogonal widgets (`8` primitives, `4` layouts, `5` composites). Compose feature views from those widgets instead of creating one-off duplicates.
 4. **Adaptive Shell & Breakpoints (`U-LAYOUT-001`..`006`):** Enforce `compact <= 720`, `medium 721..820`, `expanded > 820`. Use `62px` top chrome, `244px` persistent desktop sidebar vs `min(300px, 92%)` compact drawer, and **decouple `.floating-notice-layer` inside the scroll region ABOVE the permanently pinned bottom dock** (Quick-Add composer or Settings/Conflict action footer).
 5. **Inline Active-Label Filter (`U-LAYOUT-004`):** Never add a stacked active-filter bar. Place clickable active label inline inside the desktop heading row; on compact Tasks view, swap the brand button in top chrome to `UiAppLogo` + label name; on compact Search view, place it inline in the Search heading row.
 6. **Branding & Controls (`U-BRAND-001`..`004`, `U-COMP-002`):** Use the three-bar stepped `UiAppLogo` (`100%/1.0`, `75%/0.72`, `50%/0.42`), inline `DEV` pill (`AppBuildProfile.isDev`), sidebar SemVer footer, and `1.75`-stroke outline icons. Never use sliding Switch widgets (use 2-way `UiSegmentedControl` or `UiToggleRow` checkboxes).
@@ -28,6 +28,6 @@ Verify every UI design, component, screen, or PR against these baseline rules be
 ## 3. Implementation & Verification Procedure
 1. **Consult Spec:** Outline and read the relevant `spec/UI_DESIGN_SYSTEM.md` sections before designing or modifying UI components and views (`U-FIDELITY-001`..`003`).
 2. **TDD First (`P-TDD-FIRST`):** Write failing widget/unit tests covering all 4 theme presets (including WCAG AA contrast checks), all enum/tone variants (`M-EXHAUSTIVE-STATE-TESTS`), breakpoint boundaries `390 / 720 / 721 / 760 / 820 / 821 / 1280` (`M-EXTREME-BOUND-TESTS`), focus/keyboard/Escape paths, and `M-REAL-MECHANICS-TESTS`.
-3. **Implement Cleanly:** Follow `AGENTS.md` Sections 1–4 (`P-UDF-ARCHITECTURE`, `P-FLATTEN-BUILD`, `P-CONST-WIDGETS`, `P-SELECT-REBUILDS`, `P-LAZY-LISTS`, `P-DISPOSE-RESOURCES`) and emit UI telemetry exclusively from `lib/presentation/` (`AGENTS.md` Section 6).
+3. **Implement Cleanly:** Follow `AGENTS.md` Sections 1–4 (`P-UDF-ARCHITECTURE`, `P-FLATTEN-BUILD`, `P-CONST-WIDGETS`, `P-SELECT-REBUILDS`, `P-LAZY-LISTS`, `P-DISPOSE-RESOURCES`) and emit redacted `LogTag.ui` telemetry via `UiTelemetry` in `lib/providers/ui_telemetry.dart` (`AGENTS.md` Section 6).
 4. **Sync Spec on Evolution:** Whenever a change intentionally refines tokens, layout, or UX behavior, update `spec/UI_DESIGN_SYSTEM.md` in the same change (`U-FIDELITY-002`).
 5. **Verify:** Run `python3 .agents/scripts/tiertask_dev.py verify --full --fix` until all static, analyzer, architecture, and test gates pass cleanly.

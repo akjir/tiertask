@@ -17,13 +17,21 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/sync_controller.dart';
-import '../../presentation/ui_telemetry.dart';
-import '../ui_icon_mapper.dart';
+import '../../models/location_state.dart';
+import '../../providers/entity_actions_provider.dart';
+import '../../providers/location_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/ui_telemetry.dart';
+import '../components/ui_dialog_frame.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_pill.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
+import '../ui_domain_mappers.dart';
 
 /// Labeled inset well rendering one selectable location metadata attribute.
 class _LocationDetailWell extends StatelessWidget {
@@ -78,44 +86,65 @@ class _LocationDetailWell extends StatelessWidget {
 /// Readout list inside [_LocationStatusModalBody] displaying populated place, coordinate, and source wells.
 class _LocationMetadataWells extends StatelessWidget {
   /// Creates a [_LocationMetadataWells].
-  const _LocationMetadataWells({required this.viewModel});
+  const _LocationMetadataWells({required this.locationState});
 
-  /// Current foreground location projection.
-  final LocationStatusViewModel viewModel;
+  /// Current foreground domain location state.
+  final LocationState locationState;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final metadata = _resolveMetadata(localizations);
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        if (viewModel.placeLabel.isNotEmpty) ...<Widget>[
+        if (metadata.place.isNotEmpty) ...<Widget>[
           const SizedBox(height: 12.0),
           _LocationDetailWell(
             key: const ValueKey<String>('location_status_place'),
             label: localizations.locationPlaceLabel,
-            value: viewModel.placeLabel,
+            value: metadata.place,
           ),
         ],
-        if (viewModel.coordinatesText.isNotEmpty) ...<Widget>[
+        if (metadata.coordinates.isNotEmpty) ...<Widget>[
           const SizedBox(height: 8.0),
           _LocationDetailWell(
             key: const ValueKey<String>('location_status_coordinates'),
             label: localizations.locationCoordinatesLabel,
-            value: viewModel.coordinatesText,
+            value: metadata.coordinates,
             isMonospace: true,
           ),
         ],
-        if (viewModel.sourceLabel.isNotEmpty) ...<Widget>[
+        if (metadata.source.isNotEmpty) ...<Widget>[
           const SizedBox(height: 8.0),
           _LocationDetailWell(
             key: const ValueKey<String>('location_status_source'),
             label: localizations.locationSourceLabel,
-            value: viewModel.sourceLabel,
+            value: metadata.source,
           ),
         ],
       ],
+    );
+  }
+
+  /// Resolves formatted place, 6dp coordinates, and source captions from [locationState].
+  ({String coordinates, String place, String source}) _resolveMetadata(
+    AppLocalizations localizations,
+  ) {
+    return (
+      coordinates: UiDomainMappers.formatLocationCoordinates6dp(
+        locationState.fix,
+      ),
+      place: UiDomainMappers.resolveLocationPlaceLabel(
+        locationState,
+        localizations,
+      ),
+      source: UiDomainMappers.locationSourceLabel(
+        locationState.fix?.source,
+        localizations,
+      ),
     );
   }
 }
@@ -137,7 +166,7 @@ class _LocationStatusModal extends ConsumerStatefulWidget {
 class _LocationStatusModalBody extends StatelessWidget {
   /// Creates a [_LocationStatusModalBody].
   const _LocationStatusModalBody({
-    required this.viewModel,
+    required this.locationState,
     required this.errorMessage,
     required this.onDismissError,
   });
@@ -145,11 +174,11 @@ class _LocationStatusModalBody extends StatelessWidget {
   /// Optional transient refresh error message.
   final String? errorMessage;
 
+  /// Current foreground domain location state.
+  final LocationState locationState;
+
   /// Callback dismissing [errorMessage].
   final VoidCallback onDismissError;
-
-  /// Current location status projection.
-  final LocationStatusViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
@@ -162,13 +191,16 @@ class _LocationStatusModalBody extends StatelessWidget {
           alignment: Alignment.centerLeft,
           child: UiPill(
             key: const ValueKey<String>('location_status_pill'),
-            label: viewModel.statusLabel,
-            icon: UiIconMapper.locationIcon(viewModel.statusKind),
+            label: UiDomainMappers.locationStatusLabel(
+              locationState.status,
+              localizations,
+            ),
+            icon: UiDomainMappers.locationIcon(locationState.status),
             variant: UiPillVariant.badge,
-            tone: _locationStatusPillTone(viewModel.statusKind),
+            tone: _locationStatusPillTone(locationState.status),
           ),
         ),
-        _LocationMetadataWells(viewModel: viewModel),
+        _LocationMetadataWells(locationState: locationState),
         if (errorMessage case final message?) ...<Widget>[
           const SizedBox(height: 10.0),
           UiBanner(
@@ -214,17 +246,14 @@ class _LocationStatusModalFooter extends StatelessWidget {
       runSpacing: 8.0,
       alignment: WrapAlignment.end,
       children: <Widget>[
-        KeyedSubtree(
-          key: ValueKey<bool>(isRefreshing),
-          child: UiButton(
-            key: const ValueKey<String>('location_status_refresh_button'),
-            label: localizations.actionRefresh,
-            leadingIcon: Icons.refresh_rounded,
-            variant: UiButtonVariant.secondary,
-            density: UiButtonDensity.compact,
-            isLoading: isRefreshing,
-            onPressed: (isRefreshing || isBusy) ? null : onRefresh,
-          ),
+        UiButton(
+          key: const ValueKey<String>('location_status_refresh_button'),
+          label: localizations.actionRefresh,
+          leadingIcon: Icons.refresh_rounded,
+          variant: UiButtonVariant.secondary,
+          density: UiButtonDensity.compact,
+          isLoading: isRefreshing,
+          onPressed: (isRefreshing || isBusy) ? null : onRefresh,
         ),
         UiButton(
           key: const ValueKey<String>('location_status_close_button'),
@@ -245,8 +274,14 @@ class _LocationStatusModalState extends ConsumerState<_LocationStatusModal> {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final viewModel = ref.watch(locationStatusViewModelProvider);
-    final syncState = ref.watch(syncControllerProvider);
+    final isLocationEnabled = ref.watch(locationEnabledProvider);
+    final rawLocationState = ref.watch(locationStateProvider);
+    final locationState = isLocationEnabled
+        ? rawLocationState
+        : const LocationState.disabled();
+    final isBusy = ref.watch(
+      syncActionsProvider.select((state) => state.isBusy),
+    );
 
     return UiDialogFrame(
       key: const ValueKey<String>('location_status_modal'),
@@ -255,16 +290,14 @@ class _LocationStatusModalState extends ConsumerState<_LocationStatusModal> {
       closeTooltip: localizations.actionClose,
       onClose: widget.onClose,
       body: _LocationStatusModalBody(
-        viewModel: viewModel,
+        locationState: locationState,
         errorMessage: _errorMessage,
         onDismissError: _clearError,
       ),
       footer: _LocationStatusModalFooter(
-        isRefreshing: viewModel.isRefreshing,
-        isBusy: syncState.isBusy,
-        onRefresh: () async {
-          await _handleRefresh();
-        },
+        isRefreshing: locationState.status == LocationStatus.searching,
+        isBusy: isBusy,
+        onRefresh: _triggerRefresh,
         onClose: widget.onClose,
       ),
     );
@@ -277,11 +310,11 @@ class _LocationStatusModalState extends ConsumerState<_LocationStatusModal> {
     }
   }
 
-  /// Triggers an immediate location refresh through [SyncController].
+  /// Triggers an immediate location refresh through [SyncActionsNotifier].
   Future<void> _handleRefresh() async {
     _clearError();
     final result = await ref
-        .read(syncControllerProvider.notifier)
+        .read(syncActionsProvider.notifier)
         .refreshLocation();
     if (!mounted) {
       return;
@@ -295,6 +328,11 @@ class _LocationStatusModalState extends ConsumerState<_LocationStatusModal> {
           setState(() => _errorMessage = message);
         }
     }
+  }
+
+  /// Dispatches async location refresh from synchronous button callbacks.
+  void _triggerRefresh() {
+    unawaited(_handleRefresh());
   }
 }
 
@@ -311,12 +349,11 @@ Future<void> showLocationStatusModal(BuildContext context) {
   );
 }
 
-/// Maps [ShellLocationStatusKind] exhaustively to its semantic [UiPillTone].
-UiPillTone _locationStatusPillTone(ShellLocationStatusKind statusKind) {
-  return switch (statusKind) {
-    ShellLocationStatusKind.found => UiPillTone.success,
-    ShellLocationStatusKind.searching => UiPillTone.soft,
-    ShellLocationStatusKind.disabled ||
-    ShellLocationStatusKind.unavailable => UiPillTone.neutral,
+/// Maps domain [LocationStatus] exhaustively to its semantic [UiPillTone].
+UiPillTone _locationStatusPillTone(LocationStatus status) {
+  return switch (status) {
+    LocationStatus.found => UiPillTone.success,
+    LocationStatus.searching => UiPillTone.soft,
+    LocationStatus.disabled || LocationStatus.unavailable => UiPillTone.neutral,
   };
 }

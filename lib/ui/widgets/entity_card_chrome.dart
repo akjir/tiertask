@@ -14,9 +14,13 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_pill.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 
 /// Shared top meta bar inside expanded Task, Label, and Location cards (`U-CARD-002`).
 class EntityCardMetaBar extends StatelessWidget {
@@ -241,16 +245,13 @@ class EntityModalActionFooter extends StatelessWidget {
           density: UiButtonDensity.compact,
           onPressed: isBusy ? null : onCancel,
         ),
-        KeyedSubtree(
-          key: ValueKey<bool>(isBusy),
-          child: UiButton(
-            key: confirmKey,
-            label: confirmLabel,
-            variant: confirmVariant,
-            density: UiButtonDensity.compact,
-            isLoading: isBusy,
-            onPressed: isBusy ? null : onConfirm,
-          ),
+        UiButton(
+          key: confirmKey,
+          label: confirmLabel,
+          variant: confirmVariant,
+          density: UiButtonDensity.compact,
+          isLoading: isBusy,
+          onPressed: isBusy ? null : onConfirm,
         ),
       ],
     );

@@ -21,17 +21,21 @@ import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/models/storage_file_read_status.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
-import 'package:tiertask/presentation/app_shell_controller.dart';
-import 'package:tiertask/presentation/floating_notice_controller.dart';
-import 'package:tiertask/presentation/shell_models.dart';
+import 'package:tiertask/providers/floating_notice_providers.dart';
+import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/ui/components/ui_searchable_picker.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/primitives/ui_pill.dart';
+import 'package:tiertask/ui/primitives/ui_segmented_control.dart';
+import 'package:tiertask/ui/tokens/ui_spacing_tokens.dart';
 import 'package:tiertask/ui/views/tasks_view.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import 'test_helpers.dart';
 
@@ -173,9 +177,7 @@ void main() {
             surfaceSize: size,
           );
 
-          container
-              .read(appShellControllerProvider.notifier)
-              .selectLabelFilter('lbl_work');
+          container.read(shellProvider.notifier).selectLabelFilter('lbl_work');
           await tester.pumpAndSettle();
 
           expect(
@@ -218,7 +220,7 @@ void main() {
             );
 
             // Opening Global Search hides compact tier dropdown and shows inline active filter.
-            container.read(appShellControllerProvider.notifier).openSearch();
+            container.read(shellProvider.notifier).openSearch();
             await tester.pumpAndSettle();
             expect(
               find.byKey(const ValueKey<String>('compact_tier_select')),
@@ -247,7 +249,7 @@ void main() {
             await tester.tap(inlineFilterInHeader);
             await tester.pumpAndSettle();
             expect(
-              container.read(appShellControllerProvider).activeLabelId,
+              container.read(shellProvider).activeLabelId,
               isNull,
               reason: 'Clicking desktop inline filter clears activeLabelId',
             );
@@ -287,18 +289,15 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          container.read(appShellControllerProvider).activeTier,
-          equals(ShellTier.someday),
+          container.read(shellProvider).activeTier,
+          equals(TaskTier.someday),
         );
         expect(find.text('Someday item'), findsOneWidget);
 
         await tester.tap(find.text('+ New task'));
         await tester.pumpAndSettle();
 
-        expect(
-          container.read(appShellControllerProvider).compactComposerOpen,
-          isTrue,
-        );
+        expect(container.read(shellProvider).compactComposerOpen, isTrue);
         expect(find.text('Open as draft'), findsOneWidget);
         expect(find.text('Add'), findsOneWidget);
       },
@@ -353,9 +352,7 @@ void main() {
         );
 
         // Rich task is suspended so it lands in Blocked tier.
-        container
-            .read(appShellControllerProvider.notifier)
-            .selectTier(ShellTier.blocked);
+        container.read(shellProvider.notifier).selectTier(TaskTier.blocked);
         await tester.pumpAndSettle();
 
         final metadataFinder = find.byKey(
@@ -398,19 +395,17 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        final shellAfterNav = container.read(appShellControllerProvider);
+        final shellAfterNav = container.read(shellProvider);
         expect(shellAfterNav.view, equals(ShellView.labels));
         expect(
           shellAfterNav.expandedEntity,
           equals(const EntityRef(kind: EntityKind.label, id: 'lbl_ops')),
         );
         expect(shellAfterNav.returnContext, isNotNull);
-        expect(shellAfterNav.returnContext?.tier, equals(ShellTier.blocked));
+        expect(shellAfterNav.returnContext?.tier, equals(TaskTier.blocked));
 
         // Navigate back and verify clicking "+6 more" expands the task card.
-        container
-            .read(appShellControllerProvider.notifier)
-            .navigateBackFromReturnContext();
+        container.read(shellProvider.notifier).navigateBackFromReturnContext();
         await tester.pumpAndSettle();
 
         await tester.tap(
@@ -419,7 +414,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
+          container.read(shellProvider).expandedEntity,
           equals(const EntityRef(kind: EntityKind.task, id: 'tsk_rich')),
         );
         expect(metadataFinder, findsNothing);
@@ -443,7 +438,7 @@ void main() {
           nowUtc: _fixedNowUtc,
         );
 
-        container.read(appShellControllerProvider.notifier).openSearch();
+        container.read(shellProvider.notifier).openSearch();
         await tester.pumpAndSettle();
 
         final metadataFinder = find.byKey(
@@ -894,18 +889,13 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(
-          desktopContainer.read(appShellControllerProvider).view,
+          desktopContainer.read(shellProvider).view,
           equals(ShellView.labels),
         );
-        expect(
-          desktopContainer.read(appShellControllerProvider).returnContext,
-          isNotNull,
-        );
+        expect(desktopContainer.read(shellProvider).returnContext, isNotNull);
 
         // Return to Tasks, expand card, open desktop inline Labels picker, and tap Location chip.
-        desktopContainer
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.tasks);
+        desktopContainer.read(shellProvider.notifier).openView(ShellView.tasks);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Review API contract'));
         await tester.pumpAndSettle();
@@ -925,13 +915,10 @@ void main() {
         await tester.tap(locationPill);
         await tester.pumpAndSettle();
         expect(
-          desktopContainer.read(appShellControllerProvider).view,
+          desktopContainer.read(shellProvider).view,
           equals(ShellView.locations),
         );
-        expect(
-          desktopContainer.read(appShellControllerProvider).returnContext,
-          isNotNull,
-        );
+        expect(desktopContainer.read(shellProvider).returnContext, isNotNull);
 
         // Compact (390px): Labels Add opens compact modal bottom sheet rather than inline picker.
         const compactSize = Size(390.0, 844.0);
@@ -1009,9 +996,7 @@ void main() {
           nowUtc: _fixedNowUtc,
         );
 
-        container
-            .read(appShellControllerProvider.notifier)
-            .selectTier(ShellTier.completed);
+        container.read(shellProvider.notifier).selectTier(TaskTier.completed);
         await tester.pumpAndSettle();
 
         // Downgrade button must be hidden on completed tasks.
@@ -1121,12 +1106,8 @@ void main() {
         );
 
         // Select label filter and switch to Completed tier.
-        container
-            .read(appShellControllerProvider.notifier)
-            .selectLabelFilter('lbl_dev');
-        container
-            .read(appShellControllerProvider.notifier)
-            .selectTier(ShellTier.completed);
+        container.read(shellProvider.notifier).selectLabelFilter('lbl_dev');
+        container.read(shellProvider.notifier).selectTier(TaskTier.completed);
         await tester.pumpAndSettle();
 
         // Active label filter auto-seeded Quick-Add draft label chip.
@@ -1149,8 +1130,8 @@ void main() {
           equals('Existing Task'),
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.tone,
-          equals(NoticeTone.danger),
+          container.read(floatingNoticeProvider)?.tone,
+          equals(FloatingNoticeTone.danger),
         );
 
         // Unique title adds task, clears input, does NOT switch away from Completed tier or expand task.
@@ -1163,13 +1144,10 @@ void main() {
           isEmpty,
         );
         expect(
-          container.read(appShellControllerProvider).activeTier,
-          equals(ShellTier.completed),
+          container.read(shellProvider).activeTier,
+          equals(TaskTier.completed),
         );
-        expect(
-          container.read(appShellControllerProvider).expandedEntity,
-          isNull,
-        );
+        expect(container.read(shellProvider).expandedEntity, isNull);
         final created = container
             .read(taskNotifierProvider)
             .value
@@ -1180,9 +1158,7 @@ void main() {
         expect(created?.first.labelIds, contains('lbl_dev'));
 
         // Clearing active label filter resets Quick-Add draft labels (U-LAYOUT-004).
-        container
-            .read(appShellControllerProvider.notifier)
-            .selectLabelFilter(null);
+        container.read(shellProvider.notifier).selectLabelFilter(null);
         await tester.pumpAndSettle();
         expect(
           find.byKey(const ValueKey<String>('quick_add_label_chip_lbl_dev')),
@@ -1342,9 +1318,7 @@ void main() {
               const ValueKey<String>('quick_add_placement_control'),
             );
             final placementControl = tester
-                .widget<UiSegmentedControl<TaskPlacementOption>>(
-                  placementFinder,
-                );
+                .widget<UiSegmentedControl<QuickAddMode>>(placementFinder);
             expect(
               placementControl.mode,
               equals(UiSegmentedControlMode.vertical),
@@ -1785,10 +1759,7 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.settings),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.settings));
       },
     );
 
@@ -1818,13 +1789,8 @@ void main() {
         );
         await tester.tap(find.text('Configure'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.settings),
-        );
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.tasks);
+        expect(container.read(shellProvider).view, equals(ShellView.settings));
+        container.read(shellProvider.notifier).openView(ShellView.tasks);
         await tester.pumpAndSettle();
 
         // 2. Sync error banner supports Retry and Dismiss.
@@ -1900,15 +1866,10 @@ void main() {
         );
         await tester.tap(find.text('Resolve conflict'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.conflict),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.conflict));
 
         // 5. Recovery required banner routes Open recovery -> ShellView.recovery.
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.tasks);
+        container.read(shellProvider.notifier).openView(ShellView.tasks);
         container
             .read(syncStateProvider.notifier)
             .setConflict(
@@ -1928,10 +1889,7 @@ void main() {
         );
         await tester.tap(find.text('Open recovery'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.recovery),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.recovery));
       },
     );
 
@@ -1971,9 +1929,7 @@ void main() {
         );
         expect(find.text('Someday Prerequisite'), findsNothing);
 
-        container
-            .read(appShellControllerProvider.notifier)
-            .openDraft(EntityDraftKind.task);
+        container.read(shellProvider.notifier).openDraft(EntityDraftKind.task);
         await tester.pumpAndSettle();
 
         await tester.tap(
@@ -1997,7 +1953,7 @@ void main() {
           board: depBoard,
         );
         depContainer
-            .read(appShellControllerProvider.notifier)
+            .read(shellProvider.notifier)
             .expandEntity(
               const EntityRef(kind: EntityKind.task, id: 'tskRoot001'),
             );

@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
@@ -20,6 +21,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
@@ -606,7 +608,139 @@ void main() {
       expect(current.themeMode, equals(AppThemeMode.dark));
       expect(current.language, equals(AppLanguage.german));
     });
+
+    test('non-storage preference updates preserve repository instances, avoid redundant log rewrites, serialize concurrent toggles, and roll back failed saves', () async {
+      AppLogger.resetForTesting();
+      addTearDown(AppLogger.resetForTesting);
+
+      Completer<void>? saveGate;
+      var shouldFailSave = false;
+      final settingsRepository = _GateableSettingsRepository(
+        const WebDavConfig(
+          language: AppLanguage.english,
+          themePalette: AppThemePalette.calm,
+          themeMode: AppThemeMode.light,
+          storageMode: StorageMode.both,
+          serverUrl: 'https://cloud.example.com',
+          username: 'alice',
+          password: 'secret',
+          filePath: 'tasks.tdf',
+          localFilePath: 'tasks.tdf',
+          diagnosticsEnabled: true,
+          logLevel: LogLevel.info,
+          logStorageMode: StorageMode.local,
+        ),
+        onSave: () async {
+          if (saveGate case final gate?) {
+            await gate.future;
+          }
+          if (shouldFailSave) {
+            throw const WorkspaceException(
+              WorkspaceErrorKind.settingsPersistenceFailed,
+              'Simulated disk failure',
+            );
+          }
+        },
+      );
+      final tempDir = await Directory.systemTemp.createTemp(
+        'tiertask_cfg_diag_',
+      );
+      addTearDown(() async {
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepository),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(activeWorkspaceProvider.future);
+      await container.read(webDavConfigProvider.future);
+
+      final diagSub = container.listen(diagnosticsEnabledProvider, (_, _) {});
+      addTearDown(diagSub.close);
+      final webDavRepoBefore = container.read(webDavRepositoryProvider);
+      final localRepoBefore = container.read(localFileRepositoryProvider);
+      final logRevisionBefore = AppLogger.revision.value;
+
+      // Fire two rapid preference toggles while the first disk save is suspended.
+      saveGate = Completer<void>();
+      final notifier = container.read(webDavConfigProvider.notifier);
+      final firstFuture = notifier.updateThemePalette(
+        AppThemePalette.plumUmber,
+      );
+      final secondFuture = notifier.updateThemeMode(AppThemeMode.dark);
+
+      final midFlight = container.read(webDavConfigProvider).requireValue;
+      expect(
+        midFlight.themePalette,
+        equals(AppThemePalette.plumUmber),
+        reason: 'First optimistic update must be visible immediately',
+      );
+      expect(
+        midFlight.themeMode,
+        equals(AppThemeMode.dark),
+        reason: 'Second rapid preference update must compose on top of first without dropping clicks',
+      );
+
+      saveGate.complete();
+      saveGate = null;
+      await Future.wait(<Future<void>>[firstFuture, secondFuture]);
+
+      final afterBoth = container.read(webDavConfigProvider).requireValue;
+      expect(afterBoth.themePalette, equals(AppThemePalette.plumUmber));
+      expect(afterBoth.themeMode, equals(AppThemeMode.dark));
+      final persisted = await settingsRepository.loadConfig();
+      expect(persisted.themePalette, equals(AppThemePalette.plumUmber));
+      expect(persisted.themeMode, equals(AppThemeMode.dark));
+
+      expect(
+        container.read(webDavRepositoryProvider),
+        same(webDavRepoBefore),
+        reason: 'UI preference toggles must not recreate WebDavRepository and wipe ETag cache',
+      );
+      expect(
+        container.read(localFileRepositoryProvider),
+        same(localRepoBefore),
+        reason: 'UI preference toggles must not recreate LocalFileRepository',
+      );
+      // Updating theme palette/mode emits config.update log lines, but must not rewrite header in place redundantly.
+      expect(
+        AppLogger.revision.value,
+        lessThanOrEqualTo(logRevisionBefore + 2),
+        reason: 'Non-logger preference updates must not trigger redundant AppLogger.setEnabled header rewrites',
+      );
+
+      // Failed persistence must roll back optimistic state cleanly.
+      shouldFailSave = true;
+      await expectLater(
+        notifier.updateThemeMode(AppThemeMode.system),
+        throwsA(isA<WorkspaceException>()),
+      );
+      expect(
+        container.read(webDavConfigProvider).requireValue.themeMode,
+        equals(AppThemeMode.dark),
+        reason: 'Failed preference persistence must roll back optimistic state',
+      );
+    });
   });
+}
+
+class _GateableSettingsRepository extends InMemorySettingsRepository {
+  _GateableSettingsRepository(super.initialConfig, {required this.onSave});
+
+  final Future<void> Function() onSave;
+
+  @override
+  Future<void> saveConfig(WebDavConfig config) async {
+    await onSave();
+    await super.saveConfig(config);
+  }
 }
 
 /// Verifies that [arbMap] defines an `@<key>` metadata map with a non-empty description.

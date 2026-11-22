@@ -16,11 +16,21 @@
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/view_model_primitives.dart';
+import '../../models/tdf_location.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../components/ui_ordered_item_list.dart';
+import '../layout/ui_responsive_grid.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_pill.dart';
+import '../primitives/ui_segmented_control.dart';
+import '../primitives/ui_toggle_row.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 import 'entity_card_chrome.dart';
 import 'entity_date_time_fields.dart';
 
@@ -47,19 +57,19 @@ class EntityConditionsSection extends StatefulWidget {
   });
 
   /// Workspace locations selectable in the GPS locations condition dimension.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Whether this section can enter inline edit mode.
   final bool canEdit;
 
   /// Initial editable activation condition state.
-  final ConditionDraftViewModel conditionDraft;
+  final ConditionDraft conditionDraft;
 
   /// Optional localized active/unmet condition status line.
   final String? conditionsStatusLabel;
 
   /// Read-only condition summary chips with optional clickable location targets.
-  final List<ConditionSummaryChipViewModel> conditionsSummary;
+  final List<ConditionSummaryChip> conditionsSummary;
 
   /// Whether this entity currently has explicit or inherited activation conditions.
   final bool hasConditions;
@@ -85,8 +95,8 @@ class EntityConditionsSection extends StatefulWidget {
   /// Optional callback navigating to a referenced location in the Locations manager.
   final ValueChanged<String>? onOpenLocation;
 
-  /// Callback validating and persisting an updated [ConditionDraftViewModel].
-  final Future<ActionResult> Function(ConditionDraftViewModel draft) onSave;
+  /// Callback validating and persisting an updated [ConditionDraft].
+  final Future<ActionResult> Function(ConditionDraft draft) onSave;
 
   /// Callback opening inline edit mode for this section.
   final VoidCallback onStartEdit;
@@ -176,7 +186,7 @@ class _EntityConditionLocationsPicker extends StatelessWidget {
   });
 
   /// Available workspace locations.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Whether location toggle pills accept input.
   final bool enabled;
@@ -277,8 +287,8 @@ class _EntityConditionSummaryChip extends StatelessWidget {
     required this.onOpenLocation,
   });
 
-  /// Condition summary view model.
-  final ConditionSummaryChipViewModel chip;
+  /// Condition summary chip model.
+  final ConditionSummaryChip chip;
 
   /// Optional location navigation callback.
   final ValueChanged<String>? onOpenLocation;
@@ -313,7 +323,7 @@ class _EntityConditionSummaryChipWrap extends StatelessWidget {
   });
 
   /// Condition summary chips to display.
-  final List<ConditionSummaryChipViewModel> chips;
+  final List<ConditionSummaryChip> chips;
 
   /// Optional location navigation callback.
   final ValueChanged<String>? onOpenLocation;
@@ -360,21 +370,20 @@ class _EntityConditionTimeWindowsPicker extends StatelessWidget {
   final VoidCallback onAddTimeWindow;
 
   /// Callback removing an existing time window row.
-  final UiOrderedItemActionCallback<TimeWindowDraftViewModel>
-  onRemoveTimeWindow;
+  final UiOrderedItemActionCallback<TimeWindowDraft> onRemoveTimeWindow;
 
   /// Controller for the start `HH:MM` input.
   final TextEditingController startController;
 
   /// Configured daily time windows.
-  final List<TimeWindowDraftViewModel> timeWindows;
+  final List<TimeWindowDraft> timeWindows;
 
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
     final localizations = AppLocalizations.of(context);
 
-    return UiOrderedItemList<TimeWindowDraftViewModel>(
+    return UiOrderedItemList<TimeWindowDraft>(
       items: timeWindows,
       itemKey: (window, index) =>
           ValueKey<String>('cond_time_${index}_${window.start}_${window.end}'),
@@ -458,10 +467,10 @@ class _EntityConditionsControlsBody extends StatelessWidget {
   });
 
   /// Available workspace locations.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Current editable condition draft.
-  final ConditionDraftViewModel draft;
+  final ConditionDraft draft;
 
   /// Disables interactive controls while submitting.
   final bool isBusy;
@@ -479,8 +488,7 @@ class _EntityConditionsControlsBody extends StatelessWidget {
   final ValueChanged<ConditionDimensionMode> onLocationsModeChanged;
 
   /// Callback removing a time window.
-  final UiOrderedItemActionCallback<TimeWindowDraftViewModel>
-  onRemoveTimeWindow;
+  final UiOrderedItemActionCallback<TimeWindowDraft> onRemoveTimeWindow;
 
   /// Callback changing time-window mode.
   final ValueChanged<ConditionDimensionMode> onTimesModeChanged;
@@ -596,7 +604,7 @@ class _EntityConditionsDaysSection extends StatelessWidget {
   });
 
   /// Editable condition draft containing weekday mode and selection.
-  final ConditionDraftViewModel draft;
+  final ConditionDraft draft;
 
   /// Whether dimension controls accept input.
   final bool enabled;
@@ -621,7 +629,7 @@ class _EntityConditionsDaysSection extends StatelessWidget {
       enabled: enabled,
       onModeChanged: onDaysModeChanged,
       customChild: _EntityConditionWeekdaysPicker(
-        selectedWeekdays: draft.selectedWeekdays,
+        selectedWeekdays: draft.weekdays,
         enabled: enabled,
         onToggleWeekday: onToggleWeekday,
       ),
@@ -657,10 +665,10 @@ class _EntityConditionsEditorCard extends StatelessWidget {
   });
 
   /// Workspace locations selectable in the GPS dimension.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Current editable condition draft.
-  final ConditionDraftViewModel draft;
+  final ConditionDraft draft;
 
   /// Whether existing conditions are set (controls Clear button visibility).
   final bool hasConditions;
@@ -690,8 +698,7 @@ class _EntityConditionsEditorCard extends StatelessWidget {
   final ValueChanged<ConditionDimensionMode> onLocationsModeChanged;
 
   /// Callback removing a draft time window row.
-  final UiOrderedItemActionCallback<TimeWindowDraftViewModel>
-  onRemoveTimeWindow;
+  final UiOrderedItemActionCallback<TimeWindowDraft> onRemoveTimeWindow;
 
   /// Callback submitting the draft.
   final VoidCallback onSave;
@@ -776,7 +783,7 @@ class _EntityConditionsGlobalAndDaysGroup extends StatelessWidget {
   final bool dimensionsEnabled;
 
   /// Current editable condition draft.
-  final ConditionDraftViewModel draft;
+  final ConditionDraft draft;
 
   /// Disables the global toggle while submitting.
   final bool isBusy;
@@ -832,10 +839,10 @@ class _EntityConditionsLocationsSection extends StatelessWidget {
   });
 
   /// Available workspace locations.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Editable condition draft containing location mode and selection.
-  final ConditionDraftViewModel draft;
+  final ConditionDraft draft;
 
   /// Whether location dimension controls accept input.
   final bool enabled;
@@ -856,12 +863,12 @@ class _EntityConditionsLocationsSection extends StatelessWidget {
       title: localizations.conditionLocationGroupTitle,
       isTask: isTask,
       anyLabel: localizations.conditionLocationAnyLabel,
-      mode: draft.locationsMode,
+      mode: draft.locationMode,
       enabled: enabled,
       onModeChanged: onLocationsModeChanged,
       customChild: _EntityConditionLocationsPicker(
         allLocations: allLocations,
-        selectedLocationIds: draft.selectedLocationIds,
+        selectedLocationIds: draft.locationIds,
         enabled: enabled,
         onToggleLocation: onToggleLocation,
       ),
@@ -883,7 +890,7 @@ class _EntityConditionsReadOnlyBody extends StatelessWidget {
   final String? conditionsStatusLabel;
 
   /// Read-only condition summary chips.
-  final List<ConditionSummaryChipViewModel> conditionsSummary;
+  final List<ConditionSummaryChip> conditionsSummary;
 
   /// Shows suspended inline warning when true.
   final bool isSuspended;
@@ -945,7 +952,7 @@ class _EntityConditionsReadOnlyView extends StatelessWidget {
   final String? conditionsStatusLabel;
 
   /// Read-only condition summary chips.
-  final List<ConditionSummaryChipViewModel> conditionsSummary;
+  final List<ConditionSummaryChip> conditionsSummary;
 
   /// Whether parent mutations are in progress.
   final bool isBusy;
@@ -989,7 +996,7 @@ class _EntityConditionsSectionState extends State<EntityConditionsSection> {
   late final TextEditingController _timeEndController;
   late final TextEditingController _timeStartController;
 
-  late ConditionDraftViewModel _draft;
+  late ConditionDraft _draft;
   bool _isSubmitting = false;
   String? _saveErrorText;
   String? _timeInputError;
@@ -1082,9 +1089,9 @@ class _EntityConditionsSectionState extends State<EntityConditionsSection> {
       });
       return false;
     }
-    final nextWindows = <TimeWindowDraftViewModel>[
+    final nextWindows = <TimeWindowDraft>[
       ..._draft.timeWindows,
-      TimeWindowDraftViewModel(start: startToken, end: endToken),
+      TimeWindowDraft(start: startToken, end: endToken),
     ];
     setState(() {
       _draft = _draft.copyWith(timeWindows: nextWindows);
@@ -1125,17 +1132,17 @@ class _EntityConditionsSectionState extends State<EntityConditionsSection> {
   /// Updates the locations condition dimension mode.
   void _handleLocationsModeChanged(ConditionDimensionMode mode) {
     setState(() {
-      _draft = _draft.copyWith(locationsMode: mode);
+      _draft = _draft.copyWith(locationMode: mode);
       _saveErrorText = null;
     });
   }
 
   /// Removes the time window at [index] from the draft.
-  void _handleRemoveTimeWindow(TimeWindowDraftViewModel window, int index) {
+  void _handleRemoveTimeWindow(TimeWindowDraft window, int index) {
     if (index < 0 || index >= _draft.timeWindows.length) {
       return;
     }
-    final nextWindows = List<TimeWindowDraftViewModel>.of(_draft.timeWindows)
+    final nextWindows = List<TimeWindowDraft>.of(_draft.timeWindows)
       ..removeAt(index);
     setState(() {
       _draft = _draft.copyWith(timeWindows: nextWindows);
@@ -1151,7 +1158,7 @@ class _EntityConditionsSectionState extends State<EntityConditionsSection> {
     final canAddPendingTime =
         (!widget.isTask ||
             (!_draft.ignoreAllLabelConditions &&
-                _draft.timesMode == ConditionDimensionMode.custom)) &&
+                _draft.timeMode == ConditionDimensionMode.custom)) &&
         (_timeStartController.text.trim().isNotEmpty ||
             _timeEndController.text.trim().isNotEmpty);
     if (canAddPendingTime && !_handleAddTimeWindow()) {
@@ -1184,7 +1191,7 @@ class _EntityConditionsSectionState extends State<EntityConditionsSection> {
   /// Updates the time-window condition dimension mode.
   void _handleTimesModeChanged(ConditionDimensionMode mode) {
     setState(() {
-      _draft = _draft.copyWith(timesMode: mode);
+      _draft = _draft.copyWith(timeMode: mode);
       _timeInputError = null;
       _saveErrorText = null;
     });
@@ -1200,25 +1207,25 @@ class _EntityConditionsSectionState extends State<EntityConditionsSection> {
 
   /// Toggles [locationId] inside the draft selected locations list.
   void _handleToggleLocation(String locationId) {
-    final nextIds = List<String>.of(_draft.selectedLocationIds);
+    final nextIds = List<String>.of(_draft.locationIds);
     if (!nextIds.remove(locationId)) {
       nextIds.add(locationId);
     }
     setState(() {
-      _draft = _draft.copyWith(selectedLocationIds: nextIds);
+      _draft = _draft.copyWith(locationIds: nextIds);
       _saveErrorText = null;
     });
   }
 
   /// Toggles ISO weekday [isoWeekday] (`1..7`) and keeps the draft sorted ascending.
   void _handleToggleWeekday(int isoWeekday) {
-    final nextDays = List<int>.of(_draft.selectedWeekdays);
+    final nextDays = List<int>.of(_draft.weekdays);
     if (!nextDays.remove(isoWeekday)) {
       nextDays.add(isoWeekday);
       nextDays.sort();
     }
     setState(() {
-      _draft = _draft.copyWith(selectedWeekdays: nextDays);
+      _draft = _draft.copyWith(weekdays: nextDays);
       _saveErrorText = null;
     });
   }
@@ -1281,13 +1288,13 @@ class _EntityConditionsTimesAndLocationsGroup extends StatelessWidget {
   });
 
   /// Available workspace locations.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Whether per-dimension controls accept interaction.
   final bool dimensionsEnabled;
 
   /// Current editable condition draft.
-  final ConditionDraftViewModel draft;
+  final ConditionDraft draft;
 
   /// Enables task-only controls when true.
   final bool isTask;
@@ -1299,8 +1306,7 @@ class _EntityConditionsTimesAndLocationsGroup extends StatelessWidget {
   final ValueChanged<ConditionDimensionMode> onLocationsModeChanged;
 
   /// Callback removing a time window.
-  final UiOrderedItemActionCallback<TimeWindowDraftViewModel>
-  onRemoveTimeWindow;
+  final UiOrderedItemActionCallback<TimeWindowDraft> onRemoveTimeWindow;
 
   /// Callback changing time-window mode.
   final ValueChanged<ConditionDimensionMode> onTimesModeChanged;
@@ -1365,7 +1371,7 @@ class _EntityConditionsTimesSection extends StatelessWidget {
   });
 
   /// Editable condition draft containing time-window mode and list.
-  final ConditionDraftViewModel draft;
+  final ConditionDraft draft;
 
   /// Whether time-window controls accept input.
   final bool enabled;
@@ -1383,8 +1389,7 @@ class _EntityConditionsTimesSection extends StatelessWidget {
   final VoidCallback onAddTimeWindow;
 
   /// Callback removing a time window.
-  final UiOrderedItemActionCallback<TimeWindowDraftViewModel>
-  onRemoveTimeWindow;
+  final UiOrderedItemActionCallback<TimeWindowDraft> onRemoveTimeWindow;
 
   /// Callback changing time-window mode.
   final ValueChanged<ConditionDimensionMode> onTimesModeChanged;
@@ -1399,7 +1404,7 @@ class _EntityConditionsTimesSection extends StatelessWidget {
       title: localizations.conditionTimeGroupTitle,
       isTask: isTask,
       anyLabel: localizations.conditionTimeAnyLabel,
-      mode: draft.timesMode,
+      mode: draft.timeMode,
       enabled: enabled,
       onModeChanged: onTimesModeChanged,
       customChild: _EntityConditionTimeWindowsPicker(

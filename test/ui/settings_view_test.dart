@@ -20,15 +20,16 @@ import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/webdav_config.dart';
-import 'package:tiertask/presentation/app_shell_controller.dart';
-import 'package:tiertask/presentation/log_viewer_controller.dart';
-import 'package:tiertask/presentation/shell_models.dart';
-import 'package:tiertask/presentation/workspace_controller.dart';
 import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/shell_providers.dart';
+import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/ui/primitives/ui_banner.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/primitives/ui_field.dart';
+import 'package:tiertask/ui/primitives/ui_segmented_control.dart';
 import 'package:tiertask/ui/views/settings_view.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import 'test_helpers.dart';
 
@@ -276,14 +277,14 @@ void main() {
           equals(330),
         );
 
-        // Deadline Prioritization exposes all 6 ShellDueLeadOption choices and commits immediately.
+        // Deadline Prioritization exposes all 6 DueLeadWindow choices and commits immediately.
         final dueLeadFieldFinder = find.byKey(
           const ValueKey<String>('settings_due_lead_select'),
         );
         final dueLeadField = tester.widget<UiField>(dueLeadFieldFinder);
         expect(
           dueLeadField.selectOptions.length,
-          equals(ShellDueLeadOption.values.length),
+          equals(DueLeadWindow.values.length),
         );
         final dueLeadDropdown = find.descendant(
           of: dueLeadFieldFinder,
@@ -335,11 +336,11 @@ void main() {
         expect(logStorageFieldFinder, findsOneWidget);
         expect(
           tester.widget<UiField>(logLevelFieldFinder).selectOptions.length,
-          equals(DiagnosticLogLevel.values.length),
+          equals(LogLevel.values.length),
         );
         expect(
           tester.widget<UiField>(logStorageFieldFinder).selectOptions.length,
-          equals(ShellStorageMode.values.length),
+          equals(StorageMode.values.length),
         );
 
         await scrollToAndTap(
@@ -385,10 +386,7 @@ void main() {
           tester,
           find.byKey(const ValueKey<String>('settings_open_log_viewer_button')),
         );
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.logs),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.logs));
       },
     );
 
@@ -399,18 +397,13 @@ void main() {
         tester,
         const _SettingsTestFrame(),
       );
-      container
-          .read(appShellControllerProvider.notifier)
-          .openView(ShellView.settings);
+      container.read(shellProvider.notifier).openView(ShellView.settings);
       await tester.pumpAndSettle();
 
       await tester.tap(find.text(localizations.actionBackToTasks));
       await tester.pumpAndSettle();
 
-      expect(
-        container.read(appShellControllerProvider).view,
-        equals(ShellView.tasks),
-      );
+      expect(container.read(shellProvider).view, equals(ShellView.tasks));
     });
   });
 
@@ -1100,7 +1093,7 @@ void main() {
         );
 
         await container
-            .read(workspaceControllerProvider.notifier)
+            .read(activeWorkspaceProvider.notifier)
             .switchWorkspace(secondWorkspace.id);
         await tester.pumpAndSettle();
 
@@ -1170,10 +1163,10 @@ void main() {
 
         // Mid-flight: control must immediately show Plum Umber, stay enabled, keep element identity, and never spin Test & Sync.
         final midFlightControl = tester
-            .widget<UiSegmentedControl<AppThemePresetKey>>(paletteControl);
+            .widget<UiSegmentedControl<AppThemePalette>>(paletteControl);
         expect(
           midFlightControl.value,
-          equals(AppThemePresetKey.plumUmber),
+          equals(AppThemePalette.plumUmber),
           reason: 'Palette segmented control must update optimistically on frame 0 without snapping back to Calm',
         );
         expect(
@@ -1199,9 +1192,9 @@ void main() {
 
         expect(
           tester
-              .widget<UiSegmentedControl<AppThemePresetKey>>(paletteControl)
+              .widget<UiSegmentedControl<AppThemePalette>>(paletteControl)
               .value,
-          equals(AppThemePresetKey.plumUmber),
+          equals(AppThemePalette.plumUmber),
         );
         expect(
           tester.element(plumTabContainer),

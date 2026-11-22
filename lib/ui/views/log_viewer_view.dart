@@ -19,14 +19,22 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/log_viewer_controller.dart';
-import '../../presentation/shell_models.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/log_viewer_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../services/app_logger.dart';
+import '../layout/ui_page_header.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 
+/// Sentinel dropdown option value matching all diagnostic subsystems.
 const String _allSubsystemsValue = '__all__';
 
 /// Minimum available body width required to place the log toolbar inline with the page heading.
@@ -127,7 +135,7 @@ class _LogConsolePanel extends StatelessWidget {
   final ScrollController horizontalController;
 
   /// Filtered diagnostic log rows to display.
-  final List<DiagnosticLogLineViewModel> lines;
+  final List<DiagnosticLogLine> lines;
 
   /// Vertical scroll controller shared by the lazy list and `Scroll to Bottom` action.
   final ScrollController verticalController;
@@ -170,7 +178,7 @@ class _LogConsoleScrollView extends StatelessWidget {
   final ScrollController horizontalController;
 
   /// Non-empty filtered diagnostic log entries.
-  final List<DiagnosticLogLineViewModel> lines;
+  final List<DiagnosticLogLine> lines;
 
   /// Vertical scroll controller for the lazy `ListView.builder`.
   final ScrollController verticalController;
@@ -220,17 +228,17 @@ class _LogFilterRow extends StatelessWidget {
     required this.onTagChanged,
   });
 
-  /// Active minimum [DiagnosticLogLevel] filter.
-  final DiagnosticLogLevel minimumLevel;
+  /// Active minimum [LogLevel] filter.
+  final LogLevel minimumLevel;
 
   /// Callback invoked when the user chooses a new minimum severity threshold.
-  final ValueChanged<DiagnosticLogLevel> onLevelChanged;
+  final ValueChanged<LogLevel> onLevelChanged;
 
   /// Callback invoked when the user chooses a subsystem tag or `null` for all.
-  final ValueChanged<DiagnosticLogTag?> onTagChanged;
+  final ValueChanged<LogTag?> onTagChanged;
 
-  /// Active subsystem [DiagnosticLogTag] filter, or `null` for all subsystems.
-  final DiagnosticLogTag? selectedTag;
+  /// Active subsystem [LogTag] filter, or `null` for all subsystems.
+  final LogTag? selectedTag;
 
   @override
   Widget build(BuildContext context) {
@@ -271,11 +279,18 @@ class _LogLevelFilterField extends StatelessWidget {
     required this.onLevelChanged,
   });
 
+  /// Cached immutable select options for all [LogLevel] severity levels.
+  static final List<UiSelectOption> _levelOptions =
+      List<UiSelectOption>.unmodifiable(<UiSelectOption>[
+        for (final level in LogLevel.values)
+          UiSelectOption(value: level.name, label: level.label),
+      ]);
+
   /// Currently selected minimum log level.
-  final DiagnosticLogLevel minimumLevel;
+  final LogLevel minimumLevel;
 
   /// Callback invoked on level selection change.
-  final ValueChanged<DiagnosticLogLevel> onLevelChanged;
+  final ValueChanged<LogLevel> onLevelChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -286,12 +301,9 @@ class _LogLevelFilterField extends StatelessWidget {
       kind: UiFieldKind.select,
       label: localizations.logLevelLabel,
       selectValue: minimumLevel.name,
-      selectOptions: <UiSelectOption>[
-        for (final level in DiagnosticLogLevel.values)
-          UiSelectOption(value: level.name, label: level.label),
-      ],
+      selectOptions: _levelOptions,
       onSelectChanged: (rawValue) {
-        final parsed = _parseDiagnosticLogLevel(rawValue);
+        final parsed = _parseLogLevel(rawValue);
         if (parsed != null) {
           onLevelChanged(parsed);
         }
@@ -306,7 +318,7 @@ class _LogLineRow extends StatelessWidget {
   const _LogLineRow({super.key, required this.line});
 
   /// Formatted diagnostic log entry with pre-classified severity.
-  final DiagnosticLogLineViewModel line;
+  final DiagnosticLogLine line;
 
   @override
   Widget build(BuildContext context) {
@@ -372,10 +384,10 @@ class _LogLineRow extends StatelessWidget {
 /// Compact inset card displaying active log session metadata and severity counters.
 class _LogMetadataSummaryCard extends StatelessWidget {
   /// Creates a [_LogMetadataSummaryCard].
-  const _LogMetadataSummaryCard({required this.viewModel});
+  const _LogMetadataSummaryCard({required this.snapshot});
 
-  /// Live diagnostic view model carrying [DiagnosticLogViewModel.headerSummary] and counts.
-  final DiagnosticLogViewModel viewModel;
+  /// Live diagnostic snapshot carrying [DiagnosticLogSnapshot.headerSummary] and counts.
+  final DiagnosticLogSnapshot snapshot;
 
   @override
   Widget build(BuildContext context) {
@@ -391,15 +403,15 @@ class _LogMetadataSummaryCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           SelectableText(
-            viewModel.headerSummary,
+            snapshot.headerSummary,
             style: tokens.typography.monoSmall.copyWith(color: colors.ink),
           ),
           SizedBox(height: tokens.spacing.space1),
           Text(
             localizations.logMetadataStats(
-              viewModel.totalEntries.toString(),
-              viewModel.warningCount.toString(),
-              viewModel.errorCount.toString(),
+              snapshot.totalEntries.toString(),
+              snapshot.warningCount.toString(),
+              snapshot.errorCount.toString(),
             ),
             style: UiTypographyTokens.tabular(
               tokens.typography.meta.copyWith(color: colors.muted),
@@ -420,10 +432,10 @@ class _LogSubsystemFilterField extends StatelessWidget {
   });
 
   /// Callback invoked on subsystem tag change (`null` for all).
-  final ValueChanged<DiagnosticLogTag?> onTagChanged;
+  final ValueChanged<LogTag?> onTagChanged;
 
   /// Currently selected subsystem tag, or `null` for all subsystems.
-  final DiagnosticLogTag? selectedTag;
+  final LogTag? selectedTag;
 
   @override
   Widget build(BuildContext context) {
@@ -439,7 +451,7 @@ class _LogSubsystemFilterField extends StatelessWidget {
           value: _allSubsystemsValue,
           label: localizations.logFilterAllTags,
         ),
-        for (final tag in DiagnosticLogTag.values)
+        for (final tag in LogTag.values)
           UiSelectOption(value: tag.name, label: tag.label),
       ],
       onSelectChanged: (rawValue) {
@@ -447,7 +459,7 @@ class _LogSubsystemFilterField extends StatelessWidget {
           onTagChanged(null);
           return;
         }
-        onTagChanged(_parseDiagnosticLogTag(rawValue));
+        onTagChanged(_parseLogTag(rawValue));
       },
     );
   }
@@ -557,7 +569,7 @@ class _LogViewerHeaderSection extends StatelessWidget {
   /// Creates a [_LogViewerHeaderSection].
   const _LogViewerHeaderSection({
     required this.inlineToolbar,
-    required this.viewModel,
+    required this.snapshot,
     required this.toolbar,
     required this.onBack,
     required this.onLevelChanged,
@@ -571,16 +583,16 @@ class _LogViewerHeaderSection extends StatelessWidget {
   final VoidCallback onBack;
 
   /// Minimum log level change callback.
-  final ValueChanged<DiagnosticLogLevel> onLevelChanged;
+  final ValueChanged<LogLevel> onLevelChanged;
 
   /// Subsystem tag change callback.
-  final ValueChanged<DiagnosticLogTag?> onTagChanged;
+  final ValueChanged<LogTag?> onTagChanged;
+
+  /// Live diagnostic log snapshot.
+  final DiagnosticLogSnapshot snapshot;
 
   /// Toolbar action cluster widget.
   final Widget toolbar;
-
-  /// Live diagnostic log view model.
-  final DiagnosticLogViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
@@ -603,11 +615,11 @@ class _LogViewerHeaderSection extends StatelessWidget {
           toolbar,
         ],
         SizedBox(height: tokens.spacing.space3),
-        _LogMetadataSummaryCard(viewModel: viewModel),
+        _LogMetadataSummaryCard(snapshot: snapshot),
         SizedBox(height: tokens.spacing.space3),
         _LogFilterRow(
-          minimumLevel: viewModel.minimumLevel,
-          selectedTag: viewModel.selectedTag,
+          minimumLevel: snapshot.minimumLevel,
+          selectedTag: snapshot.selectedTag,
           onLevelChanged: onLevelChanged,
           onTagChanged: onTagChanged,
         ),
@@ -621,7 +633,7 @@ class _LogViewerHeaderSection extends StatelessWidget {
 class _LogViewerLayout extends StatelessWidget {
   /// Creates a [_LogViewerLayout].
   const _LogViewerLayout({
-    required this.viewModel,
+    required this.snapshot,
     required this.toolbar,
     required this.console,
     required this.onBack,
@@ -636,16 +648,16 @@ class _LogViewerLayout extends StatelessWidget {
   final VoidCallback onBack;
 
   /// Minimum log level change callback.
-  final ValueChanged<DiagnosticLogLevel> onLevelChanged;
+  final ValueChanged<LogLevel> onLevelChanged;
 
   /// Subsystem tag change callback.
-  final ValueChanged<DiagnosticLogTag?> onTagChanged;
+  final ValueChanged<LogTag?> onTagChanged;
+
+  /// Live diagnostic log snapshot.
+  final DiagnosticLogSnapshot snapshot;
 
   /// Toolbar action cluster widget.
   final Widget toolbar;
-
-  /// Live diagnostic log view model.
-  final DiagnosticLogViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
@@ -655,7 +667,7 @@ class _LogViewerLayout extends StatelessWidget {
       builder: (context, constraints) {
         final header = _LogViewerHeaderSection(
           inlineToolbar: constraints.maxWidth >= _inlineToolbarBreakpoint,
-          viewModel: viewModel,
+          snapshot: snapshot,
           toolbar: toolbar,
           onBack: onBack,
           onLevelChanged: onLevelChanged,
@@ -706,21 +718,21 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final viewModel = ref.watch(logViewerControllerProvider);
-    final controller = ref.read(logViewerControllerProvider.notifier);
+    final snapshot = ref.watch(logViewerProvider);
+    final notifier = ref.read(logViewerProvider.notifier);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
 
     return Padding(
       padding: tokens.spacing.mainContentPadding(viewport),
       child: _LogViewerLayout(
-        viewModel: viewModel,
+        snapshot: snapshot,
         onBack: _navigateBackToTasks,
-        onLevelChanged: controller.setMinimumLevel,
-        onTagChanged: controller.setSelectedTag,
+        onLevelChanged: notifier.setMinimumLevel,
+        onTagChanged: notifier.setSelectedTag,
         toolbar: _LogToolbarActions(
-          canSyncWebDav: viewModel.canSyncWebDav,
-          hasEntries: viewModel.hasEntries,
-          hasFilteredLines: viewModel.filteredLines.isNotEmpty,
+          canSyncWebDav: snapshot.canSyncWebDav,
+          hasEntries: snapshot.hasEntries,
+          hasFilteredLines: snapshot.filteredLines.isNotEmpty,
           isUploading: _isUploading,
           onUploadLog: _handleUploadLog,
           onCopyAll: _handleCopyAll,
@@ -729,7 +741,7 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
         ),
         console: _LogConsolePanel(
           key: const ValueKey<String>('log_viewer_console'),
-          lines: viewModel.filteredLines,
+          lines: snapshot.filteredLines,
           emptyHint: localizations.emptyLogHint,
           horizontalController: _horizontalController,
           verticalController: _verticalController,
@@ -741,25 +753,29 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
   /// Clears buffered diagnostic entries and emits a confirmation floating notice.
   void _clearLog() {
     final localizations = AppLocalizations.of(context);
-    ref.read(logViewerControllerProvider.notifier).clearLog();
+    ref.read(logViewerProvider.notifier).clearLog();
     ref
-        .read(floatingNoticeControllerProvider.notifier)
-        .showNotice(localizations.logClearedSnackBar, tone: NoticeTone.neutral);
+        .read(floatingNoticeProvider.notifier)
+        .showNotice(
+          localizations.logClearedSnackBar,
+          tone: FloatingNoticeTone.neutral,
+        );
   }
 
   /// Copies the complete diagnostic log text to the system clipboard.
   Future<void> _copyAll() async {
     final localizations = AppLocalizations.of(context);
-    final fullText = ref
-        .read(logViewerControllerProvider.notifier)
-        .readFullLogText();
+    final fullText = ref.read(logViewerProvider.notifier).readFullLogText();
     await Clipboard.setData(ClipboardData(text: fullText));
     if (!mounted) {
       return;
     }
     ref
-        .read(floatingNoticeControllerProvider.notifier)
-        .showNotice(localizations.logCopiedSnackBar, tone: NoticeTone.success);
+        .read(floatingNoticeProvider.notifier)
+        .showNotice(
+          localizations.logCopiedSnackBar,
+          tone: FloatingNoticeTone.success,
+        );
   }
 
   /// Triggers [_copyAll] safely from synchronous button tap callbacks.
@@ -774,7 +790,7 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
 
   /// Returns to the primary Tasks shell view.
   void _navigateBackToTasks() {
-    ref.read(appShellControllerProvider.notifier).openView(ShellView.tasks);
+    ref.read(shellProvider.notifier).openView(ShellView.tasks);
   }
 
   /// Scrolls the vertical log list immediately to its bottommost entry.
@@ -794,22 +810,20 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
     setState(() => _isUploading = true);
     try {
       final result = await ref
-          .read(logViewerControllerProvider.notifier)
+          .read(logViewerProvider.notifier)
           .syncLogToWebDav();
       if (!mounted) {
         return;
       }
-      final noticeController = ref.read(
-        floatingNoticeControllerProvider.notifier,
-      );
+      final noticeNotifier = ref.read(floatingNoticeProvider.notifier);
       switch (result) {
         case LogSyncSucceeded():
-          noticeController.showNotice(
+          noticeNotifier.showNotice(
             localizations.logSyncedSnackBar,
-            tone: NoticeTone.success,
+            tone: FloatingNoticeTone.success,
           );
         case LogSyncFailed(:final message):
-          noticeController.showNotice(message, tone: NoticeTone.danger);
+          noticeNotifier.showNotice(message, tone: FloatingNoticeTone.danger);
       }
     } finally {
       if (mounted) {
@@ -821,7 +835,7 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
 
 /// Computes pixel width for horizontal scrolling from the longest line in [lines].
 double _computeLogContentWidth({
-  required List<DiagnosticLogLineViewModel> lines,
+  required List<DiagnosticLogLine> lines,
   required TextStyle style,
   required TextScaler textScaler,
   required double viewportWidth,
@@ -849,9 +863,9 @@ double _computeLogContentWidth({
   return math.max(viewportWidth, measuredWidth);
 }
 
-/// Maps a serialized [DiagnosticLogLevel.name] string back to its enum value.
-DiagnosticLogLevel? _parseDiagnosticLogLevel(String rawValue) {
-  for (final level in DiagnosticLogLevel.values) {
+/// Maps a serialized [LogLevel.name] string back to its enum value.
+LogLevel? _parseLogLevel(String rawValue) {
+  for (final level in LogLevel.values) {
     if (level.name == rawValue) {
       return level;
     }
@@ -859,9 +873,9 @@ DiagnosticLogLevel? _parseDiagnosticLogLevel(String rawValue) {
   return null;
 }
 
-/// Maps a serialized [DiagnosticLogTag.name] string back to its enum value.
-DiagnosticLogTag? _parseDiagnosticLogTag(String rawValue) {
-  for (final tag in DiagnosticLogTag.values) {
+/// Maps a serialized [LogTag.name] string back to its enum value.
+LogTag? _parseLogTag(String rawValue) {
+  for (final tag in LogTag.values) {
     if (tag.name == rawValue) {
       return tag;
     }

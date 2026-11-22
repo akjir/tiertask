@@ -29,19 +29,17 @@ import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/settings_codec.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
-import 'package:tiertask/presentation/app_shell_controller.dart';
-import 'package:tiertask/presentation/board_boundary_timer.dart';
-import 'package:tiertask/presentation/board_presentation_providers.dart';
-import 'package:tiertask/presentation/floating_notice_controller.dart';
-import 'package:tiertask/presentation/settings_controller.dart';
-import 'package:tiertask/presentation/shell_chrome_view_models.dart';
-import 'package:tiertask/presentation/shell_models.dart';
-import 'package:tiertask/presentation/workspace_controller.dart';
+import 'package:tiertask/providers/board_providers.dart';
 import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/entity_actions_provider.dart';
+import 'package:tiertask/providers/floating_notice_providers.dart';
 import 'package:tiertask/providers/location_providers.dart';
+import 'package:tiertask/providers/settings_draft_providers.dart';
+import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
@@ -53,8 +51,19 @@ import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/sha256_service.dart';
 import 'package:tiertask/services/tdf_service.dart';
+import 'package:tiertask/ui/components/ui_searchable_picker.dart';
+import 'package:tiertask/ui/dialogs/compact_label_picker_sheet.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/primitives/ui_segmented_control.dart';
+import 'package:tiertask/ui/primitives/ui_toggle_row.dart';
 import 'package:tiertask/ui/tier_task_shell_screen.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
+import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
+import 'package:tiertask/ui/views/raw_tdf_view.dart';
+import 'package:tiertask/ui/views/resolution_views.dart';
+import 'package:tiertask/ui/views/task_detail_editors.dart';
+import 'package:tiertask/ui/widgets/entity_note_section.dart';
+
+import 'test_helpers.dart';
 
 /// Controllable [LocationRepository] allowing tests to hold a lookup in the `searching` state.
 class _CompleterLocationRepository extends FakeLocationRepository {
@@ -181,6 +190,21 @@ class _ControllableSettingsRepository extends InMemorySettingsRepository {
       await barrier.future;
     }
     await super.saveConfig(config);
+  }
+}
+
+/// Counting [TdfService] subclass recording canonical `.tdf` serialization calls.
+class _CountingTdfService extends TdfService {
+  /// Creates a [_CountingTdfService].
+  _CountingTdfService();
+
+  /// Number of [serialize] invocations observed.
+  int serializeCalls = 0;
+
+  @override
+  String serialize(TaskBoard board) {
+    serializeCalls++;
+    return super.serialize(board);
   }
 }
 
@@ -540,15 +564,10 @@ void main() {
           equals('Mid-Flight Title'),
           reason: 'Failed inline save must preserve user text buffer',
         );
-        expect(
-          container.read(appShellControllerProvider).activeInlineEdit,
-          isNotNull,
-        );
+        expect(container.read(shellProvider).activeInlineEdit, isNotNull);
 
         // Switch to Settings, edit WebDAV URL, suspend save on Completer, navigate away mid-flight.
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.settings);
+        container.read(shellProvider.notifier).openView(ShellView.settings);
         await tester.pumpAndSettle();
 
         final urlField = find.descendant(
@@ -560,10 +579,7 @@ void main() {
         await tester.ensureVisible(urlField);
         await tester.enterText(urlField, 'https://next.example.com');
         await tester.pumpAndSettle();
-        expect(
-          container.read(settingsControllerProvider).isWebDavDirty,
-          isTrue,
-        );
+        expect(container.read(settingsDraftProvider).isDirty, isTrue);
 
         final settingsCompleter = Completer<void>();
         settingsRepo.pendingSave = settingsCompleter;
@@ -573,9 +589,7 @@ void main() {
         await tester.pump();
 
         // Navigate back to Tasks while Settings save is suspended in-flight.
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.tasks);
+        container.read(shellProvider.notifier).openView(ShellView.tasks);
         await tester.pump();
 
         // Complete the suspended Settings save after SettingsView has disposed.
@@ -584,10 +598,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
       },
     );
 
@@ -727,16 +738,10 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.pumpAndSettle();
 
+        expect(container.read(shellProvider).expandedEntity, isNull);
+        expect(container.read(shellProvider).activeInlineEdit, isNull);
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
-          isNull,
-        );
-        expect(
-          container.read(appShellControllerProvider).activeInlineEdit,
-          isNull,
-        );
-        expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           contains('removed'),
           reason: 'External deletion must show entityRemovedExternallyNotice',
         );
@@ -763,17 +768,14 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.pumpAndSettle();
 
+        expect(container.read(shellProvider).activeInlineEdit, isNull);
         expect(
-          container.read(appShellControllerProvider).activeInlineEdit,
-          isNull,
-        );
-        expect(
-          container.read(appShellControllerProvider).expandedEntity?.id,
+          container.read(shellProvider).expandedEntity?.id,
           equals('taskB00002'),
           reason: 'Externally completed task stays expanded in read-only completed mode',
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           contains('completed'),
           reason: 'External completion during non-History edit must emit taskCompletedExternallyNotice',
         );
@@ -785,7 +787,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          container.read(floatingNoticeControllerProvider)?.undoSequence,
+          container.read(floatingNoticeProvider)?.undoSequence,
           isNotNull,
           reason: 'Local subtask auto-finish must keep Undo floating notice without external-change clobber',
         );
@@ -902,41 +904,33 @@ void main() {
           find.byKey(const ValueKey<String>('task_complete_taskA00001')),
         );
         await tester.pumpAndSettle();
-        expect(container.read(boardChromeViewModelProvider).canUndo, isTrue);
+        expect(container.read(taskUndoStateProvider).canUndo, isTrue);
 
-        final shellNotifier = container.read(
-          appShellControllerProvider.notifier,
-        );
+        final shellNotifier = container.read(shellProvider.notifier);
         shellNotifier.selectLabelFilter('work000001');
         shellNotifier.openDraft(EntityDraftKind.task);
         shellNotifier.openView(ShellView.settings);
         await tester.pumpAndSettle();
 
         container
-            .read(settingsControllerProvider.notifier)
+            .read(settingsDraftProvider.notifier)
             .updateWebDavDraft(serverUrl: 'https://dirty.example.com');
         await tester.pump();
-        expect(
-          container.read(settingsControllerProvider).isWebDavDirty,
-          isTrue,
-        );
+        expect(container.read(settingsDraftProvider).isDirty, isTrue);
 
         // Switch workspace across await boundary.
         await container
-            .read(workspaceControllerProvider.notifier)
+            .read(workspaceActionsProvider.notifier)
             .switchWorkspace('ws_work');
         await tester.pumpAndSettle();
 
-        final shellAfter = container.read(appShellControllerProvider);
+        final shellAfter = container.read(shellProvider);
         expect(shellAfter.activeDraft, isNull);
         expect(shellAfter.expandedEntity, isNull);
         expect(shellAfter.activeLabelId, isNull);
         expect(shellAfter.searchOpen, isFalse);
-        expect(container.read(boardChromeViewModelProvider).canUndo, isFalse);
-        expect(
-          container.read(settingsControllerProvider).isWebDavDirty,
-          isFalse,
-        );
+        expect(container.read(taskUndoStateProvider).canUndo, isFalse);
+        expect(container.read(settingsDraftProvider).isDirty, isFalse);
         expect(find.text('Work Workspace Task'), findsOneWidget);
       },
     );
@@ -1015,17 +1009,17 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          container.read(appShellControllerProvider).activeTier,
-          equals(ShellTier.focus),
+          container.read(shellProvider).activeTier,
+          equals(TaskTier.focus),
           reason: 'Quick-Add must never jump tiers on task creation',
         );
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
+          container.read(shellProvider).expandedEntity,
           isNull,
           reason: 'Quick-Add must not auto-expand newly created tasks',
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           contains('Someday'),
         );
 
@@ -1034,7 +1028,7 @@ void main() {
           find.byKey(const ValueKey<String>('task_complete_taskB00002')),
         );
         await tester.pumpAndSettle();
-        expect(container.read(boardChromeViewModelProvider).canUndo, isTrue);
+        expect(container.read(taskUndoStateProvider).canUndo, isTrue);
 
         container
             .read(syncStateProvider.notifier)
@@ -1052,21 +1046,15 @@ void main() {
           find.byKey(const ValueKey<String>('chrome_sync_button')),
         );
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.conflict),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.conflict));
 
         await tester.tap(
           find.byKey(const ValueKey<String>('resolution_apply_button')),
         );
         await tester.pumpAndSettle();
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
         expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
-        expect(
-          container.read(boardChromeViewModelProvider).canUndo,
+          container.read(taskUndoStateProvider).canUndo,
           isFalse,
           reason: 'Conflict resolution must clear stale Undo history',
         );
@@ -1088,19 +1076,13 @@ void main() {
           find.byKey(const ValueKey<String>('chrome_sync_button')),
         );
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.recovery),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.recovery));
 
         await tester.tap(
           find.byKey(const ValueKey<String>('resolution_apply_button')),
         );
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
       },
     );
 
@@ -1150,20 +1132,18 @@ void main() {
         );
 
         // Layers 1 -> 2 -> 4 -> 5 -> 6 via live Escape key events.
-        final shellNotifier = container.read(
-          appShellControllerProvider.notifier,
-        );
+        final shellNotifier = container.read(shellProvider.notifier);
         shellNotifier.openSearch();
         shellNotifier.openDraft(EntityDraftKind.task);
         shellNotifier.setLabelPickerOpen(true);
-        shellNotifier.setLabelPickerQuery('wo');
+        container.read(labelPickerQueryProvider.notifier).setQuery('wo');
         shellNotifier.toggleSidebarLabelsFilter();
         await tester.pumpAndSettle();
 
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).labelPickerQuery,
+          container.read(labelPickerQueryProvider),
           isEmpty,
           reason: 'Layer 1 Escape must clear label picker query first',
         );
@@ -1171,7 +1151,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).sidebarLabelsFilterOpen,
+          container.read(shellProvider).sidebarLabelsFilterOpen,
           isFalse,
           reason: 'Layer 2 Escape must close open sidebar filter second',
         );
@@ -1179,7 +1159,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).labelPickerOpen,
+          container.read(shellProvider).labelPickerOpen,
           isFalse,
           reason: 'Layer 4 Escape must close inline label picker',
         );
@@ -1187,7 +1167,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).activeDraft,
+          container.read(shellProvider).activeDraft,
           isNull,
           reason: 'Layer 5 Escape must cancel uncommitted draft card',
         );
@@ -1195,7 +1175,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).searchOpen,
+          container.read(shellProvider).searchOpen,
           isFalse,
           reason: 'Layer 6 Escape must close Global Search',
         );
@@ -1212,7 +1192,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).activeInlineEdit,
+          container.read(shellProvider).activeInlineEdit,
           isNull,
           reason: 'Layer 7 Escape must cancel active inline section edit',
         );
@@ -1220,7 +1200,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).activeDeleteConfirm,
+          container.read(shellProvider).activeDeleteConfirm,
           isNull,
           reason: 'Layer 8 Escape must cancel active inline delete confirm',
         );
@@ -1228,7 +1208,7 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
+          container.read(shellProvider).expandedEntity,
           isNull,
           reason: 'Layer 9 Escape must collapse expanded entity card',
         );
@@ -1237,29 +1217,20 @@ void main() {
         shellNotifier.openView(ShellView.settings);
         shellNotifier.toggleSidebarLabelsFilter();
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).sidebarLabelsFilterOpen,
-          isTrue,
-        );
+        expect(container.read(shellProvider).sidebarLabelsFilterOpen, isTrue);
 
         await tester.binding.handlePopRoute();
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).sidebarLabelsFilterOpen,
+          container.read(shellProvider).sidebarLabelsFilterOpen,
           isFalse,
           reason: 'Tablet PopScope must close open Layer 2 sidebar filter before unwinding view',
         );
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.settings),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.settings));
 
         await tester.binding.handlePopRoute();
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
 
         // Compact <= 720px: Quick-Add + Labels bottom sheet must NOT auto-focus search input (U-A11Y-003).
         tester.view.physicalSize = const Size(390, 844);
@@ -1882,19 +1853,15 @@ task loc100OkD2 priority {
         await tester.pumpAndSettle();
 
         // Reproduce user flow: Logs -> Settings -> click Plum Umber.
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.logs);
+        container.read(shellProvider.notifier).openView(ShellView.logs);
         await tester.pumpAndSettle();
         AppLogger.clear();
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.settings);
+        container.read(shellProvider.notifier).openView(ShellView.settings);
         await tester.pumpAndSettle();
 
         final configTransitions = <AsyncValue<WebDavConfig>>[];
         final taskTransitions = <AsyncValue<TaskBoard>>[];
-        final paletteTransitions = <AppThemePresetKey>[];
+        final paletteTransitions = <AppThemePalette>[];
         final configSub = container.listen(
           webDavConfigProvider,
           (_, next) => configTransitions.add(next),
@@ -1903,14 +1870,14 @@ task loc100OkD2 priority {
           taskNotifierProvider,
           (_, next) => taskTransitions.add(next),
         );
-        final settingsSub = container.listen(
-          settingsControllerProvider.select((model) => model.themePalette),
+        final paletteSub = container.listen(
+          appThemePaletteProvider,
           (_, next) => paletteTransitions.add(next),
         );
         addTearDown(() {
           configSub.close();
           taskSub.close();
-          settingsSub.close();
+          paletteSub.close();
         });
 
         final paletteControl = find.byKey(
@@ -1939,9 +1906,9 @@ task loc100OkD2 priority {
 
         expect(
           tester
-              .widget<UiSegmentedControl<AppThemePresetKey>>(paletteControl)
+              .widget<UiSegmentedControl<AppThemePalette>>(paletteControl)
               .value,
-          equals(AppThemePresetKey.plumUmber),
+          equals(AppThemePalette.plumUmber),
           reason: 'Mid-flight segmented control must hold Plum Umber without bouncing back',
         );
         expect(
@@ -1957,7 +1924,7 @@ task loc100OkD2 priority {
 
         expect(
           paletteTransitions,
-          equals(const <AppThemePresetKey>[AppThemePresetKey.plumUmber]),
+          equals(const <AppThemePalette>[AppThemePalette.plumUmber]),
           reason: 'Palette selection must transition monotonically once from Calm to Plum Umber',
         );
         expect(
@@ -1980,6 +1947,1108 @@ task loc100OkD2 priority {
           isNot(contains('domain.lead_window.reevaluated')),
           reason: 'Palette update must not trigger spurious lead-window re-evaluation',
         );
+      },
+    );
+
+    testWidgets(
+      'Rapid sequential preference toggles (Palette -> ThemeMode -> Language) while save is suspended apply optimistically without dropping clicks, AsyncLoading bounce, TaskNotifier resync, WebDavRepository ETag reset, or duplicate log rewrites',
+      (tester) async {
+        _setViewport(tester, const Size(1280, 860));
+        AppLogger.resetForTesting();
+        addTearDown(AppLogger.resetForTesting);
+
+        final tempDirectory = Directory.systemTemp.createTempSync(
+          'tiertask_rapid_prefs_',
+        );
+        addTearDown(() {
+          if (tempDirectory.existsSync()) {
+            tempDirectory.deleteSync(recursive: true);
+          }
+        });
+        final tdfPath =
+            '${tempDirectory.path}${Platform.pathSeparator}tasks.tdf';
+        File(tdfPath).writeAsStringSync(buildSeedTdf(), flush: true);
+
+        final initialConfig = WebDavConfig(
+          language: AppLanguage.english,
+          themePalette: AppThemePalette.calm,
+          themeMode: AppThemeMode.light,
+          storageMode: StorageMode.local,
+          localFilePath: tdfPath,
+          serverUrl: 'https://cloud.example.com',
+          username: 'alice',
+          password: 'secret',
+          filePath: 'tasks.tdf',
+          diagnosticsEnabled: true,
+          logLevel: LogLevel.info,
+          logStorageMode: StorageMode.local,
+        );
+        Completer<void>? saveGate;
+        final settingsRepository = _DelayedSettingsRepository(
+          initialConfig: initialConfig,
+          onLoad: () async {},
+          onSave: () async {
+            if (saveGate case final gate?) {
+              await gate.future;
+            }
+          },
+        );
+
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepository),
+            localStorageDirectoryPathProvider.overrideWithValue(
+              tempDirectory.path,
+            ),
+            clockProvider.overrideWithValue(() => baseTime),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Settings'));
+        await tester.pumpAndSettle();
+
+        final paletteControl = find.byKey(
+          const ValueKey<String>('settings_theme_palette_control'),
+        );
+        final modeControl = find.byKey(
+          const ValueKey<String>('settings_theme_mode_control'),
+        );
+        final languageControl = find.byKey(
+          const ValueKey<String>('settings_language_control'),
+        );
+        await tester.ensureVisible(paletteControl);
+        await tester.ensureVisible(modeControl);
+        await tester.ensureVisible(languageControl);
+
+        final webDavRepositoryBefore = container.read(webDavRepositoryProvider);
+        final localRepositoryBefore = container.read(
+          localFileRepositoryProvider,
+        );
+        final logRevisionBefore = AppLogger.revision.value;
+
+        final configTransitions = <AsyncValue<WebDavConfig>>[];
+        final taskTransitions = <AsyncValue<TaskBoard>>[];
+        final configSubscription = container.listen(
+          webDavConfigProvider,
+          (_, next) => configTransitions.add(next),
+        );
+        final taskSubscription = container.listen(
+          taskNotifierProvider,
+          (_, next) => taskTransitions.add(next),
+        );
+        addTearDown(() {
+          configSubscription.close();
+          taskSubscription.close();
+        });
+
+        saveGate = Completer<void>();
+
+        // Tap 1: Plum Umber palette while disk save is suspended.
+        await tester.tap(
+          find.descendant(
+            of: paletteControl,
+            matching: find.text('Plum Umber'),
+          ),
+        );
+        await tester.pump();
+
+        expect(
+          container.read(webDavConfigProvider).requireValue.themePalette,
+          equals(AppThemePalette.plumUmber),
+          reason: 'Palette tap must apply optimistically before save completes',
+        );
+        expect(
+          tester.widget<UiSegmentedControl<AppThemeMode>>(modeControl).enabled,
+          isTrue,
+          reason:
+              'Theme mode control must remain enabled during suspended save',
+        );
+        expect(
+          container.read(webDavRepositoryProvider),
+          same(webDavRepositoryBefore),
+          reason: 'Palette toggle must keep WebDavRepository instance and ETag cache intact',
+        );
+        expect(
+          container.read(localFileRepositoryProvider),
+          same(localRepositoryBefore),
+          reason:
+              'Palette toggle must keep LocalFileRepository instance intact',
+        );
+        expect(
+          AppLogger.revision.value,
+          equals(logRevisionBefore),
+          reason: 'Palette toggle must not trigger diagnostic log rewrites',
+        );
+
+        // Tap 2: Dark theme mode while disk save is still suspended.
+        await tester.tap(
+          find.descendant(of: modeControl, matching: find.text('Dark')),
+        );
+        await tester.pump();
+
+        final afterSecondTap = container
+            .read(webDavConfigProvider)
+            .requireValue;
+        expect(afterSecondTap.themePalette, equals(AppThemePalette.plumUmber));
+        expect(
+          afterSecondTap.themeMode,
+          equals(AppThemeMode.dark),
+          reason: 'Second rapid preference click must compose onto first without dropping input',
+        );
+        expect(
+          tester
+              .widget<UiSegmentedControl<AppLanguage>>(languageControl)
+              .enabled,
+          isTrue,
+          reason: 'Language control must remain enabled during suspended save',
+        );
+        expect(
+          container.read(webDavRepositoryProvider),
+          same(webDavRepositoryBefore),
+          reason: 'Theme mode toggle must keep WebDavRepository instance and ETag cache intact',
+        );
+        expect(
+          container.read(localFileRepositoryProvider),
+          same(localRepositoryBefore),
+          reason:
+              'Theme mode toggle must keep LocalFileRepository instance intact',
+        );
+        expect(
+          AppLogger.revision.value,
+          equals(logRevisionBefore),
+          reason: 'Theme mode toggle must not trigger diagnostic log rewrites',
+        );
+
+        // Tap 3: Deutsch language while disk save is still suspended.
+        await tester.tap(
+          find.descendant(of: languageControl, matching: find.text('Deutsch')),
+        );
+        await tester.pump();
+        // Advance AnimatedTheme (200ms) while disk save Completer remains suspended.
+        await tester.pump(const Duration(milliseconds: 250));
+
+        final afterThirdTap = container.read(webDavConfigProvider).requireValue;
+        expect(afterThirdTap.themePalette, equals(AppThemePalette.plumUmber));
+        expect(afterThirdTap.themeMode, equals(AppThemeMode.dark));
+        expect(
+          afterThirdTap.language,
+          equals(AppLanguage.german),
+          reason: 'Third rapid preference click must apply optimistically before save completes',
+        );
+        final midFlightContext = tester.element(
+          find.byType(TierTaskShellScreen),
+        );
+        expect(
+          UiThemeTokens.of(midFlightContext).colors.bg,
+          equals(UiThemePresets.plumUmber.dark.colors.bg),
+          reason: 'Live theme tokens must reflect Plum Umber Dark immediately',
+        );
+        expect(
+          AppLocalizations.of(midFlightContext).settingsTitle,
+          equals('Einstellungen'),
+          reason: 'Live locale must reflect German immediately',
+        );
+        expect(
+          AppLogger.revision.value,
+          equals(logRevisionBefore + 1),
+          reason: 'Locale update must refresh diagnostic log header at most once without double-writing',
+        );
+        final webDavRepositoryAfterLanguage = container.read(
+          webDavRepositoryProvider,
+        );
+
+        // Release suspended Completer and settle all queued persistence writes.
+        saveGate.complete();
+        saveGate = null;
+        await tester.pumpAndSettle();
+
+        expect(
+          configTransitions.any((state) => state is AsyncLoading<WebDavConfig>),
+          isFalse,
+          reason: 'Rapid sequential preference saves must never bounce webDavConfigProvider through AsyncLoading',
+        );
+        expect(
+          taskTransitions,
+          isEmpty,
+          reason:
+              'Preference toggles must never resync or rebuild TaskNotifier',
+        );
+        expect(
+          container.read(webDavRepositoryProvider),
+          same(webDavRepositoryAfterLanguage),
+          reason: 'Completing queued preference writes must not recreate WebDavRepository',
+        );
+
+        final persistedConfig = await settingsRepository.loadConfig();
+        expect(persistedConfig.themePalette, equals(AppThemePalette.plumUmber));
+        expect(persistedConfig.themeMode, equals(AppThemeMode.dark));
+        expect(persistedConfig.language, equals(AppLanguage.german));
+        expect(
+          AppLogger.fullLogText,
+          contains('@meta locale=de'),
+          reason: 'Diagnostic log header must persist updated locale',
+        );
+        expect(
+          AppLogger.revision.value,
+          equals(logRevisionBefore + 4),
+          reason: 'Completing 3 preference saves must emit only 1 locale header refresh plus 3 config.update lines without double-writing',
+        );
+      },
+    );
+
+    testWidgets(
+      'Leaving RawTdfView auto-disposes rawTdfPreviewProvider so subsequent task mutations perform zero background serializations',
+      (tester) async {
+        _setViewport(tester, const Size(1280, 860));
+        final countingTdfService = _CountingTdfService();
+        final seedBoard = TaskBoard.evaluate(
+          tasks: <TaskItem>[
+            TaskItem(
+              id: 'taskA00001',
+              title: 'Primary Focus Task',
+              createdAt: baseTime,
+              modifiedAt: baseTime,
+            ),
+            TaskItem(
+              id: 'taskB00002',
+              title: 'Second Focus Task',
+              createdAt: baseTime,
+              modifiedAt: baseTime,
+            ),
+          ],
+          queueBlock: TdfQueueBlock(
+            modifiedAt: baseTime,
+            taskIds: const <String>['taskA00001', 'taskB00002'],
+          ),
+          evaluationTime: baseTime,
+          localEvaluationTime: baseTime,
+        );
+
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(
+                const WebDavConfig(language: AppLanguage.english),
+              ),
+            ),
+            taskNotifierProvider.overrideWith(
+              () => FakeTaskNotifier(seedBoard),
+            ),
+            tdfServiceProvider.overrideWithValue(countingTdfService),
+            clockProvider.overrideWithValue(() => baseTime),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          countingTdfService.serializeCalls,
+          equals(0),
+          reason: 'TasksView must not eagerly compute rawTdfPreviewProvider',
+        );
+
+        // Open RawTdfView via the sidebar navigation link.
+        await tester.tap(find.text('Raw TDF 0.8.0'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(RawTdfView), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey<String>('raw_tdf_code_block')),
+          findsOneWidget,
+        );
+        expect(
+          countingTdfService.serializeCalls,
+          equals(1),
+          reason: 'Opening RawTdfView must serialize the board exactly once',
+        );
+
+        // Navigate back to TasksView so auto-disposed rawTdfPreviewProvider tears down.
+        await tester.tap(find.text('Back to tasks'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(RawTdfView), findsNothing);
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
+
+        // Perform multiple real UI task mutations on TasksView.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_complete_taskA00001')),
+        );
+        await tester.pumpAndSettle();
+
+        final quickAddInput = find.descendant(
+          of: find.byKey(const ValueKey<String>('tasks_quick_add_composer')),
+          matching: find.byType(EditableText),
+        );
+        await tester.enterText(quickAddInput, 'Mutated After Leaving Raw View');
+        await tester.tap(find.widgetWithText(UiButton, 'Add'));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Second Focus Task'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_edit_title_taskB00002')),
+        );
+        await tester.pumpAndSettle();
+        final titleInput = find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('task_title_editor_input_taskB00002'),
+          ),
+          matching: find.byType(EditableText),
+        );
+        await tester.enterText(titleInput, 'Renamed After Leaving Raw View');
+        await tester.tap(
+          find.byKey(
+            const ValueKey<String>('task_title_editor_save_taskB00002'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          countingTdfService.serializeCalls,
+          equals(1),
+          reason: 'Auto-disposed rawTdfPreviewProvider must execute zero background serializations after leaving RawTdfView',
+        );
+
+        // Re-opening RawTdfView recomputes fresh serialized output once.
+        await tester.tap(find.text('Raw TDF 0.8.0'));
+        await tester.pumpAndSettle();
+        expect(
+          countingTdfService.serializeCalls,
+          equals(2),
+          reason: 'Re-entering RawTdfView must recompute preview once',
+        );
+        expect(
+          find.textContaining('Renamed After Leaving Raw View'),
+          findsOneWidget,
+        );
+      },
+    );
+
+    testWidgets(
+      'DeletionConflictView and GenerationRecoveryView decisions survive live locale updates and background board updates without resetting',
+      (tester) async {
+        _setViewport(tester, const Size(1280, 860));
+        const config = WebDavConfig(
+          language: AppLanguage.english,
+          storageMode: StorageMode.both,
+          serverUrl: 'https://cloud.example.com',
+          username: 'alice',
+          password: 'secret',
+          dueLeadWindow: DueLeadWindow.hours24,
+        );
+        final seedTdf = buildSeedTdf();
+        final localRepository = _ControllableLocalFileRepository(
+          config: config,
+          content: seedTdf,
+        );
+        final webDavRepository = _InMemoryWebDavRepository(
+          config: config,
+          remoteTdf: seedTdf,
+        );
+
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(config),
+            ),
+            localFileRepositoryProvider.overrideWith((ref) => localRepository),
+            webDavRepositoryProvider.overrideWith((ref) => webDavRepository),
+            clockProvider.overrideWithValue(() => baseTime),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        var boardEmissionCount = 0;
+        final boardSubscription = container.listen(taskNotifierProvider, (
+          _,
+          next,
+        ) {
+          if (next.hasValue) {
+            boardEmissionCount++;
+          }
+        });
+        addTearDown(boardSubscription.close);
+
+        // Part 1: DeletionConflictView decision survival across locale and board updates.
+        container
+            .read(syncStateProvider.notifier)
+            .setConflict(
+              'Deletion conflict',
+              outcome: const TdfSyncOutcomeException(
+                kind: TdfSyncOutcomeKind.deletionConflict,
+                message: 'Deletion conflict',
+                conflictedTaskIds: <String>['taskA00001'],
+              ),
+            );
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('chrome_sync_button')),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(DeletionConflictView), findsOneWidget);
+
+        final conflictCard = find.byKey(
+          const ValueKey<String>('conflict_card_task_taskA00001'),
+        );
+        final conflictSegmented = find.descendant(
+          of: conflictCard,
+          matching: find.byType(UiSegmentedControl<TdfDeletionResolution>),
+        );
+        expect(
+          tester
+              .widget<UiSegmentedControl<TdfDeletionResolution>>(
+                conflictSegmented,
+              )
+              .value,
+          equals(TdfDeletionResolution.undelete),
+          reason: 'Deletion conflict decision must default to undelete',
+        );
+
+        await tester.tap(
+          find.descendant(
+            of: conflictCard,
+            matching: find.text('Confirm Deletion'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<UiSegmentedControl<TdfDeletionResolution>>(
+                conflictSegmented,
+              )
+              .value,
+          equals(TdfDeletionResolution.delete),
+        );
+
+        final boardEmissionsBeforeConflictUpdates = boardEmissionCount;
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateLanguage(AppLanguage.german);
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateDueLeadWindow(DueLeadWindow.hours48);
+        await tester.pumpAndSettle();
+
+        expect(
+          boardEmissionCount,
+          greaterThan(boardEmissionsBeforeConflictUpdates),
+          reason: 'Background board re-evaluation must emit a real TaskBoard update',
+        );
+        expect(container.read(appLocaleProvider), equals(const Locale('de')));
+        expect(
+          tester
+              .widget<UiSegmentedControl<TdfDeletionResolution>>(
+                conflictSegmented,
+              )
+              .value,
+          equals(TdfDeletionResolution.delete),
+          reason: 'Selected DeletionConflict decision in UI card must survive locale and background board updates',
+        );
+        expect(
+          container.read(conflictDecisionsProvider)[resolutionDecisionKey(
+            'task',
+            'taskA00001',
+          )],
+          equals(TdfDeletionResolution.delete),
+        );
+
+        // Part 2: GenerationRecoveryView decision survival across locale and board updates.
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateLanguage(AppLanguage.english);
+        await tester.pumpAndSettle();
+
+        container
+            .read(syncStateProvider.notifier)
+            .setConflict(
+              'Recovery required',
+              outcome: const TdfSyncOutcomeException(
+                kind: TdfSyncOutcomeKind.recoveryRequired,
+                message: 'Recovery required',
+                ambiguousTaskIds: <String>['taskA00001'],
+              ),
+            );
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('chrome_sync_button')),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(GenerationRecoveryView), findsOneWidget);
+
+        final recoveryCard = find.byKey(
+          const ValueKey<String>('recovery_card_task_taskA00001'),
+        );
+        final recoverySegmented = find.descendant(
+          of: recoveryCard,
+          matching: find.byType(UiSegmentedControl<TdfRecoveryResolution>),
+        );
+        expect(
+          tester
+              .widget<UiSegmentedControl<TdfRecoveryResolution>>(
+                recoverySegmented,
+              )
+              .value,
+          equals(TdfRecoveryResolution.recoverAsNew),
+          reason: 'Generation recovery decision must default to recoverAsNew',
+        );
+
+        await tester.tap(
+          find.descendant(
+            of: recoveryCard,
+            matching: find.text('Discard Local Change'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<UiSegmentedControl<TdfRecoveryResolution>>(
+                recoverySegmented,
+              )
+              .value,
+          equals(TdfRecoveryResolution.discard),
+        );
+
+        final boardEmissionsBeforeRecoveryUpdates = boardEmissionCount;
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateLanguage(AppLanguage.german);
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateDueLeadWindow(DueLeadWindow.days7);
+        await tester.pumpAndSettle();
+
+        expect(
+          boardEmissionCount,
+          greaterThan(boardEmissionsBeforeRecoveryUpdates),
+          reason: 'Background board re-evaluation must emit a real TaskBoard update during recovery',
+        );
+        expect(container.read(appLocaleProvider), equals(const Locale('de')));
+        expect(
+          tester
+              .widget<UiSegmentedControl<TdfRecoveryResolution>>(
+                recoverySegmented,
+              )
+              .value,
+          equals(TdfRecoveryResolution.discard),
+          reason: 'Selected GenerationRecovery decision in UI card must survive locale and background board updates',
+        );
+        expect(
+          container.read(recoveryDecisionsProvider)[resolutionDecisionKey(
+            'task',
+            'taskA00001',
+          )],
+          equals(TdfRecoveryResolution.discard),
+        );
+      },
+    );
+
+    testWidgets(
+      'Offline StorageMode.both inline Title and Note edits commit locally, close inline editors, and keep sync error banner visible',
+      (tester) async {
+        _setViewport(tester, const Size(1280, 860));
+        final tempDirectory = Directory.systemTemp.createTempSync(
+          'tiertask_offline_both_',
+        );
+        addTearDown(() {
+          if (tempDirectory.existsSync()) {
+            tempDirectory.deleteSync(recursive: true);
+          }
+        });
+        final tdfPath =
+            '${tempDirectory.path}${Platform.pathSeparator}tasks.tdf';
+        final seedTdf = buildSeedTdf();
+        File(tdfPath).writeAsStringSync(seedTdf, flush: true);
+
+        final config = WebDavConfig(
+          language: AppLanguage.english,
+          storageMode: StorageMode.both,
+          localFilePath: tdfPath,
+          serverUrl: 'https://cloud.example.com',
+          username: 'alice',
+          password: 'secret',
+          filePath: 'tasks.tdf',
+        );
+        var isWebDavOffline = false;
+        final remoteStore = <String, String>{
+          config.resolveEndpointUri()?.path ?? '': seedTdf,
+        };
+        final webDavRepository = FakeWebDavRepository(
+          config: config,
+          shouldFail: () => isWebDavOffline,
+          remoteStore: remoteStore,
+        );
+
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(config),
+            ),
+            localStorageDirectoryPathProvider.overrideWithValue(
+              tempDirectory.path,
+            ),
+            webDavRepositoryProvider.overrideWith((ref) => webDavRepository),
+            clockProvider.overrideWithValue(() => baseTime),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Transition WebDAV offline before inline edits begin.
+        isWebDavOffline = true;
+
+        // 1. Expand taskA00001 and commit an inline Title edit while offline.
+        await tester.tap(find.text('Primary Focus Task'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_edit_title_taskA00001')),
+        );
+        await tester.pumpAndSettle();
+
+        final titleInput = find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('task_title_editor_input_taskA00001'),
+          ),
+          matching: find.byType(EditableText),
+        );
+        await tester.enterText(titleInput, 'Offline Edited Focus Title');
+        await tester.tap(
+          find.byKey(
+            const ValueKey<String>('task_title_editor_save_taskA00001'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          container.read(shellProvider).activeInlineEdit,
+          isNull,
+          reason: 'Offline dual-storage local title commit must close inline editor cleanly',
+        );
+        expect(
+          find.byKey(
+            const ValueKey<String>('task_title_editor_input_taskA00001'),
+          ),
+          findsNothing,
+        );
+        expect(
+          find.text('Offline Edited Focus Title'),
+          findsOneWidget,
+          reason: 'Updated task title must render immediately on the card',
+        );
+        expect(
+          File(tdfPath).readAsStringSync(),
+          contains('Offline Edited Focus Title'),
+          reason: 'Updated task title must be persisted to local .tdf on disk',
+        );
+        expect(
+          find.byKey(
+            const ValueKey<String>('tasks_status_banner_partialFileRead'),
+          ),
+          findsOneWidget,
+          reason: 'Offline remote failure in StorageMode.both must keep the partial file-read danger banner visible',
+        );
+        expect(
+          container.read(syncStateProvider).fileReadReport?.remote?.isReadable,
+          isFalse,
+        );
+        expect(container.read(syncStateProvider).errorMessage, isNotNull);
+
+        // 2. Commit an inline Note edit while sync error banner is already active.
+        final addNoteChip = find.byKey(
+          const ValueKey<String>('task_add_note_taskA00001'),
+        );
+        await tester.ensureVisible(addNoteChip);
+        await tester.pumpAndSettle();
+        await tester.tap(addNoteChip);
+        await tester.pumpAndSettle();
+
+        final noteSection = find.byType(EntityNoteSection);
+        final noteInput = find.descendant(
+          of: noteSection,
+          matching: find.byType(EditableText),
+        );
+        await tester.enterText(noteInput, 'Persisted Offline Local Note');
+        await tester.tap(
+          find.descendant(
+            of: noteSection,
+            matching: find.widgetWithText(UiButton, 'Save'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          container.read(shellProvider).activeInlineEdit,
+          isNull,
+          reason: 'Offline dual-storage local note commit must close inline editor cleanly',
+        );
+        expect(
+          find.text('Persisted Offline Local Note'),
+          findsOneWidget,
+          reason: 'Updated task note must render on the card',
+        );
+        expect(
+          File(tdfPath).readAsStringSync(),
+          contains('Persisted Offline Local Note'),
+          reason: 'Updated task note must be persisted to local .tdf on disk',
+        );
+        expect(
+          find.byKey(
+            const ValueKey<String>('tasks_status_banner_partialFileRead'),
+          ),
+          findsOneWidget,
+          reason: 'Sync error banner must remain visible after offline local note edit',
+        );
+      },
+    );
+
+    testWidgets(
+      'saveSubtasks auto-finish and createAndAssignLabel each commit in a single atomic saveTdf write and preserve Undo',
+      (tester) async {
+        _setViewport(tester, const Size(1280, 860));
+        const config = WebDavConfig(
+          language: AppLanguage.english,
+          storageMode: StorageMode.local,
+        );
+        final localRepository = _ControllableLocalFileRepository(
+          config: config,
+          content: buildSeedTdf(includeSubtaskTask: true),
+        );
+
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(config),
+            ),
+            localFileRepositoryProvider.overrideWith((ref) => localRepository),
+            clockProvider.overrideWithValue(() => baseTime),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Part 1: Inline subtasks editor check-all with auto-finish commits in 1 saveTdf call and supports Undo.
+        final saveCallsBeforeSubtasks = localRepository.saveCalls;
+        await tester.tap(find.text('Checklist Focus Task'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(
+            const ValueKey<String>('task_subtasks_edit_button_taskS00003'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final subtasksEditor = find.byKey(
+          const ValueKey<String>('task_subtasks_edit_taskS00003'),
+        );
+        expect(subtasksEditor, findsOneWidget);
+        expect(
+          tester
+              .widget<UiToggleRow>(
+                find.byKey(
+                  const ValueKey<String>(
+                    'subtask_auto_finish_toggle_taskS00003',
+                  ),
+                ),
+              )
+              .value,
+          isTrue,
+        );
+
+        await tester.tap(
+          find.descendant(
+            of: subtasksEditor,
+            matching: find.byType(TaskSubtaskCheckBoxButton),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final subtasksSaveButton = find.descendant(
+          of: subtasksEditor,
+          matching: find.widgetWithText(UiButton, 'Save'),
+        );
+        await tester.ensureVisible(subtasksSaveButton);
+        await tester.pumpAndSettle();
+        await tester.tap(subtasksSaveButton);
+        await tester.pumpAndSettle();
+
+        expect(
+          localRepository.saveCalls,
+          equals(saveCallsBeforeSubtasks + 1),
+          reason: 'saveSubtasks auto-finish must execute exactly one atomic saveTdf write',
+        );
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('taskS00003')
+              ?.isCompleted,
+          isTrue,
+        );
+        expect(
+          container.read(floatingNoticeProvider)?.hasUndoAction,
+          isTrue,
+          reason: 'Atomic subtask auto-finish must present Undo toast',
+        );
+
+        await tester.tap(find.widgetWithText(UiButton, 'Undo'));
+        await tester.pumpAndSettle();
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('taskS00003')
+              ?.isCompleted,
+          isFalse,
+          reason: 'Undo after atomic saveSubtasks auto-finish must restore task to open state',
+        );
+
+        // Part 2: Inline label picker create-and-assign commits in 1 saveTdf call.
+        final saveCallsBeforeLabelCreate = localRepository.saveCalls;
+        await tester.tap(find.text('Second Focus Task'));
+        await tester.pumpAndSettle();
+
+        final addLabelsChip = find.byKey(
+          const ValueKey<String>('task_add_labels_taskB00002'),
+        );
+        await tester.ensureVisible(addLabelsChip);
+        await tester.pumpAndSettle();
+        await tester.tap(addLabelsChip);
+        await tester.pumpAndSettle();
+
+        final inlineLabelPicker = find.byKey(
+          const ValueKey<String>('task_labels_picker_taskB00002'),
+        );
+        expect(inlineLabelPicker, findsOneWidget);
+
+        final pickerSearchInput = find.descendant(
+          of: inlineLabelPicker,
+          matching: find.byType(EditableText),
+        );
+        await tester.enterText(pickerSearchInput, 'AtomicLabel');
+        await tester.pumpAndSettle();
+
+        final createRow = find.text('Create & assign "AtomicLabel"');
+        await tester.ensureVisible(createRow);
+        await tester.pumpAndSettle();
+        await tester.tap(createRow);
+        await tester.pumpAndSettle();
+
+        expect(
+          localRepository.saveCalls,
+          equals(saveCallsBeforeLabelCreate + 1),
+          reason: 'createAndAssignLabel must execute exactly one atomic saveTdf write',
+        );
+
+        final boardAfterLabelCreate = container
+            .read(taskNotifierProvider)
+            .requireValue;
+        final createdLabel = boardAfterLabelCreate.labels.firstWhere(
+          (label) => label.name == 'AtomicLabel',
+        );
+        expect(
+          createdLabel.id,
+          isNot(startsWith('_')),
+          reason: 'Created label must carry a real persisted TDF ID',
+        );
+        expect(
+          boardAfterLabelCreate.findTask('taskB00002')?.labelIds,
+          contains(createdLabel.id),
+          reason: 'Created label must be assigned to taskB00002',
+        );
+        expect(
+          localRepository.content,
+          contains('AtomicLabel'),
+          reason: 'Atomic label creation must persist to .tdf storage',
+        );
+      },
+    );
+
+    testWidgets(
+      'Compact mobile CompactLabelPickerSheet reactively creates real persisted label IDs without synthetic IDs, toggles live, and displays the real chip on close',
+      (tester) async {
+        _setViewport(tester, const Size(390, 844));
+        const config = WebDavConfig(
+          language: AppLanguage.english,
+          storageMode: StorageMode.local,
+        );
+        final localRepository = _ControllableLocalFileRepository(
+          config: config,
+          content: buildSeedTdf(),
+        );
+
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(config),
+            ),
+            localFileRepositoryProvider.overrideWith((ref) => localRepository),
+            clockProvider.overrideWithValue(() => baseTime),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Expand taskB00002 and open the compact mobile label picker bottom sheet.
+        await tester.tap(find.text('Second Focus Task'));
+        await tester.pumpAndSettle();
+
+        final addLabelsChip = find.byKey(
+          const ValueKey<String>('task_add_labels_taskB00002'),
+        );
+        await tester.ensureVisible(addLabelsChip);
+        await tester.tap(addLabelsChip);
+        await tester.pumpAndSettle();
+
+        expect(find.byType(CompactLabelPickerSheet), findsOneWidget);
+        final pickerFinder = find.byKey(
+          const ValueKey<String>('compact_label_picker'),
+        );
+        expect(pickerFinder, findsOneWidget);
+
+        // Type a brand-new label name and tap Create inside the open sheet.
+        final sheetSearchInput = find.descendant(
+          of: pickerFinder,
+          matching: find.byType(EditableText),
+        );
+        await tester.enterText(sheetSearchInput, 'MobileTag');
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Create & assign "MobileTag"'));
+        await tester.pumpAndSettle();
+
+        final boardAfterCreate = container
+            .read(taskNotifierProvider)
+            .requireValue;
+        final createdLabel = boardAfterCreate.labels.firstWhere(
+          (label) => label.name == 'MobileTag',
+        );
+        expect(
+          createdLabel.id,
+          isNot(startsWith('_')),
+          reason: 'Compact sheet creation must use real persisted TdfLabel.id instead of synthetic _created_0 ID',
+        );
+        expect(
+          boardAfterCreate.findTask('taskB00002')?.labelIds,
+          contains(createdLabel.id),
+        );
+
+        final pickerAfterCreate = tester.widget<UiSearchablePicker<String>>(
+          pickerFinder,
+        );
+        expect(
+          pickerAfterCreate.selectedIds,
+          equals(<String>{createdLabel.id}),
+          reason: 'Open compact sheet must immediately show real persisted ID selected with zero synthetic IDs',
+        );
+        expect(
+          find.byKey(ValueKey<String>('picker_opt_${createdLabel.id}')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(ValueKey<String>('picker_chip_${createdLabel.id}')),
+          findsOneWidget,
+        );
+
+        // Toggle the real label off inside the still-open sheet.
+        final optionRow = find.byKey(
+          ValueKey<String>('picker_opt_${createdLabel.id}'),
+        );
+        await tester.tap(optionRow);
+        await tester.pumpAndSettle();
+
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('taskB00002')
+              ?.labelIds,
+          isNot(contains(createdLabel.id)),
+          reason: 'Toggling newly created label off inside compact sheet must immediately update real board',
+        );
+        expect(
+          tester.widget<UiSearchablePicker<String>>(pickerFinder).selectedIds,
+          isEmpty,
+        );
+
+        // Toggle the real label back on inside the still-open sheet.
+        await tester.tap(optionRow);
+        await tester.pumpAndSettle();
+
+        expect(
+          container
+              .read(taskNotifierProvider)
+              .requireValue
+              .findTask('taskB00002')
+              ?.labelIds,
+          contains(createdLabel.id),
+          reason: 'Toggling newly created label back on inside compact sheet must immediately update real board',
+        );
+        expect(
+          tester.widget<UiSearchablePicker<String>>(pickerFinder).selectedIds,
+          equals(<String>{createdLabel.id}),
+        );
+
+        // Close the sheet and verify the real label chip is rendered on the expanded card.
+        await tester.tap(find.widgetWithText(UiButton, 'Done'));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(CompactLabelPickerSheet), findsNothing);
+        expect(
+          find.byKey(
+            ValueKey<String>(
+              'task_expanded_label_taskB00002_${createdLabel.id}',
+            ),
+          ),
+          findsOneWidget,
+          reason: 'Closing compact sheet must display the real persisted label chip on the card',
+        );
+        expect(find.text('MobileTag'), findsOneWidget);
       },
     );
   });

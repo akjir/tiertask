@@ -22,16 +22,18 @@ import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
-import 'package:tiertask/presentation/app_shell_controller.dart';
-import 'package:tiertask/presentation/floating_notice_controller.dart';
-import 'package:tiertask/presentation/shell_models.dart';
+import 'package:tiertask/providers/floating_notice_providers.dart';
+import 'package:tiertask/providers/location_providers.dart';
+import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/location_repository.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/primitives/ui_field.dart';
 import 'package:tiertask/ui/views/locations_view.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import 'test_helpers.dart';
 
@@ -130,12 +132,15 @@ void main() {
             source: LocationSource.gps,
           ),
         );
+        // Prime foreground GPS fix as TierTaskShellScreen does when mounted in the full shell.
+        container.read(locationStateProvider);
+        await tester.pumpAndSettle();
 
         await tester.tap(find.widgetWithText(UiButton, 'Add'));
         await tester.pumpAndSettle();
 
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Please enter a location name.'),
         );
         expect(
@@ -163,13 +168,13 @@ void main() {
         expect(createdLocation.longitude, closeTo(11.032846, 0.000001));
         expect(createdLocation.radius, equals(200.0));
 
-        final shellState = container.read(appShellControllerProvider);
+        final shellState = container.read(shellProvider);
         expect(
           shellState.expandedEntity,
           equals(EntityRef(kind: EntityKind.location, id: createdLocation.id)),
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Location saved.'),
         );
         expect(find.text('No locations created yet.'), findsNothing);
@@ -198,6 +203,9 @@ void main() {
             source: LocationSource.gps,
           ),
         );
+        // Prime foreground GPS fix as TierTaskShellScreen does when mounted in the full shell.
+        container.read(locationStateProvider);
+        await tester.pumpAndSettle();
 
         final composerInput = find.descendant(
           of: find.byKey(
@@ -307,7 +315,7 @@ void main() {
         expect(createdLocation.radius, equals(1500.0));
         expect(createdLocation.note, equals('Rear gate code 42'));
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
+          container.read(shellProvider).expandedEntity,
           equals(EntityRef(kind: EntityKind.location, id: createdLocation.id)),
         );
         expect(find.text('Rear gate code 42'), findsOneWidget);
@@ -378,7 +386,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(lastCopiedText, equals('loc_office'));
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Location ID copied to clipboard.'),
         );
 
@@ -531,7 +539,7 @@ void main() {
           equals('13.404954'),
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Current GPS position applied.'),
         );
 
@@ -564,7 +572,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Source resolved to coordinates.'),
         );
         final resolvedLatitudeText =
@@ -674,7 +682,7 @@ void main() {
           findsNothing,
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Source resolved to coordinates.'),
         );
 
@@ -803,9 +811,9 @@ void main() {
         container.read(taskNotifierProvider).asData?.value.locations,
         isEmpty,
       );
-      expect(container.read(appShellControllerProvider).expandedEntity, isNull);
+      expect(container.read(shellProvider).expandedEntity, isNull);
       expect(
-        container.read(floatingNoticeControllerProvider)?.message,
+        container.read(floatingNoticeProvider)?.message,
         equals('Location deleted.'),
       );
     });
@@ -834,10 +842,8 @@ void main() {
           board: board,
         );
 
-        final shellNotifier = container.read(
-          appShellControllerProvider.notifier,
-        );
-        shellNotifier.selectTier(ShellTier.ready);
+        final shellNotifier = container.read(shellProvider.notifier);
+        shellNotifier.selectTier(TaskTier.ready);
         shellNotifier.selectLabelFilter('lbl_1');
         shellNotifier.expandEntity(
           const EntityRef(kind: EntityKind.task, id: 'task_1'),
@@ -851,17 +857,14 @@ void main() {
 
         expect(find.text('Back to tasks'), findsOneWidget);
         expect(find.text('ID: loc_nav'), findsOneWidget);
-        expect(
-          container.read(appShellControllerProvider).revealEntityRequest,
-          isNull,
-        );
+        expect(container.read(shellProvider).revealEntityRequest, isNull);
 
         await tester.tap(find.text('Back to tasks'));
         await tester.pumpAndSettle();
 
-        final restoredTasksState = container.read(appShellControllerProvider);
+        final restoredTasksState = container.read(shellProvider);
         expect(restoredTasksState.view, equals(ShellView.tasks));
-        expect(restoredTasksState.activeTier, equals(ShellTier.ready));
+        expect(restoredTasksState.activeTier, equals(TaskTier.ready));
         expect(restoredTasksState.activeLabelId, equals('lbl_1'));
         expect(
           restoredTasksState.expandedEntity,
@@ -870,7 +873,7 @@ void main() {
         expect(restoredTasksState.returnContext, isNull);
 
         shellNotifier.openSearch();
-        shellNotifier.updateSearchQuery('files');
+        container.read(searchQueryProvider.notifier).setQuery('files');
         shellNotifier.openEntityInManager(
           const EntityRef(kind: EntityKind.location, id: 'loc_nav'),
           preserveReturnContext: true,
@@ -881,10 +884,10 @@ void main() {
         await tester.tap(find.text('Back to search'));
         await tester.pumpAndSettle();
 
-        final restoredSearchState = container.read(appShellControllerProvider);
+        final restoredSearchState = container.read(shellProvider);
         expect(restoredSearchState.view, equals(ShellView.tasks));
         expect(restoredSearchState.searchOpen, isTrue);
-        expect(restoredSearchState.searchQuery, equals('files'));
+        expect(container.read(searchQueryProvider), equals('files'));
       },
     );
 

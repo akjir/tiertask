@@ -21,17 +21,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
-import 'package:tiertask/presentation/app_shell_controller.dart';
-import 'package:tiertask/presentation/floating_notice_controller.dart';
-import 'package:tiertask/presentation/shell_models.dart';
+import 'package:tiertask/providers/floating_notice_providers.dart';
+import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/ui/components/ui_color_wheel.dart';
+import 'package:tiertask/ui/components/ui_quick_composer.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/views/labels_view.dart';
 import 'package:tiertask/ui/widgets/entity_conditions_section.dart';
 import 'package:tiertask/ui/widgets/entity_note_section.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import 'test_helpers.dart';
 
@@ -148,8 +150,8 @@ void main() {
           board: board,
         );
 
-        final shell = container.read(appShellControllerProvider.notifier);
-        shell.selectTier(ShellTier.ready);
+        final shell = container.read(shellProvider.notifier);
+        shell.selectTier(TaskTier.ready);
         shell.selectLabelFilter('lbl_work');
         shell.expandEntity(const EntityRef(kind: EntityKind.task, id: 'tsk_1'));
         shell.openEntityInManager(
@@ -162,9 +164,9 @@ void main() {
         await tester.tap(find.text('Back to tasks'));
         await tester.pumpAndSettle();
 
-        final restored = container.read(appShellControllerProvider);
+        final restored = container.read(shellProvider);
         expect(restored.view, ShellView.tasks);
-        expect(restored.activeTier, ShellTier.ready);
+        expect(restored.activeTier, TaskTier.ready);
         expect(restored.activeLabelId, 'lbl_work');
         expect(
           restored.expandedEntity,
@@ -186,9 +188,9 @@ void main() {
           board: board,
         );
 
-        final shell = container.read(appShellControllerProvider.notifier);
+        final shell = container.read(shellProvider.notifier);
         shell.openSearch();
-        shell.updateSearchQuery('groceries');
+        container.read(searchQueryProvider.notifier).setQuery('groceries');
         shell.openEntityInManager(
           const EntityRef(kind: EntityKind.label, id: 'lbl_home'),
           preserveReturnContext: true,
@@ -199,10 +201,10 @@ void main() {
         await tester.tap(find.text('Back to search'));
         await tester.pumpAndSettle();
 
-        final restored = container.read(appShellControllerProvider);
+        final restored = container.read(shellProvider);
         expect(restored.view, ShellView.tasks);
         expect(restored.searchOpen, isTrue);
-        expect(restored.searchQuery, 'groceries');
+        expect(container.read(searchQueryProvider), 'groceries');
         expect(restored.returnContext, isNull);
       },
     );
@@ -244,7 +246,7 @@ void main() {
         expect(labels.first.name, 'Alpha');
         expect(labels.first.color, '#2196F3');
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
+          container.read(shellProvider).expandedEntity,
           EntityRef(kind: EntityKind.label, id: labels.first.id),
         );
         expect(
@@ -252,10 +254,7 @@ void main() {
           isEmpty,
           reason: 'Quick-create input clears after successful creation',
         );
-        expect(
-          container.read(floatingNoticeControllerProvider)?.message,
-          'Label saved.',
-        );
+        expect(container.read(floatingNoticeProvider)?.message, 'Label saved.');
 
         // Second label gets next rotating preset #4CAF50 and takes over single-expand.
         await tester.enterText(composerInput, 'Beta');
@@ -269,7 +268,7 @@ void main() {
         final beta = labels.firstWhere((item) => item.name == 'Beta');
         expect(beta.color, '#4CAF50');
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
+          container.read(shellProvider).expandedEntity,
           EntityRef(kind: EntityKind.label, id: beta.id),
         );
 
@@ -287,8 +286,8 @@ void main() {
           'alpha',
           reason: 'Failed quick-create preserves typed input',
         );
-        final notice = container.read(floatingNoticeControllerProvider);
-        expect(notice?.tone, NoticeTone.danger);
+        final notice = container.read(floatingNoticeProvider);
+        expect(notice?.tone, FloatingNoticeTone.danger);
         expect(notice?.message, 'A label with this name already exists.');
       },
     );
@@ -550,7 +549,7 @@ void main() {
         expect(created.links.first.uri, 'https://example.com/spec');
         expect(created.conditions, hasLength(3));
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
+          container.read(shellProvider).expandedEntity,
           EntityRef(kind: EntityKind.label, id: created.id),
         );
       },
@@ -657,7 +656,7 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
+          container.read(shellProvider).expandedEntity,
           const EntityRef(kind: EntityKind.label, id: 'lbl_alpha'),
         );
         expect(find.text('ID: lbl_alpha'), findsOneWidget);
@@ -677,7 +676,7 @@ void main() {
         await tester.tap(find.text('Beta'));
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).expandedEntity,
+          container.read(shellProvider).expandedEntity,
           const EntityRef(kind: EntityKind.label, id: 'lbl_beta'),
         );
         expect(find.text('ID: lbl_alpha'), findsNothing);
@@ -688,10 +687,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Beta'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).expandedEntity,
-          isNull,
-        );
+        expect(container.read(shellProvider).expandedEntity, isNull);
         expect(find.text('ID: lbl_beta'), findsNothing);
       },
     );
@@ -727,7 +723,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(lastCopiedText, 'lbl_alpha');
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           'Label ID copied to clipboard.',
         );
 
@@ -840,11 +836,8 @@ void main() {
               .findLabel('lbl_alpha'),
           isNull,
         );
-        expect(
-          container.read(appShellControllerProvider).expandedEntity,
-          isNull,
-        );
-        final deleteNotice = container.read(floatingNoticeControllerProvider);
+        expect(container.read(shellProvider).expandedEntity, isNull);
+        final deleteNotice = container.read(floatingNoticeProvider);
         expect(deleteNotice?.message, 'Label deleted.');
         expect(deleteNotice?.hasUndoAction, isFalse);
       },
@@ -992,7 +985,7 @@ void main() {
         await tester.tap(find.text('Office'));
         await tester.pumpAndSettle();
 
-        final shellState = container.read(appShellControllerProvider);
+        final shellState = container.read(shellProvider);
         expect(shellState.view, ShellView.locations);
         expect(
           shellState.expandedEntity,
@@ -1006,7 +999,7 @@ void main() {
 
         // Re-expand Context label and clear Activation Conditions.
         container
-            .read(appShellControllerProvider.notifier)
+            .read(shellProvider.notifier)
             .expandEntity(
               const EntityRef(kind: EntityKind.label, id: 'lbl_context'),
             );
@@ -1068,7 +1061,7 @@ void main() {
         expect(tester.takeException(), isNull);
 
         container
-            .read(appShellControllerProvider.notifier)
+            .read(shellProvider.notifier)
             .expandEntity(
               const EntityRef(kind: EntityKind.label, id: 'lbl_12'),
               reveal: true,
@@ -1076,7 +1069,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          container.read(appShellControllerProvider).revealEntityRequest,
+          container.read(shellProvider).revealEntityRequest,
           isNull,
           reason: 'One-shot revealEntityRequest clears once revealed',
         );

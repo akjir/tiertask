@@ -17,20 +17,24 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/task_controller.dart';
-import '../../presentation/tasks_view_model.dart';
+import '../../models/task_item.dart';
+import '../../models/tdf_error.dart';
+import '../../models/webdav_config.dart';
+import '../../providers/board_actions_provider.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_segmented_control.dart';
+import '../primitives/ui_toggle_row.dart';
+import '../tokens/ui_color_tokens.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
 import '../widgets/entity_date_time_fields.dart';
-
-/// Maximum multi-line note length allowed by `TDF 0.8.0` (`maxTdfNoteLength`).
-const int _maxNoteLength = 2000;
-
-/// Maximum single-line text length allowed by `TDF 0.8.0` (`maxTdfTextLength`).
-const int _maxSingleLineLength = 500;
 
 /// Read-only and inline-editable Due section for expanded Task cards (`U-CARD-002`..`003`).
 class TaskDueSection extends ConsumerStatefulWidget {
@@ -38,11 +42,17 @@ class TaskDueSection extends ConsumerStatefulWidget {
   const TaskDueSection({
     super.key,
     required this.task,
+    required this.isSomeday,
     required this.isEditing,
+    required this.configuration,
+    required this.nowUtc,
     required this.currentLocalDateTimeHint,
     required this.onStartEdit,
     required this.onCancelEdit,
   });
+
+  /// Active workspace configuration supplying timezone and due lead-window settings.
+  final WebDavConfig configuration;
 
   /// Current workspace local wall-clock timestamp (`YYYY-MM-DD HH:MM`) seeding pickers.
   final String currentLocalDateTimeHint;
@@ -50,14 +60,20 @@ class TaskDueSection extends ConsumerStatefulWidget {
   /// Whether this section is currently in inline edit mode.
   final bool isEditing;
 
+  /// Whether [task] currently resides in Tier 5 (`Someday`).
+  final bool isSomeday;
+
+  /// Current evaluation UTC timestamp used for remaining/overdue formatting.
+  final DateTime nowUtc;
+
   /// Callback cancelling inline edit mode without saving.
   final VoidCallback onCancelEdit;
 
   /// Callback opening inline edit mode for this section.
   final VoidCallback onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item rendered by this section.
+  final TaskItem task;
 
   @override
   ConsumerState<TaskDueSection> createState() => _TaskDueSectionState();
@@ -107,8 +123,8 @@ class TaskRepeatSection extends ConsumerStatefulWidget {
   /// Callback opening inline edit mode for this section.
   final VoidCallback onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item rendered by this section.
+  final TaskItem task;
 
   @override
   ConsumerState<TaskRepeatSection> createState() => _TaskRepeatSectionState();
@@ -121,10 +137,15 @@ class TaskSuspendedSection extends ConsumerStatefulWidget {
     super.key,
     required this.task,
     required this.isEditing,
+    required this.configuration,
+    required this.nowUtc,
     required this.currentLocalDateTimeHint,
     required this.onStartEdit,
     required this.onCancelEdit,
   });
+
+  /// Active workspace configuration supplying timezone settings.
+  final WebDavConfig configuration;
 
   /// Current workspace local wall-clock timestamp (`YYYY-MM-DD HH:MM`) seeding pickers.
   final String currentLocalDateTimeHint;
@@ -132,14 +153,17 @@ class TaskSuspendedSection extends ConsumerStatefulWidget {
   /// Whether this section is currently in inline edit mode.
   final bool isEditing;
 
+  /// Current evaluation UTC timestamp used for remaining deferral formatting.
+  final DateTime nowUtc;
+
   /// Callback cancelling inline edit mode without saving.
   final VoidCallback onCancelEdit;
 
   /// Callback opening inline edit mode for this section.
   final VoidCallback onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item rendered by this section.
+  final TaskItem task;
 
   @override
   ConsumerState<TaskSuspendedSection> createState() =>
@@ -183,7 +207,7 @@ class _ScheduleNoteField extends StatelessWidget {
       controller: controller,
       label: label,
       hintText: hintText,
-      maxLength: _maxNoteLength,
+      maxLength: maxTdfNoteLength,
       minLines: 2,
       maxLines: 4,
       enabled: enabled,
@@ -464,58 +488,100 @@ class _TaskDueEditFields extends StatelessWidget {
 /// Read-only due timestamp, auto-priority summary, anchor, and note inside [_TaskDueReadCard].
 class _TaskDueReadBody extends StatelessWidget {
   /// Creates a [_TaskDueReadBody].
-  const _TaskDueReadBody({required this.task});
+  const _TaskDueReadBody({
+    required this.task,
+    required this.dueAtUtc,
+    required this.isSomeday,
+    required this.configuration,
+    required this.nowUtc,
+  });
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Active workspace configuration supplying timezone and due lead-window settings.
+  final WebDavConfig configuration;
 
-  /// Auto-priority explanation label shown only for open tasks.
-  String? get _autoPriorityLabel =>
-      task.isCompleted ? null : task.dueAutoPriorityLabel;
+  /// Non-null due UTC instant of [task].
+  final DateTime dueAtUtc;
+
+  /// Whether [task] currently resides in Tier 5 (`Someday`).
+  final bool isSomeday;
+
+  /// Current evaluation UTC timestamp used for remaining/overdue formatting.
+  final DateTime nowUtc;
+
+  /// Domain task item rendered by this body.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
+    final localizations = AppLocalizations.of(context);
+    final colors = UiThemeTokens.of(context).colors;
+    final details = _computeDueReadout(localizations, colors);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Text(
-          task.dueFormatted ?? '',
-          style: tokens.typography.control.copyWith(
-            color: _resolveDueColor(colors),
-          ),
-        ),
-        if (_autoPriorityLabel case final label?) ...<Widget>[
-          const SizedBox(height: 4.0),
-          Text(
-            label,
-            style: tokens.typography.meta.copyWith(color: colors.muted),
-          ),
-        ],
-        if (task.dueAnchorFormatted case final anchor?) ...<Widget>[
-          const SizedBox(height: 4.0),
-          Text(
-            anchor,
-            style: UiTypographyTokens.mono(
-              tokens.typography.monoSmall.copyWith(color: colors.muted),
-            ),
-          ),
-        ],
-        if (task.dueNote case final note? when note.isNotEmpty)
-          _ScheduleNoteReadText(note: note),
-      ],
+    return _TaskDueReadLines(
+      dueFormatted: details.dueFormatted,
+      dueColor: details.dueColor,
+      autoPriorityLabel: details.autoPriorityLabel,
+      anchorFormatted: details.anchorFormatted,
+      dueNote: task.dueNote,
+    );
+  }
+
+  /// Computes formatted due readout strings and urgency color for [task].
+  ({
+    String dueFormatted,
+    Color dueColor,
+    String? autoPriorityLabel,
+    String? anchorFormatted,
+  })
+  _computeDueReadout(AppLocalizations localizations, UiColorTokens colors) {
+    final isActive = !task.isCompleted;
+    final isOverdue = isActive && !dueAtUtc.isAfter(nowUtc);
+    final isWithinLead =
+        isActive &&
+        !task.isDuePassive &&
+        task.isWithinDueLeadWindow(
+          nowUtc,
+          configuration.dueLeadWindow.duration,
+        );
+    return (
+      dueFormatted: TaskScheduleHelper.formatDueDetail(
+        dueAtUtc: dueAtUtc,
+        nowUtc: nowUtc,
+        isOverdue: isOverdue,
+        config: configuration,
+        localizations: localizations,
+      ),
+      dueColor: _resolveDueColor(
+        colors: colors,
+        isOverdue: isOverdue,
+        isWithinLead: isWithinLead,
+      ),
+      autoPriorityLabel: isActive
+          ? TaskScheduleHelper.formatDueAutoPriorityLabel(
+              task: task,
+              isAutoPrioritized: !isSomeday && !task.isPriority && isWithinLead,
+              dueLeadWindow: configuration.dueLeadWindow,
+              localizations: localizations,
+            )
+          : null,
+      anchorFormatted: TaskScheduleHelper.formatDueAnchor(
+        task: task,
+        config: configuration,
+        localizations: localizations,
+      ),
     );
   }
 
   /// Resolves semantic text color for the due date based on urgency.
-  Color _resolveDueColor(UiColorTokens colors) {
-    if (!task.isCompleted && task.isOverdue) {
+  Color _resolveDueColor({
+    required UiColorTokens colors,
+    required bool isOverdue,
+    required bool isWithinLead,
+  }) {
+    if (isOverdue) {
       return colors.danger;
     }
-    if (!task.isCompleted && task.isWithinDueLeadWindow) {
+    if (isWithinLead) {
       return colors.warning;
     }
     return colors.ink;
@@ -527,18 +593,34 @@ class _TaskDueReadCard extends StatelessWidget {
   /// Creates a [_TaskDueReadCard].
   const _TaskDueReadCard({
     required this.task,
+    required this.dueAtUtc,
+    required this.isSomeday,
+    required this.configuration,
+    required this.nowUtc,
     required this.isBusy,
     required this.onStartEdit,
   });
 
+  /// Active workspace configuration supplying timezone and due lead-window settings.
+  final WebDavConfig configuration;
+
+  /// Non-null due UTC instant of [task].
+  final DateTime dueAtUtc;
+
   /// Whether a task mutation is in flight.
   final bool isBusy;
+
+  /// Whether [task] currently resides in Tier 5 (`Someday`).
+  final bool isSomeday;
+
+  /// Current evaluation UTC timestamp used for remaining/overdue formatting.
+  final DateTime nowUtc;
 
   /// Callback entering inline edit mode.
   final VoidCallback onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item rendered by this card.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
@@ -555,7 +637,75 @@ class _TaskDueReadCard extends StatelessWidget {
               isBusy: isBusy,
               onPressed: onStartEdit,
             ),
-      child: _TaskDueReadBody(task: task),
+      child: _TaskDueReadBody(
+        task: task,
+        dueAtUtc: dueAtUtc,
+        isSomeday: isSomeday,
+        configuration: configuration,
+        nowUtc: nowUtc,
+      ),
+    );
+  }
+}
+
+/// Vertical readout column rendering formatted due lines inside [_TaskDueReadBody].
+class _TaskDueReadLines extends StatelessWidget {
+  /// Creates a [_TaskDueReadLines].
+  const _TaskDueReadLines({
+    required this.dueFormatted,
+    required this.dueColor,
+    required this.autoPriorityLabel,
+    required this.anchorFormatted,
+    required this.dueNote,
+  });
+
+  /// Optional formatted schedule anchor readout.
+  final String? anchorFormatted;
+
+  /// Optional auto-priority explanation shown on active tasks.
+  final String? autoPriorityLabel;
+
+  /// Semantic urgency text color for [dueFormatted].
+  final Color dueColor;
+
+  /// Formatted due timestamp and remaining/overdue detail.
+  final String dueFormatted;
+
+  /// Optional persisted deadline note.
+  final String? dueNote;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          dueFormatted,
+          style: tokens.typography.control.copyWith(color: dueColor),
+        ),
+        if (autoPriorityLabel case final label?) ...<Widget>[
+          const SizedBox(height: 4.0),
+          Text(
+            label,
+            style: tokens.typography.meta.copyWith(color: colors.muted),
+          ),
+        ],
+        if (anchorFormatted case final anchor?) ...<Widget>[
+          const SizedBox(height: 4.0),
+          Text(
+            anchor,
+            style: UiTypographyTokens.mono(
+              tokens.typography.monoSmall.copyWith(color: colors.muted),
+            ),
+          ),
+        ],
+        if (dueNote case final note? when note.isNotEmpty)
+          _ScheduleNoteReadText(note: note),
+      ],
     );
   }
 }
@@ -571,10 +721,18 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
   bool _isSubmitting = false;
   String? _submitError;
 
+  /// Formatted initial local due timestamp string (`''` when unset).
+  String get _initialDueInput => widget.task.dueAt != null
+      ? TaskScheduleHelper.formatLocalTimestamp(
+          widget.task.dueAt,
+          widget.configuration,
+        )
+      : '';
+
   @override
   void initState() {
     super.initState();
-    _dueController = TextEditingController(text: widget.task.dueInputInitial);
+    _dueController = TextEditingController(text: _initialDueInput);
     _dueNoteController = TextEditingController(text: widget.task.dueNote ?? '');
     _autoPrioritize = !widget.task.isDuePassive;
   }
@@ -583,7 +741,7 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
   void didUpdateWidget(covariant TaskDueSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!oldWidget.isEditing && widget.isEditing) {
-      _dueController.text = widget.task.dueInputInitial;
+      _dueController.text = _initialDueInput;
       _dueNoteController.text = widget.task.dueNote ?? '';
       _autoPrioritize = !widget.task.isDuePassive;
       _dueError = null;
@@ -608,15 +766,20 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
   @override
   Widget build(BuildContext context) {
     final isControllerBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final isBusy = _isSubmitting || isControllerBusy;
+    final dueAt = widget.task.dueAt;
 
     if (!widget.isEditing || widget.task.isCompleted) {
-      return widget.task.dueFormatted == null
+      return dueAt == null
           ? const SizedBox.shrink()
           : _TaskDueReadCard(
               task: widget.task,
+              dueAtUtc: dueAt,
+              isSomeday: widget.isSomeday,
+              configuration: widget.configuration,
+              nowUtc: widget.nowUtc,
               isBusy: isBusy,
               onStartEdit: widget.onStartEdit,
             );
@@ -626,7 +789,7 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
       dueController: _dueController,
       dueNoteController: _dueNoteController,
       autoPrioritize: _autoPrioritize,
-      hasExistingDue: widget.task.dueFormatted != null,
+      hasExistingDue: dueAt != null,
       currentLocalDateTimeHint: widget.currentLocalDateTimeHint,
       dueError: _dueError,
       dueNoteError: _dueNoteError,
@@ -652,7 +815,7 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
     }
   }
 
-  /// Clears the persisted due date via [TaskController.clearDue].
+  /// Clears the persisted due date via [BoardActionsNotifier.clearDue].
   Future<void> _handleClear() async {
     if (_isSubmitting) {
       return;
@@ -662,7 +825,7 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
       _submitError = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .clearDue(widget.task.id, locale: Localizations.localeOf(context));
     if (!mounted) {
       return;
@@ -679,7 +842,7 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
     }
   }
 
-  /// Saves the edited due date via [TaskController.saveDue].
+  /// Saves the edited due date via [BoardActionsNotifier.saveDue].
   Future<void> _handleSave() async {
     if (_isSubmitting) {
       return;
@@ -691,7 +854,7 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
       _submitError = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .saveDue(
           widget.task.id,
           rawDue: _dueController.text,
@@ -827,7 +990,7 @@ class _TaskInlineTitleEditorState extends ConsumerState<TaskInlineTitleEditor> {
   @override
   Widget build(BuildContext context) {
     final isControllerBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final isBusy = _isSubmitting || isControllerBusy;
 
@@ -855,7 +1018,7 @@ class _TaskInlineTitleEditorState extends ConsumerState<TaskInlineTitleEditor> {
     }
   }
 
-  /// Persists the edited title through [TaskController.saveTitle].
+  /// Persists the edited title through [BoardActionsNotifier.saveTitle].
   Future<void> _handleSave() async {
     if (_isSubmitting) {
       return;
@@ -865,7 +1028,7 @@ class _TaskInlineTitleEditorState extends ConsumerState<TaskInlineTitleEditor> {
       _errorText = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .saveTitle(
           widget.taskId,
           _controller.text,
@@ -928,7 +1091,7 @@ class _TaskInlineTitleField extends StatelessWidget {
       key: ValueKey<String>('task_title_editor_input_$taskId'),
       kind: UiFieldKind.text,
       controller: controller,
-      maxLength: _maxSingleLineLength,
+      maxLength: maxTdfTextLength,
       autofocus: true,
       enabled: !isBusy,
       errorText: errorText,
@@ -1039,13 +1202,13 @@ class _TaskRepeatEditCard extends StatelessWidget {
   final VoidCallback onSave;
 
   /// Callback changing recurrence unit.
-  final ValueChanged<ShellRepeatUnit> onUnitChanged;
+  final ValueChanged<RepeatUnit> onUnitChanged;
 
   /// Optional general persistence error.
   final String? submitError;
 
   /// Selected recurrence unit.
-  final ShellRepeatUnit unit;
+  final RepeatUnit unit;
 
   @override
   Widget build(BuildContext context) {
@@ -1123,10 +1286,10 @@ class _TaskRepeatEditFields extends StatelessWidget {
   final VoidCallback onSave;
 
   /// Callback changing recurrence unit.
-  final ValueChanged<ShellRepeatUnit> onUnitChanged;
+  final ValueChanged<RepeatUnit> onUnitChanged;
 
   /// Selected recurrence unit.
-  final ShellRepeatUnit unit;
+  final RepeatUnit unit;
 
   @override
   Widget build(BuildContext context) {
@@ -1217,32 +1380,37 @@ class _TaskRepeatLeadDaysField extends StatelessWidget {
 /// Read-only recurrence summary, completions count, and lead label inside [_TaskRepeatReadCard].
 class _TaskRepeatReadBody extends StatelessWidget {
   /// Creates a [_TaskRepeatReadBody].
-  const _TaskRepeatReadBody({required this.task});
+  const _TaskRepeatReadBody({required this.task, required this.repeatRule});
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Non-null recurrence rule configured on [task].
+  final TaskRepeatRule repeatRule;
+
+  /// Domain task item rendered by this body.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
+    final labels = _formatRepeatLabels(localizations);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Text(
-          task.repeatSummary ?? '',
+          labels.summary,
           style: tokens.typography.control.copyWith(color: colors.ink),
         ),
-        if (task.repeatCompletionsLabel case final completions?) ...<Widget>[
+        if (labels.completions case final completions?) ...<Widget>[
           const SizedBox(height: 4.0),
           Text(
             completions,
             style: tokens.typography.meta.copyWith(color: colors.muted),
           ),
         ],
-        if (task.repeatLeadLabel case final lead?) ...<Widget>[
+        if (labels.lead case final lead?) ...<Widget>[
           const SizedBox(height: 4.0),
           Text(
             lead,
@@ -1252,6 +1420,21 @@ class _TaskRepeatReadBody extends StatelessWidget {
       ],
     );
   }
+
+  /// Formats the recurrence summary, completions count, and lead-days labels.
+  ({String summary, String? completions, String? lead}) _formatRepeatLabels(
+    AppLocalizations localizations,
+  ) {
+    return (
+      summary: TaskScheduleHelper.formatRepeatPhrase(repeatRule, localizations),
+      completions: task.completions > 0
+          ? localizations.taskInfoRepeatCompletions('${task.completions}')
+          : null,
+      lead: repeatRule.leadDays > 0
+          ? localizations.taskInfoRepeatLeadDays('${repeatRule.leadDays}')
+          : null,
+    );
+  }
 }
 
 /// Read-only display card for [TaskRepeatSection].
@@ -1259,6 +1442,7 @@ class _TaskRepeatReadCard extends StatelessWidget {
   /// Creates a [_TaskRepeatReadCard].
   const _TaskRepeatReadCard({
     required this.task,
+    required this.repeatRule,
     required this.isBusy,
     required this.onStartEdit,
   });
@@ -1269,8 +1453,11 @@ class _TaskRepeatReadCard extends StatelessWidget {
   /// Callback entering inline edit mode.
   final VoidCallback onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Non-null recurrence rule configured on [task].
+  final TaskRepeatRule repeatRule;
+
+  /// Domain task item rendered by this card.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
@@ -1287,7 +1474,7 @@ class _TaskRepeatReadCard extends StatelessWidget {
               isBusy: isBusy,
               onPressed: onStartEdit,
             ),
-      child: _TaskRepeatReadBody(task: task),
+      child: _TaskRepeatReadBody(task: task, repeatRule: repeatRule),
     );
   }
 }
@@ -1301,27 +1488,25 @@ class _TaskRepeatSectionState extends ConsumerState<TaskRepeatSection> {
   bool _isSubmitting = false;
   String? _leadError;
   String? _submitError;
-  late ShellRepeatUnit _unit;
+  late RepeatUnit _unit;
 
   @override
   void initState() {
     super.initState();
-    _countController = TextEditingController(
-      text: '${widget.task.repeatCount ?? 1}',
-    );
-    _leadDaysController = TextEditingController(
-      text: '${widget.task.repeatLeadDays ?? 0}',
-    );
-    _unit = widget.task.repeatUnit ?? ShellRepeatUnit.days;
+    final rule = widget.task.repeatRule;
+    _countController = TextEditingController(text: '${rule?.count ?? 1}');
+    _leadDaysController = TextEditingController(text: '${rule?.leadDays ?? 0}');
+    _unit = rule?.unit ?? RepeatUnit.days;
   }
 
   @override
   void didUpdateWidget(covariant TaskRepeatSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!oldWidget.isEditing && widget.isEditing) {
-      _countController.text = '${widget.task.repeatCount ?? 1}';
-      _leadDaysController.text = '${widget.task.repeatLeadDays ?? 0}';
-      _unit = widget.task.repeatUnit ?? ShellRepeatUnit.days;
+      final rule = widget.task.repeatRule;
+      _countController.text = '${rule?.count ?? 1}';
+      _leadDaysController.text = '${rule?.leadDays ?? 0}';
+      _unit = rule?.unit ?? RepeatUnit.days;
       _countError = null;
       _leadError = null;
       _submitError = null;
@@ -1344,15 +1529,17 @@ class _TaskRepeatSectionState extends ConsumerState<TaskRepeatSection> {
   @override
   Widget build(BuildContext context) {
     final isControllerBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final isBusy = _isSubmitting || isControllerBusy;
+    final repeatRule = widget.task.repeatRule;
 
     if (!widget.isEditing || widget.task.isCompleted) {
-      return widget.task.repeatSummary == null
+      return repeatRule == null
           ? const SizedBox.shrink()
           : _TaskRepeatReadCard(
               task: widget.task,
+              repeatRule: repeatRule,
               isBusy: isBusy,
               onStartEdit: widget.onStartEdit,
             );
@@ -1362,8 +1549,8 @@ class _TaskRepeatSectionState extends ConsumerState<TaskRepeatSection> {
       countController: _countController,
       unit: _unit,
       leadDaysController: _leadDaysController,
-      hasDueDate: widget.task.dueFormatted != null,
-      hasExistingRepeat: widget.task.repeatSummary != null,
+      hasDueDate: widget.task.dueAt != null,
+      hasExistingRepeat: repeatRule != null,
       countError: _countError,
       leadError: _leadError,
       submitError: _submitError,
@@ -1387,7 +1574,7 @@ class _TaskRepeatSectionState extends ConsumerState<TaskRepeatSection> {
     }
   }
 
-  /// Disables recurrence via [TaskController.disableRepeat].
+  /// Disables recurrence via [BoardActionsNotifier.disableRepeat].
   Future<void> _handleDisable() async {
     if (_isSubmitting) {
       return;
@@ -1397,7 +1584,7 @@ class _TaskRepeatSectionState extends ConsumerState<TaskRepeatSection> {
       _submitError = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .disableRepeat(widget.task.id, locale: Localizations.localeOf(context));
     if (!mounted) {
       return;
@@ -1414,7 +1601,7 @@ class _TaskRepeatSectionState extends ConsumerState<TaskRepeatSection> {
     }
   }
 
-  /// Saves edited recurrence parameters via [TaskController.saveRepeat].
+  /// Saves edited recurrence parameters via [BoardActionsNotifier.saveRepeat].
   Future<void> _handleSave() async {
     if (_isSubmitting) {
       return;
@@ -1426,7 +1613,7 @@ class _TaskRepeatSectionState extends ConsumerState<TaskRepeatSection> {
       _submitError = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .saveRepeat(
           widget.task.id,
           rawCount: _countController.text,
@@ -1477,27 +1664,27 @@ class _TaskRepeatUnitControl extends StatelessWidget {
   final bool isBusy;
 
   /// Callback changing recurrence unit.
-  final ValueChanged<ShellRepeatUnit> onUnitChanged;
+  final ValueChanged<RepeatUnit> onUnitChanged;
 
   /// Selected recurrence unit.
-  final ShellRepeatUnit unit;
+  final RepeatUnit unit;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
 
-    return UiSegmentedControl<ShellRepeatUnit>(
-      segments: <UiSegment<ShellRepeatUnit>>[
-        UiSegment<ShellRepeatUnit>(
-          value: ShellRepeatUnit.days,
+    return UiSegmentedControl<RepeatUnit>(
+      segments: <UiSegment<RepeatUnit>>[
+        UiSegment<RepeatUnit>(
+          value: RepeatUnit.days,
           label: localizations.repeatUnitDays,
         ),
-        UiSegment<ShellRepeatUnit>(
-          value: ShellRepeatUnit.weeks,
+        UiSegment<RepeatUnit>(
+          value: RepeatUnit.weeks,
           label: localizations.repeatUnitWeeks,
         ),
-        UiSegment<ShellRepeatUnit>(
-          value: ShellRepeatUnit.months,
+        UiSegment<RepeatUnit>(
+          value: RepeatUnit.months,
           label: localizations.repeatUnitMonths,
         ),
       ],
@@ -1739,24 +1926,38 @@ class _TaskSuspendedReadCard extends StatelessWidget {
   /// Creates a [_TaskSuspendedReadCard].
   const _TaskSuspendedReadCard({
     required this.task,
+    required this.configuration,
+    required this.nowUtc,
     required this.isBusy,
     required this.onStartEdit,
   });
 
+  /// Active workspace configuration supplying timezone settings.
+  final WebDavConfig configuration;
+
   /// Whether a task mutation is in flight.
   final bool isBusy;
+
+  /// Current evaluation UTC timestamp used for remaining deferral formatting.
+  final DateTime nowUtc;
 
   /// Callback entering inline edit mode.
   final VoidCallback onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item rendered by this card.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
+    final suspendedSummary = TaskScheduleHelper.formatSuspendedDetail(
+      task: task,
+      nowUtc: nowUtc,
+      config: configuration,
+      localizations: localizations,
+    );
 
     return UiCard.inset(
       key: ValueKey<String>('task_suspended_read_${task.id}'),
@@ -1776,7 +1977,7 @@ class _TaskSuspendedReadCard extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Text(
-            task.suspendedSummary ?? '',
+            suspendedSummary,
             style: tokens.typography.control.copyWith(color: colors.ink),
           ),
           if (task.suspendedNote case final note? when note.isNotEmpty)
@@ -1798,13 +1999,23 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
   String? _submitError;
   String? _untilError;
 
+  /// Formatted initial local suspended-until timestamp string (`''` when unset or forever).
+  String get _initialUntilInput =>
+      TaskScheduleHelper.formatInitialSuspendedText(
+        widget.task.suspendedAt,
+        widget.configuration,
+      );
+
+  /// Whether [widget.task] currently carries an active finite or indefinite suspension.
+  bool get _isSuspended =>
+      widget.task.isSuspendedForever ||
+      widget.task.hasActiveSuspendedAt(widget.nowUtc);
+
   @override
   void initState() {
     super.initState();
-    _indefinitely = widget.task.isSuspendedIndefinitely;
-    _untilController = TextEditingController(
-      text: widget.task.suspendedInputInitial,
-    );
+    _indefinitely = widget.task.isSuspendedForever;
+    _untilController = TextEditingController(text: _initialUntilInput);
     _noteController = TextEditingController(
       text: widget.task.suspendedNote ?? '',
     );
@@ -1814,8 +2025,8 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
   void didUpdateWidget(covariant TaskSuspendedSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!oldWidget.isEditing && widget.isEditing) {
-      _indefinitely = widget.task.isSuspendedIndefinitely;
-      _untilController.text = widget.task.suspendedInputInitial;
+      _indefinitely = widget.task.isSuspendedForever;
+      _untilController.text = _initialUntilInput;
       _noteController.text = widget.task.suspendedNote ?? '';
       _untilError = null;
       _noteError = null;
@@ -1839,15 +2050,18 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
   @override
   Widget build(BuildContext context) {
     final isControllerBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final isBusy = _isSubmitting || isControllerBusy;
+    final isSuspended = _isSuspended;
 
     if (!widget.isEditing || widget.task.isCompleted) {
-      return (!widget.task.isSuspended || widget.task.suspendedSummary == null)
+      return !isSuspended
           ? const SizedBox.shrink()
           : _TaskSuspendedReadCard(
               task: widget.task,
+              configuration: widget.configuration,
+              nowUtc: widget.nowUtc,
               isBusy: isBusy,
               onStartEdit: widget.onStartEdit,
             );
@@ -1857,7 +2071,7 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
       indefinitely: _indefinitely,
       untilController: _untilController,
       noteController: _noteController,
-      hasExistingSuspension: widget.task.isSuspended,
+      hasExistingSuspension: isSuspended,
       currentLocalDateTimeHint: widget.currentLocalDateTimeHint,
       untilError: _untilError,
       noteError: _noteError,
@@ -1885,7 +2099,7 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
     }
   }
 
-  /// Resumes the suspended task via [TaskController.resumeTask].
+  /// Resumes the suspended task via [BoardActionsNotifier.resumeTask].
   Future<void> _handleResume() async {
     if (_isSubmitting) {
       return;
@@ -1895,7 +2109,7 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
       _submitError = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .resumeTask(widget.task.id, locale: Localizations.localeOf(context));
     if (!mounted) {
       return;
@@ -1912,7 +2126,7 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
     }
   }
 
-  /// Saves edited suspension parameters via [TaskController.saveSuspended].
+  /// Saves edited suspension parameters via [BoardActionsNotifier.saveSuspended].
   Future<void> _handleSave() async {
     if (_isSubmitting) {
       return;
@@ -1924,7 +2138,7 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
       _submitError = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .saveSuspended(
           widget.task.id,
           indefinitely: _indefinitely,

@@ -15,48 +15,53 @@
 
 import 'dart:async';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/ui_telemetry.dart';
-import '../../presentation/view_model_primitives.dart';
+import '../../models/task_board.dart';
+import '../../models/task_board_evaluator.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_metadata.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../../providers/ui_telemetry.dart';
+import '../components/ui_dialog_frame.dart';
+import '../components/ui_searchable_picker.dart';
+import '../tokens/ui_theme_tokens.dart';
 
+/// Scope filter identifier showing all workspace labels inside [CompactLabelPickerSheet].
 const String _labelScopeAll = 'all';
 
-/// Scope filter identifier showing only global context labels inside the compact label picker sheet.
+/// Scope filter identifier showing only global context labels inside [CompactLabelPickerSheet].
 const String _labelScopeGlobal = 'global';
 
-/// Scope filter identifier showing only scoped queue labels inside the compact label picker sheet.
+/// Scope filter identifier showing only scoped queue labels inside [CompactLabelPickerSheet].
 const String _labelScopeScoped = 'scoped';
 
-/// Maximum Unicode scalar length for searchable label creation (`maxTdfTextLength`).
-const int _maxLabelNameLength = 500;
-
-/// Stateful body hosted inside the compact mobile label picker bottom sheet (`U-A11Y-003`).
-class _CompactLabelPickerSheetBody extends StatefulWidget {
-  /// Creates a [_CompactLabelPickerSheetBody].
-  const _CompactLabelPickerSheetBody({
-    required this.initialLabels,
-    required this.hasBothScopedAndGlobal,
-    required this.initialSelectedIds,
+/// Live Riverpod-backed compact mobile label picker bottom sheet (`U-A11Y-003`).
+///
+/// Watches [taskNotifierProvider] for live workspace labels and, when [taskId] is non-null,
+/// for live task label assignments. When [taskId] is `null`, tracks draft selections seeded
+/// from [initialSelectedLabelIds] and real label IDs returned by [onCreateLabel].
+class CompactLabelPickerSheet extends ConsumerStatefulWidget {
+  /// Creates a [CompactLabelPickerSheet].
+  const CompactLabelPickerSheet({
+    super.key,
+    this.taskId,
+    this.initialSelectedLabelIds = const <String>{},
     required this.onToggleLabel,
-    required this.onCreateAndAssign,
+    required this.onCreateLabel,
     required this.onOpenLabelInfo,
     required this.onRequestClose,
   });
 
-  /// Whether conditional `All` / `Scoped` / `Global` filter pills are shown.
-  final bool hasBothScopedAndGlobal;
+  /// Initial selected label identifiers used in uncommitted draft mode (`taskId == null`).
+  final Set<String> initialSelectedLabelIds;
 
-  /// Initial label options supplied when opening the sheet.
-  final List<LabelPickerOptionViewModel> initialLabels;
-
-  /// Initial set of selected label identifiers.
-  final Set<String> initialSelectedIds;
-
-  /// Callback creating and assigning a new label by name.
-  final ValueChanged<String> onCreateAndAssign;
+  /// Async callback creating a new label by name and returning its [ActionResult].
+  final Future<ActionResult> Function(String rawName) onCreateLabel;
 
   /// Callback navigating to the label manager card for a label identifier.
   final ValueChanged<String> onOpenLabelInfo;
@@ -67,80 +72,90 @@ class _CompactLabelPickerSheetBody extends StatefulWidget {
   /// Callback toggling selection of an existing label identifier.
   final ValueChanged<String> onToggleLabel;
 
+  /// Optional persisted task identifier whose assigned labels are watched live from [taskNotifierProvider].
+  final String? taskId;
+
   @override
-  State<_CompactLabelPickerSheetBody> createState() =>
-      _CompactLabelPickerSheetBodyState();
+  ConsumerState<CompactLabelPickerSheet> createState() =>
+      _CompactLabelPickerSheetState();
 }
 
-/// Manages local live selection, scope filtering, and inline label creation inside [_CompactLabelPickerSheetBody].
-class _CompactLabelPickerSheetBodyState
-    extends State<_CompactLabelPickerSheetBody> {
+/// Manages live label projection, scope filtering, and inline creation inside [CompactLabelPickerSheet].
+class _CompactLabelPickerSheetState
+    extends ConsumerState<CompactLabelPickerSheet> {
   String _activeScopeId = _labelScopeAll;
-  late List<LabelPickerOptionViewModel> _labels;
+  late Set<String> _draftSelectedIds;
+  bool _isCreating = false;
   String _query = '';
-  late Set<String> _selectedIds;
-  final Set<String> _syntheticIds = <String>{};
 
   @override
   void initState() {
     super.initState();
-    _labels = List<LabelPickerOptionViewModel>.of(widget.initialLabels);
-    _selectedIds = Set<String>.of(widget.initialSelectedIds);
+    _draftSelectedIds = Set<String>.of(widget.initialSelectedLabelIds);
   }
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final hasDuplicate = _hasLabelNamed(_labels, _query.trim());
+    final board = ref.watch(
+      taskNotifierProvider.select((asyncBoard) => asyncBoard.asData?.value),
+    );
+    final snapshot = _buildPickerSnapshot(
+      board: board,
+      localizations: localizations,
+      tokens: UiThemeTokens.of(context),
+    );
 
     return UiSearchablePicker<String>(
       key: const ValueKey<String>('compact_label_picker'),
-      options: _buildOptions(localizations, tokens),
-      selectedIds: _selectedIds,
+      options: snapshot.options,
+      selectedIds: snapshot.selectedIds,
       selectionMode: UiPickerSelectionMode.multiple,
       isCompactSheet: true,
       autoFocusSearch: false,
-      searchMaxLength: _maxLabelNameLength,
+      searchMaxLength: maxTdfTextLength,
       query: _query,
       onQueryChanged: _handleQueryChanged,
       searchPlaceholder: localizations.labelPickerSearchPlaceholder,
       searchClearTooltip: localizations.tooltipClearSearch,
-      scopeFilters: _buildScopeFilters(localizations),
-      activeScopeId: _activeScopeId,
+      scopeFilters: snapshot.scopeFilters,
+      activeScopeId: snapshot.effectiveScopeId,
       onScopeChanged: _handleScopeChanged,
-      emptyText: _labels.isEmpty
-          ? localizations.labelPickerEmptyHint
-          : localizations.labelPickerNoMatches,
+      emptyText: snapshot.emptyText,
       infoTooltip: localizations.openLabelInManagerTooltip,
       onToggleOption: _handleToggleOption,
       onOptionInfo: _handleOptionInfo,
       removeChipTooltip: (option) =>
           localizations.labelPickerRemoveTooltip(option.label),
-      inlineCreateLabel: (trimmed) =>
-          localizations.labelPickerCreateAndAssign(trimmed),
-      onInlineCreate: hasDuplicate ? null : _handleInlineCreate,
+      inlineCreateLabel: localizations.labelPickerCreateAndAssign,
+      onInlineCreate: snapshot.hasDuplicate ? null : _triggerInlineCreate,
       onRequestClose: widget.onRequestClose,
     );
   }
 
-  /// Builds picker option rows filtered by [_activeScopeId].
-  List<UiPickerOption<String>> _buildOptions(
-    AppLocalizations localizations,
-    UiThemeTokens tokens,
-  ) {
+  /// Builds picker option rows filtered by [effectiveScopeId] from live workspace [labels].
+  List<UiPickerOption<String>> _buildOptions({
+    required TaskBoard? board,
+    required List<TdfLabel> labels,
+    required String effectiveScopeId,
+    required AppLocalizations localizations,
+    required UiThemeTokens tokens,
+  }) {
     final options = <UiPickerOption<String>>[];
-    for (final label in _labels) {
-      if (_activeScopeId == _labelScopeScoped && !label.isScoped) {
+    for (final label in labels) {
+      if (effectiveScopeId == _labelScopeScoped && !label.isScoped) {
         continue;
       }
-      if (_activeScopeId == _labelScopeGlobal && label.isScoped) {
+      if (effectiveScopeId == _labelScopeGlobal && label.isScoped) {
         continue;
       }
-      final colorDot = switch (label.colorValue) {
+      final colorDot = switch (TaskScheduleHelper.parseLabelColorValue(
+        label.color,
+      )) {
         final value? => Color(value),
         null => tokens.colors.accent,
       };
+      final openCount = board?.openTaskCountForLabel(label.id) ?? 0;
       options.add(
         UiPickerOption<String>(
           id: label.id,
@@ -148,30 +163,61 @@ class _CompactLabelPickerSheetBodyState
           label: label.name,
           colorDot: colorDot,
           badgeLabel: label.isScoped ? localizations.scopedQueueLabel : null,
-          countLabel: localizations.openTasksCountPill('${label.openCount}'),
-          hasInfoAction: !_syntheticIds.contains(label.id),
+          countLabel: localizations.openTasksCountPill('$openCount'),
+          hasInfoAction: true,
         ),
       );
     }
     return options;
   }
 
+  /// Computes the live sorted options, scope filters, and selected label IDs from [board].
+  _CompactLabelPickerSnapshot _buildPickerSnapshot({
+    required TaskBoard? board,
+    required AppLocalizations localizations,
+    required UiThemeTokens tokens,
+  }) {
+    final sortedLabels = board == null
+        ? const <TdfLabel>[]
+        : TaskBoardEvaluator.sortLabelsAlphabetically(board.labels);
+    final scopedCount = _countScopedLabels(sortedLabels);
+    final hasBothScopes = scopedCount > 0 && scopedCount < sortedLabels.length;
+    final effectiveScopeId = hasBothScopes ? _activeScopeId : _labelScopeAll;
+    return (
+      effectiveScopeId: effectiveScopeId,
+      emptyText: sortedLabels.isEmpty
+          ? localizations.labelPickerEmptyHint
+          : localizations.labelPickerNoMatches,
+      hasDuplicate: board?.hasDuplicateLabelName(_query) ?? false,
+      options: _buildOptions(
+        board: board,
+        labels: sortedLabels,
+        effectiveScopeId: effectiveScopeId,
+        localizations: localizations,
+        tokens: tokens,
+      ),
+      scopeFilters: hasBothScopes
+          ? _buildScopeFilters(
+              localizations: localizations,
+              totalCount: sortedLabels.length,
+              scopedCount: scopedCount,
+            )
+          : const <UiPickerScopeFilter>[],
+      selectedIds: _resolveSelectedIds(board),
+    );
+  }
+
   /// Builds conditional `All`, `Scoped`, and `Global` filter pills when both scopes exist.
-  List<UiPickerScopeFilter> _buildScopeFilters(AppLocalizations localizations) {
-    if (!widget.hasBothScopedAndGlobal) {
-      return const <UiPickerScopeFilter>[];
-    }
-    var scopedCount = 0;
-    for (final label in _labels) {
-      if (label.isScoped) {
-        scopedCount++;
-      }
-    }
-    final globalCount = _labels.length - scopedCount;
+  List<UiPickerScopeFilter> _buildScopeFilters({
+    required AppLocalizations localizations,
+    required int totalCount,
+    required int scopedCount,
+  }) {
+    final globalCount = totalCount - scopedCount;
     return <UiPickerScopeFilter>[
       UiPickerScopeFilter(
         id: _labelScopeAll,
-        label: localizations.labelPickerFilterAll('${_labels.length}'),
+        label: localizations.labelPickerFilterAll('$totalCount'),
       ),
       UiPickerScopeFilter(
         id: _labelScopeScoped,
@@ -184,33 +230,39 @@ class _CompactLabelPickerSheetBodyState
     ];
   }
 
-  /// Invokes inline label creation and reflects the new selection optimistically inside the sheet.
-  void _handleInlineCreate(String rawName) {
+  /// Creates a new real label via [CompactLabelPickerSheet.onCreateLabel] and selects its committed ID.
+  Future<void> _handleInlineCreate(String rawName) async {
+    if (_isCreating) {
+      return;
+    }
     final trimmed = rawName.trim();
     if (trimmed.isEmpty) {
       return;
     }
-    widget.onCreateAndAssign(trimmed);
-    final syntheticId = '_created_${_syntheticIds.length}';
-    final createdOption = LabelPickerOptionViewModel(
-      id: syntheticId,
-      name: trimmed,
-      isScoped: false,
-      openCount: 0,
-    );
-    setState(() {
-      _syntheticIds.add(syntheticId);
-      _labels = <LabelPickerOptionViewModel>[..._labels, createdOption]
-        ..sort(
-          (first, second) =>
-              first.name.toLowerCase().compareTo(second.name.toLowerCase()),
-        );
-      _selectedIds = <String>{..._selectedIds, syntheticId};
-      _query = '';
-      if (_activeScopeId == _labelScopeScoped) {
-        _activeScopeId = _labelScopeAll;
+    _isCreating = true;
+    try {
+      final result = await widget.onCreateLabel(trimmed);
+      if (!mounted) {
+        return;
       }
-    });
+      switch (result) {
+        case ActionSucceeded(:final entityId):
+          setState(() {
+            if (widget.taskId == null && entityId != null) {
+              _draftSelectedIds = <String>{..._draftSelectedIds, entityId};
+            }
+            _query = '';
+            if (_activeScopeId == _labelScopeScoped) {
+              _activeScopeId = _labelScopeAll;
+            }
+          });
+        case ActionValidationFailed():
+        case ActionPersistFailed():
+          break;
+      }
+    } finally {
+      _isCreating = false;
+    }
   }
 
   /// Closes the bottom sheet and notifies the caller to inspect [option] in Labels manager.
@@ -229,64 +281,95 @@ class _CompactLabelPickerSheetBodyState
     setState(() => _activeScopeId = nextScopeId);
   }
 
-  /// Toggles local selection state and forwards existing label IDs to the caller.
+  /// Updates draft selection when `taskId == null` and forwards the toggled label ID to the caller.
   void _handleToggleOption(UiPickerOption<String> option) {
-    final nextSelected = Set<String>.of(_selectedIds);
-    if (!nextSelected.add(option.id)) {
-      nextSelected.remove(option.id);
+    if (widget.taskId == null) {
+      final nextSelected = Set<String>.of(_draftSelectedIds);
+      if (!nextSelected.add(option.id)) {
+        nextSelected.remove(option.id);
+      }
+      setState(() => _draftSelectedIds = nextSelected);
     }
-    setState(() => _selectedIds = nextSelected);
-    if (!_syntheticIds.contains(option.id)) {
-      widget.onToggleLabel(option.value);
+    widget.onToggleLabel(option.value);
+  }
+
+  /// Resolves the live selected label ID set from [board] in task mode or [_draftSelectedIds] in draft mode.
+  Set<String> _resolveSelectedIds(TaskBoard? board) {
+    if (widget.taskId case final targetTaskId?) {
+      final assignedIds = board?.findTask(targetTaskId)?.labelIds;
+      if (assignedIds == null || assignedIds.isEmpty) {
+        return const <String>{};
+      }
+      return Set<String>.of(assignedIds);
     }
+    return _draftSelectedIds;
+  }
+
+  /// Dispatches async inline label creation from [UiSearchablePicker.onInlineCreate].
+  void _triggerInlineCreate(String rawName) {
+    unawaited(_handleInlineCreate(rawName));
   }
 }
+
+/// Immutable per-frame picker projection computed for [CompactLabelPickerSheet].
+typedef _CompactLabelPickerSnapshot = ({
+  String effectiveScopeId,
+  String emptyText,
+  bool hasDuplicate,
+  List<UiPickerOption<String>> options,
+  List<UiPickerScopeFilter> scopeFilters,
+  Set<String> selectedIds,
+});
 
 /// Presents the focus-trapped compact mobile label picker bottom sheet without search auto-focus (`U-A11Y-003`).
 Future<void> showCompactLabelPickerSheet(
   BuildContext context, {
   required String title,
-  required List<LabelPickerOptionViewModel> allLabels,
-  required bool hasBothScopedAndGlobal,
-  required Set<String> selectedIds,
+  String? taskId,
+  Set<String> initialSelectedLabelIds = const <String>{},
   required ValueChanged<String> onToggleLabel,
-  required ValueChanged<String> onCreateAndAssign,
+  required Future<ActionResult> Function(String rawName) onCreateLabel,
   required ValueChanged<String> onOpenLabelInfo,
 }) {
   UiTelemetry.logDialogOpened('label_picker_sheet');
   final localizations = AppLocalizations.of(context);
+  final initialCount = switch (taskId) {
+    final targetTaskId? =>
+      ProviderScope.containerOf(context, listen: false)
+              .read(taskNotifierProvider)
+              .asData
+              ?.value
+              .findTask(targetTaskId)
+              ?.labelIds
+              .length ??
+          initialSelectedLabelIds.length,
+    null => initialSelectedLabelIds.length,
+  };
   return UiDialogFrame.showBottomSheet<void>(
     context: context,
     title: title,
     icon: Icons.label_outline_rounded,
-    countLabel: '${selectedIds.length}',
+    countLabel: '$initialCount',
     doneLabel: localizations.actionDone,
     barrierLabel: title,
-    builder: (modalContext) => _CompactLabelPickerSheetBody(
-      initialLabels: allLabels,
-      hasBothScopedAndGlobal: hasBothScopedAndGlobal,
-      initialSelectedIds: selectedIds,
+    builder: (modalContext) => CompactLabelPickerSheet(
+      taskId: taskId,
+      initialSelectedLabelIds: initialSelectedLabelIds,
       onToggleLabel: onToggleLabel,
-      onCreateAndAssign: onCreateAndAssign,
+      onCreateLabel: onCreateLabel,
       onOpenLabelInfo: onOpenLabelInfo,
       onRequestClose: () => Navigator.of(modalContext).maybePop(),
     ),
   );
 }
 
-/// Returns `true` when any option in [labels] matches [trimmedName] case-insensitively.
-bool _hasLabelNamed(
-  List<LabelPickerOptionViewModel> labels,
-  String trimmedName,
-) {
-  if (trimmedName.isEmpty) {
-    return false;
-  }
-  final normalized = trimmedName.toLowerCase();
+/// Counts scoped queue labels in [labels] in a single linear pass.
+int _countScopedLabels(Iterable<TdfLabel> labels) {
+  var count = 0;
   for (final label in labels) {
-    if (label.name.trim().toLowerCase() == normalized) {
-      return true;
+    if (label.isScoped) {
+      count++;
     }
   }
-  return false;
+  return count;
 }

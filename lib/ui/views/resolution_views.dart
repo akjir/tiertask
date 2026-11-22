@@ -17,13 +17,23 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/sync_controller.dart';
+import '../../models/task_board.dart';
+import '../../models/tdf_sync_metadata.dart';
+import '../../providers/entity_actions_provider.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/sync_providers.dart';
+import '../../providers/task_providers.dart';
+import '../layout/ui_page_header.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_pill.dart';
+import '../primitives/ui_segmented_control.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
 
 /// Resolution view listing pending `TDF-DEL-003` deletion conflicts across tasks, labels, and locations.
 class DeletionConflictView extends ConsumerWidget {
@@ -33,38 +43,30 @@ class DeletionConflictView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final viewModel = ref.watch(conflictResolutionViewModelProvider);
-    final decisions = ref.watch(conflictDecisionsProvider);
-    final notifier = ref.read(conflictDecisionsProvider.notifier);
+    // Keep auto-disposed decision state alive for this view without rebuilding the list on per-card changes.
+    ref.listen<bool>(conflictDecisionsProvider.select((_) => true), (_, _) {});
+    final outcome = ref.watch(
+      syncStateProvider.select((syncState) => syncState.syncOutcome),
+    );
+    final board = ref.watch(
+      taskNotifierProvider.select((boardAsync) => boardAsync.asData?.value),
+    );
+    final entries = _buildConflictEntries(
+      outcome: outcome,
+      board: board,
+      localizations: localizations,
+    );
 
     return _ResolutionScaffoldBody(
-      title: viewModel.title,
-      subtitle: viewModel.subtitle,
-      entryCount: viewModel.entries.length,
-      onBack: () => ref
-          .read(appShellControllerProvider.notifier)
-          .openView(ShellView.tasks),
+      title: localizations.conflictResolutionTitle,
+      subtitle: localizations.conflictResolutionSubtitle,
+      entryCount: entries.length,
+      onBack: () => ref.read(shellProvider.notifier).openView(ShellView.tasks),
       itemBuilder: (context, index) {
-        final entry = viewModel.entries[index];
-        final decisionKey = resolutionDecisionKey(entry.kind, entry.id);
-        final selected =
-            decisions[decisionKey] ?? ConflictDecisionChoice.keepEdit;
-        return _ResolutionEntryCard<ConflictDecisionChoice>(
+        final entry = entries[index];
+        return _ConflictEntryCard(
           key: ValueKey<String>('conflict_card_${entry.kind.name}_${entry.id}'),
           entry: entry,
-          value: selected,
-          segments: <UiSegment<ConflictDecisionChoice>>[
-            UiSegment<ConflictDecisionChoice>(
-              value: ConflictDecisionChoice.keepEdit,
-              label: localizations.conflictKeepEditOption,
-            ),
-            UiSegment<ConflictDecisionChoice>(
-              value: ConflictDecisionChoice.confirmDelete,
-              label: localizations.conflictConfirmDeleteOption,
-            ),
-          ],
-          onChanged: (choice) =>
-              notifier.selectDecision(entry.kind, entry.id, choice),
         );
       },
     );
@@ -79,38 +81,30 @@ class GenerationRecoveryView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final viewModel = ref.watch(recoveryResolutionViewModelProvider);
-    final decisions = ref.watch(recoveryDecisionsProvider);
-    final notifier = ref.read(recoveryDecisionsProvider.notifier);
+    // Keep auto-disposed decision state alive for this view without rebuilding the list on per-card changes.
+    ref.listen<bool>(recoveryDecisionsProvider.select((_) => true), (_, _) {});
+    final outcome = ref.watch(
+      syncStateProvider.select((syncState) => syncState.syncOutcome),
+    );
+    final board = ref.watch(
+      taskNotifierProvider.select((boardAsync) => boardAsync.asData?.value),
+    );
+    final entries = _buildRecoveryEntries(
+      outcome: outcome,
+      board: board,
+      localizations: localizations,
+    );
 
     return _ResolutionScaffoldBody(
-      title: viewModel.title,
-      subtitle: viewModel.subtitle,
-      entryCount: viewModel.entries.length,
-      onBack: () => ref
-          .read(appShellControllerProvider.notifier)
-          .openView(ShellView.tasks),
+      title: localizations.recoveryResolutionTitle,
+      subtitle: localizations.recoveryResolutionSubtitle,
+      entryCount: entries.length,
+      onBack: () => ref.read(shellProvider.notifier).openView(ShellView.tasks),
       itemBuilder: (context, index) {
-        final entry = viewModel.entries[index];
-        final decisionKey = resolutionDecisionKey(entry.kind, entry.id);
-        final selected =
-            decisions[decisionKey] ?? RecoveryDecisionChoice.recoverAsNew;
-        return _ResolutionEntryCard<RecoveryDecisionChoice>(
+        final entry = entries[index];
+        return _RecoveryEntryCard(
           key: ValueKey<String>('recovery_card_${entry.kind.name}_${entry.id}'),
           entry: entry,
-          value: selected,
-          segments: <UiSegment<RecoveryDecisionChoice>>[
-            UiSegment<RecoveryDecisionChoice>(
-              value: RecoveryDecisionChoice.recoverAsNew,
-              label: localizations.recoveryAsNewOption,
-            ),
-            UiSegment<RecoveryDecisionChoice>(
-              value: RecoveryDecisionChoice.discardLocal,
-              label: localizations.recoveryDiscardLocalOption,
-            ),
-          ],
-          onChanged: (choice) =>
-              notifier.selectDecision(entry.kind, entry.id, choice),
         );
       },
     );
@@ -129,27 +123,23 @@ class ResolutionActionDock extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isBusy = ref.watch(
-      syncControllerProvider.select((syncState) => syncState.isBusy),
+      syncActionsProvider.select((syncActions) => syncActions.isBusy),
     );
-    final hasEntries = isRecovery
-        ? ref.watch(
-            recoveryResolutionViewModelProvider.select(
-              (model) => model.hasItems,
-            ),
-          )
-        : ref.watch(
-            conflictResolutionViewModelProvider.select(
-              (model) => model.hasConflicts,
-            ),
-          );
+    final hasEntries = ref.watch(
+      syncStateProvider.select(
+        (syncState) => _hasResolutionEntries(
+          syncState.syncOutcome,
+          isRecovery: isRecovery,
+        ),
+      ),
+    );
 
     return _ResolutionActionButtons(
       isRecovery: isRecovery,
       isBusy: isBusy,
       hasEntries: hasEntries,
-      onCancel: () => ref
-          .read(appShellControllerProvider.notifier)
-          .openView(ShellView.tasks),
+      onCancel: () =>
+          ref.read(shellProvider.notifier).openView(ShellView.tasks),
       onApply: () => _handleApply(context, ref),
     );
   }
@@ -161,6 +151,83 @@ class ResolutionActionDock extends ConsumerWidget {
       isRecovery
           ? _applyRecoveryResolutions(context, ref, locale: locale)
           : _applyConflictResolutions(context, ref, locale: locale),
+    );
+  }
+}
+
+/// Scoped `TDF-DEL-003` deletion conflict card watching only its own [conflictDecisionsProvider] entry.
+class _ConflictEntryCard extends ConsumerWidget {
+  /// Creates a [_ConflictEntryCard].
+  const _ConflictEntryCard({super.key, required this.entry});
+
+  /// Conflicted entity metadata rendered on this card.
+  final _ResolutionEntry entry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final decisionKey = resolutionDecisionKey(entry.kind.name, entry.id);
+    final selected = ref.watch(
+      conflictDecisionsProvider.select(
+        (decisions) => decisions[decisionKey] ?? TdfDeletionResolution.undelete,
+      ),
+    );
+
+    return _ResolutionEntryCard<TdfDeletionResolution>(
+      entry: entry,
+      value: selected,
+      segments: <UiSegment<TdfDeletionResolution>>[
+        UiSegment<TdfDeletionResolution>(
+          value: TdfDeletionResolution.undelete,
+          label: localizations.conflictKeepEditOption,
+        ),
+        UiSegment<TdfDeletionResolution>(
+          value: TdfDeletionResolution.delete,
+          label: localizations.conflictConfirmDeleteOption,
+        ),
+      ],
+      onChanged: (choice) => ref
+          .read(conflictDecisionsProvider.notifier)
+          .selectDecision(decisionKey, choice),
+    );
+  }
+}
+
+/// Scoped `TDF-REC-002` generation recovery card watching only its own [recoveryDecisionsProvider] entry.
+class _RecoveryEntryCard extends ConsumerWidget {
+  /// Creates a [_RecoveryEntryCard].
+  const _RecoveryEntryCard({super.key, required this.entry});
+
+  /// Ambiguous entity metadata rendered on this card.
+  final _ResolutionEntry entry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final decisionKey = resolutionDecisionKey(entry.kind.name, entry.id);
+    final selected = ref.watch(
+      recoveryDecisionsProvider.select(
+        (decisions) =>
+            decisions[decisionKey] ?? TdfRecoveryResolution.recoverAsNew,
+      ),
+    );
+
+    return _ResolutionEntryCard<TdfRecoveryResolution>(
+      entry: entry,
+      value: selected,
+      segments: <UiSegment<TdfRecoveryResolution>>[
+        UiSegment<TdfRecoveryResolution>(
+          value: TdfRecoveryResolution.recoverAsNew,
+          label: localizations.recoveryAsNewOption,
+        ),
+        UiSegment<TdfRecoveryResolution>(
+          value: TdfRecoveryResolution.discard,
+          label: localizations.recoveryDiscardLocalOption,
+        ),
+      ],
+      onChanged: (choice) => ref
+          .read(recoveryDecisionsProvider.notifier)
+          .selectDecision(decisionKey, choice),
     );
   }
 }
@@ -223,19 +290,60 @@ class _ResolutionActionButtons extends StatelessWidget {
   }
 }
 
+/// Immutable display entry for one conflicted or ambiguous task, label, or location.
+@immutable
+class _ResolutionEntry {
+  /// Creates a [_ResolutionEntry].
+  const _ResolutionEntry({
+    required this.kind,
+    required this.kindBadgeLabel,
+    required this.id,
+    required this.title,
+    required this.detail,
+  });
+
+  /// Localized conflict or recovery explanation shown on the card.
+  final String detail;
+
+  /// Canonical entity identifier.
+  final String id;
+
+  /// Entity domain kind (`task`, `label`, or `location`).
+  final EntityKind kind;
+
+  /// Localized uppercase badge label for [kind].
+  final String kindBadgeLabel;
+
+  /// Resolved display title from the loaded board, or [id] when absent.
+  final String title;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is _ResolutionEntry &&
+        other.kind == kind &&
+        other.kindBadgeLabel == kindBadgeLabel &&
+        other.id == id &&
+        other.title == title &&
+        other.detail == detail;
+  }
+
+  @override
+  int get hashCode => Object.hash(kind, kindBadgeLabel, id, title, detail);
+}
+
 /// Flat `UiCard.standard` displaying one conflicted or ambiguous entity with its 2-way decision control.
 class _ResolutionEntryCard<T> extends StatelessWidget {
   /// Creates a [_ResolutionEntryCard].
   const _ResolutionEntryCard({
-    super.key,
     required this.entry,
     required this.value,
     required this.segments,
     required this.onChanged,
   });
 
-  /// Conflicted or ambiguous entity view model.
-  final ResolutionEntryViewModel entry;
+  /// Conflicted or ambiguous entity display entry.
+  final _ResolutionEntry entry;
 
   /// Callback invoked when the user switches the segmented decision.
   final ValueChanged<T> onChanged;
@@ -279,8 +387,8 @@ class _ResolutionEntryHeader extends StatelessWidget {
   /// Creates a [_ResolutionEntryHeader].
   const _ResolutionEntryHeader({required this.entry});
 
-  /// Conflicted or ambiguous entity view model.
-  final ResolutionEntryViewModel entry;
+  /// Conflicted or ambiguous entity display entry.
+  final _ResolutionEntry entry;
 
   @override
   Widget build(BuildContext context) {
@@ -402,34 +510,38 @@ class _ResolutionScaffoldBody extends StatelessWidget {
   }
 }
 
-/// Partitions deletion conflict choices by entity kind and submits them via [SyncController].
+/// Partitions deletion conflict choices by entity kind and submits them via [SyncActionsNotifier].
 Future<void> _applyConflictResolutions(
   BuildContext context,
   WidgetRef ref, {
   required Locale locale,
 }) async {
-  final viewModel = ref.read(conflictResolutionViewModelProvider);
-  final decisions = ref.read(conflictDecisionsProvider);
-  final taskDecisions = <String, ConflictDecisionChoice>{};
-  final labelDecisions = <String, ConflictDecisionChoice>{};
-  final locationDecisions = <String, ConflictDecisionChoice>{};
-
-  for (final entry in viewModel.entries) {
-    final choice =
-        decisions[resolutionDecisionKey(entry.kind, entry.id)] ??
-        ConflictDecisionChoice.keepEdit;
-    switch (entry.kind) {
-      case EntityKind.task:
-        taskDecisions[entry.id] = choice;
-      case EntityKind.label:
-        labelDecisions[entry.id] = choice;
-      case EntityKind.location:
-        locationDecisions[entry.id] = choice;
-    }
+  final outcome = ref.read(syncStateProvider).syncOutcome;
+  if (outcome == null || outcome.kind != TdfSyncOutcomeKind.deletionConflict) {
+    return;
   }
+  final decisions = ref.read(conflictDecisionsProvider);
+  final taskDecisions = <String, TdfDeletionResolution>{
+    for (final id in outcome.conflictedTaskIds)
+      id:
+          decisions[resolutionDecisionKey(EntityKind.task.name, id)] ??
+          TdfDeletionResolution.undelete,
+  };
+  final labelDecisions = <String, TdfDeletionResolution>{
+    for (final id in outcome.conflictedLabelIds)
+      id:
+          decisions[resolutionDecisionKey(EntityKind.label.name, id)] ??
+          TdfDeletionResolution.undelete,
+  };
+  final locationDecisions = <String, TdfDeletionResolution>{
+    for (final id in outcome.conflictedLocationIds)
+      id:
+          decisions[resolutionDecisionKey(EntityKind.location.name, id)] ??
+          TdfDeletionResolution.undelete,
+  };
 
   final result = await ref
-      .read(syncControllerProvider.notifier)
+      .read(syncActionsProvider.notifier)
       .applyDeletionConflictResolutions(
         taskDecisions: taskDecisions,
         labelDecisions: labelDecisions,
@@ -442,34 +554,38 @@ Future<void> _applyConflictResolutions(
   _reportResolutionFailure(ref, result);
 }
 
-/// Partitions generation recovery choices by entity kind and submits them via [SyncController].
+/// Partitions generation recovery choices by entity kind and submits them via [SyncActionsNotifier].
 Future<void> _applyRecoveryResolutions(
   BuildContext context,
   WidgetRef ref, {
   required Locale locale,
 }) async {
-  final viewModel = ref.read(recoveryResolutionViewModelProvider);
-  final decisions = ref.read(recoveryDecisionsProvider);
-  final taskDecisions = <String, RecoveryDecisionChoice>{};
-  final labelDecisions = <String, RecoveryDecisionChoice>{};
-  final locationDecisions = <String, RecoveryDecisionChoice>{};
-
-  for (final entry in viewModel.entries) {
-    final choice =
-        decisions[resolutionDecisionKey(entry.kind, entry.id)] ??
-        RecoveryDecisionChoice.recoverAsNew;
-    switch (entry.kind) {
-      case EntityKind.task:
-        taskDecisions[entry.id] = choice;
-      case EntityKind.label:
-        labelDecisions[entry.id] = choice;
-      case EntityKind.location:
-        locationDecisions[entry.id] = choice;
-    }
+  final outcome = ref.read(syncStateProvider).syncOutcome;
+  if (outcome == null || outcome.kind != TdfSyncOutcomeKind.recoveryRequired) {
+    return;
   }
+  final decisions = ref.read(recoveryDecisionsProvider);
+  final taskDecisions = <String, TdfRecoveryResolution>{
+    for (final id in outcome.ambiguousTaskIds)
+      id:
+          decisions[resolutionDecisionKey(EntityKind.task.name, id)] ??
+          TdfRecoveryResolution.recoverAsNew,
+  };
+  final labelDecisions = <String, TdfRecoveryResolution>{
+    for (final id in outcome.ambiguousLabelIds)
+      id:
+          decisions[resolutionDecisionKey(EntityKind.label.name, id)] ??
+          TdfRecoveryResolution.recoverAsNew,
+  };
+  final locationDecisions = <String, TdfRecoveryResolution>{
+    for (final id in outcome.ambiguousLocationIds)
+      id:
+          decisions[resolutionDecisionKey(EntityKind.location.name, id)] ??
+          TdfRecoveryResolution.recoverAsNew,
+  };
 
   final result = await ref
-      .read(syncControllerProvider.notifier)
+      .read(syncActionsProvider.notifier)
       .applyRecoveryResolutions(
         taskDecisions: taskDecisions,
         labelDecisions: labelDecisions,
@@ -482,6 +598,119 @@ Future<void> _applyRecoveryResolutions(
   _reportResolutionFailure(ref, result);
 }
 
+/// Builds pending `TDF-DEL-003` deletion conflict display entries from [outcome] and [board].
+List<_ResolutionEntry> _buildConflictEntries({
+  required TdfSyncOutcomeException? outcome,
+  required TaskBoard? board,
+  required AppLocalizations localizations,
+}) {
+  if (outcome == null || outcome.kind != TdfSyncOutcomeKind.deletionConflict) {
+    return const <_ResolutionEntry>[];
+  }
+  return _buildResolutionEntries(
+    taskIds: outcome.conflictedTaskIds,
+    labelIds: outcome.conflictedLabelIds,
+    locationIds: outcome.conflictedLocationIds,
+    board: board,
+    localizations: localizations,
+    detail: localizations.syncConflictDeletionBanner,
+  );
+}
+
+/// Builds pending `TDF-REC-002` generation recovery display entries from [outcome] and [board].
+List<_ResolutionEntry> _buildRecoveryEntries({
+  required TdfSyncOutcomeException? outcome,
+  required TaskBoard? board,
+  required AppLocalizations localizations,
+}) {
+  if (outcome == null || outcome.kind != TdfSyncOutcomeKind.recoveryRequired) {
+    return const <_ResolutionEntry>[];
+  }
+  return _buildResolutionEntries(
+    taskIds: outcome.ambiguousTaskIds,
+    labelIds: outcome.ambiguousLabelIds,
+    locationIds: outcome.ambiguousLocationIds,
+    board: board,
+    localizations: localizations,
+    detail: localizations.syncConflictRecoveryBanner,
+  );
+}
+
+/// Builds ordered [_ResolutionEntry] items across tasks, labels, and locations.
+List<_ResolutionEntry> _buildResolutionEntries({
+  required Iterable<String> taskIds,
+  required Iterable<String> labelIds,
+  required Iterable<String> locationIds,
+  required TaskBoard? board,
+  required AppLocalizations localizations,
+  required String detail,
+}) {
+  final entries = <_ResolutionEntry>[];
+  for (final taskId in taskIds) {
+    entries.add(
+      _ResolutionEntry(
+        kind: EntityKind.task,
+        kindBadgeLabel: localizations.entityKindTaskBadge,
+        id: taskId,
+        title: _resolveDisplayTitle(
+          board?.findTask(taskId)?.title,
+          fallbackId: taskId,
+        ),
+        detail: detail,
+      ),
+    );
+  }
+  for (final labelId in labelIds) {
+    entries.add(
+      _ResolutionEntry(
+        kind: EntityKind.label,
+        kindBadgeLabel: localizations.entityKindLabelBadge,
+        id: labelId,
+        title: _resolveDisplayTitle(
+          board?.findLabel(labelId)?.name,
+          fallbackId: labelId,
+        ),
+        detail: detail,
+      ),
+    );
+  }
+  for (final locationId in locationIds) {
+    entries.add(
+      _ResolutionEntry(
+        kind: EntityKind.location,
+        kindBadgeLabel: localizations.entityKindLocationBadge,
+        id: locationId,
+        title: _resolveDisplayTitle(
+          board?.findLocation(locationId)?.name,
+          fallbackId: locationId,
+        ),
+        detail: detail,
+      ),
+    );
+  }
+  return entries;
+}
+
+/// Returns `true` when [outcome] contains at least one pending entry for the active resolution mode.
+bool _hasResolutionEntries(
+  TdfSyncOutcomeException? outcome, {
+  required bool isRecovery,
+}) {
+  if (outcome == null) {
+    return false;
+  }
+  if (isRecovery) {
+    return outcome.kind == TdfSyncOutcomeKind.recoveryRequired &&
+        (outcome.ambiguousTaskIds.isNotEmpty ||
+            outcome.ambiguousLabelIds.isNotEmpty ||
+            outcome.ambiguousLocationIds.isNotEmpty);
+  }
+  return outcome.kind == TdfSyncOutcomeKind.deletionConflict &&
+      (outcome.conflictedTaskIds.isNotEmpty ||
+          outcome.conflictedLabelIds.isNotEmpty ||
+          outcome.conflictedLocationIds.isNotEmpty);
+}
+
 /// Emits a danger floating notice when [result] indicates validation or persistence failure.
 void _reportResolutionFailure(WidgetRef ref, ActionResult result) {
   switch (result) {
@@ -490,7 +719,15 @@ void _reportResolutionFailure(WidgetRef ref, ActionResult result) {
     case ActionValidationFailed(:final message):
     case ActionPersistFailed(:final message):
       ref
-          .read(floatingNoticeControllerProvider.notifier)
-          .showNotice(message, tone: NoticeTone.danger);
+          .read(floatingNoticeProvider.notifier)
+          .showNotice(message, tone: FloatingNoticeTone.danger);
   }
+}
+
+/// Returns [candidate] when non-empty, otherwise falls back to [fallbackId].
+String _resolveDisplayTitle(String? candidate, {required String fallbackId}) {
+  if (candidate != null && candidate.trim().isNotEmpty) {
+    return candidate;
+  }
+  return fallbackId;
 }

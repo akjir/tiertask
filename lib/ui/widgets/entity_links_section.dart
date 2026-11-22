@@ -13,25 +13,25 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:async';
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/link_action_controller.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/task_controller.dart';
-import '../../presentation/view_model_primitives.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_metadata.dart';
+import '../../providers/config_providers.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../components/ui_ordered_item_list.dart';
+import '../layout/ui_responsive_grid.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_pill.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 import 'entity_card_chrome.dart';
-
-/// Maximum reference links allowed per task or label (`TDF 0.8.0`).
-const int _maxLinksPerEntity = 20;
-
-/// Maximum single-line text length allowed by `TDF 0.8.0` (`maxTdfTextLength`).
-const int _maxSingleLineLength = 500;
 
 /// Shared read-only and inline-editable Reference Links section for Tasks and Labels (`U-COMP-006`).
 class EntityLinksSection extends ConsumerStatefulWidget {
@@ -61,13 +61,13 @@ class EntityLinksSection extends ConsumerStatefulWidget {
   final bool isLabel;
 
   /// Persisted reference links attached to the entity.
-  final List<EntityLinkViewModel> links;
+  final List<TaskLink> links;
 
   /// Callback closing inline edit mode without saving.
   final VoidCallback onCancelEdit;
 
   /// Callback validating and persisting the edited links list.
-  final Future<ActionResult> Function(List<EntityLinkViewModel> links) onSave;
+  final Future<ActionResult> Function(List<TaskLink> links) onSave;
 
   /// Callback opening inline edit mode for this section.
   final VoidCallback onStartEdit;
@@ -288,7 +288,7 @@ class _EntityLinkFormInputsGrid extends StatelessWidget {
           kind: UiFieldKind.text,
           controller: titleController,
           hintText: localizations.linkTitleHint,
-          maxLength: _maxSingleLineLength,
+          maxLength: maxTdfTextLength,
           autofocus: true,
           enabled: enabled,
           onChanged: onChanged,
@@ -314,7 +314,7 @@ class _EntityLinkListItem extends StatelessWidget {
   const _EntityLinkListItem({required this.link});
 
   /// Reference link displayed in this row.
-  final EntityLinkViewModel link;
+  final TaskLink link;
 
   @override
   Widget build(BuildContext context) {
@@ -352,6 +352,7 @@ class _EntityLinksEditCard extends StatelessWidget {
   /// Creates an [_EntityLinksEditCard].
   const _EntityLinksEditCard({
     required this.draftLinks,
+    required this.maxLinks,
     required this.hasPersistedLinks,
     required this.editingIndex,
     required this.titleController,
@@ -371,7 +372,7 @@ class _EntityLinksEditCard extends StatelessWidget {
   });
 
   /// Editable draft links list.
-  final List<EntityLinkViewModel> draftLinks;
+  final List<TaskLink> draftLinks;
 
   /// Row index currently being updated inline, or `null` when adding.
   final int? editingIndex;
@@ -384,6 +385,9 @@ class _EntityLinksEditCard extends StatelessWidget {
 
   /// Disables controls while submitting.
   final bool isBusy;
+
+  /// Maximum number of links permitted on this entity.
+  final int maxLinks;
 
   /// Callback cancelling the whole links section edit.
   final VoidCallback onCancel;
@@ -398,7 +402,7 @@ class _EntityLinksEditCard extends StatelessWidget {
   final VoidCallback onCommitLinkInput;
 
   /// Callback removing a link row.
-  final UiOrderedItemActionCallback<EntityLinkViewModel> onDeleteRow;
+  final UiOrderedItemActionCallback<TaskLink> onDeleteRow;
 
   /// Callback clearing input validation error when text changes.
   final ValueChanged<String> onInputChanged;
@@ -410,7 +414,7 @@ class _EntityLinksEditCard extends StatelessWidget {
   final VoidCallback onSave;
 
   /// Callback starting inline edit on a link row.
-  final UiOrderedItemActionCallback<EntityLinkViewModel> onStartRowEdit;
+  final UiOrderedItemActionCallback<TaskLink> onStartRowEdit;
 
   /// Optional persistence or validation error returned by `onSave`.
   final String? saveErrorText;
@@ -429,7 +433,7 @@ class _EntityLinksEditCard extends StatelessWidget {
       headerIcon: Icons.link_rounded,
       headerTitle: localizations.linksSectionTitle,
       headerBadge: UiPill(
-        label: '${draftLinks.length} / $_maxLinksPerEntity',
+        label: '${draftLinks.length} / $maxLinks',
         variant: UiPillVariant.count,
       ),
       footer: EntityInlineEditorFooter(
@@ -477,7 +481,7 @@ class _EntityLinksOrderedList extends StatelessWidget {
   });
 
   /// Editable draft links list.
-  final List<EntityLinkViewModel> draftLinks;
+  final List<TaskLink> draftLinks;
 
   /// Row index currently being updated inline, or `null` when adding.
   final int? editingIndex;
@@ -495,7 +499,7 @@ class _EntityLinksOrderedList extends StatelessWidget {
   final VoidCallback onCommitLinkInput;
 
   /// Callback removing a link row.
-  final UiOrderedItemActionCallback<EntityLinkViewModel> onDeleteRow;
+  final UiOrderedItemActionCallback<TaskLink> onDeleteRow;
 
   /// Callback clearing input validation error when text changes.
   final ValueChanged<String> onInputChanged;
@@ -504,7 +508,7 @@ class _EntityLinksOrderedList extends StatelessWidget {
   final UiOrderedItemReorderCallback onReorder;
 
   /// Callback starting inline edit on a link row.
-  final UiOrderedItemActionCallback<EntityLinkViewModel> onStartRowEdit;
+  final UiOrderedItemActionCallback<TaskLink> onStartRowEdit;
 
   /// Title text controller.
   final TextEditingController titleController;
@@ -515,7 +519,7 @@ class _EntityLinksOrderedList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    return UiOrderedItemList<EntityLinkViewModel>(
+    return UiOrderedItemList<TaskLink>(
       items: draftLinks,
       itemKey: (link, index) =>
           ValueKey<String>('entity_link_${index}_${link.uri}'),
@@ -548,6 +552,7 @@ class _EntityLinksReadOnlyCard extends StatelessWidget {
   /// Creates an [_EntityLinksReadOnlyCard].
   const _EntityLinksReadOnlyCard({
     required this.links,
+    required this.maxLinks,
     required this.canEdit,
     required this.isBusy,
     required this.onStartEdit,
@@ -561,7 +566,10 @@ class _EntityLinksReadOnlyCard extends StatelessWidget {
   final bool isBusy;
 
   /// Reference links to display.
-  final List<EntityLinkViewModel> links;
+  final List<TaskLink> links;
+
+  /// Maximum number of links permitted on this entity.
+  final int maxLinks;
 
   /// Callback launching a link URI.
   final ValueChanged<String> onOpenLink;
@@ -576,7 +584,7 @@ class _EntityLinksReadOnlyCard extends StatelessWidget {
       headerIcon: Icons.link_rounded,
       headerTitle: localizations.linksSectionTitle,
       headerBadge: UiPill(
-        label: '${links.length} / $_maxLinksPerEntity',
+        label: '${links.length} / $maxLinks',
         variant: UiPillVariant.count,
       ),
       headerTrailing: canEdit
@@ -610,7 +618,7 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
   late final TextEditingController _titleController;
   late final TextEditingController _uriController;
 
-  List<EntityLinkViewModel> _draftLinks = const <EntityLinkViewModel>[];
+  List<TaskLink> _draftLinks = const <TaskLink>[];
   int? _editingIndex;
   String? _inputErrorText;
   bool _isSubmitting = false;
@@ -619,7 +627,7 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
   @override
   void initState() {
     super.initState();
-    _draftLinks = List<EntityLinkViewModel>.of(widget.links);
+    _draftLinks = List<TaskLink>.of(widget.links);
     _titleController = TextEditingController();
     _uriController = TextEditingController();
   }
@@ -628,7 +636,7 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
   void didUpdateWidget(covariant EntityLinksSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!oldWidget.isEditing && widget.isEditing) {
-      _draftLinks = List<EntityLinkViewModel>.of(widget.links);
+      _draftLinks = List<TaskLink>.of(widget.links);
       _editingIndex = null;
       _titleController.clear();
       _uriController.clear();
@@ -652,10 +660,12 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
 
   @override
   Widget build(BuildContext context) {
+    final maxLinks = widget.isLabel ? maxTdfLinksPerLabel : maxTdfLinksPerTask;
     if (!widget.isEditing) {
       return widget.links.isNotEmpty
           ? _EntityLinksReadOnlyCard(
               links: widget.links,
+              maxLinks: maxLinks,
               canEdit: widget.canEdit,
               isBusy: widget.isBusy,
               onStartEdit: widget.onStartEdit,
@@ -666,6 +676,7 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
 
     return _EntityLinksEditCard(
       draftLinks: _draftLinks,
+      maxLinks: maxLinks,
       hasPersistedLinks: widget.links.isNotEmpty,
       editingIndex: _editingIndex,
       titleController: _titleController,
@@ -696,28 +707,28 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
   }
 
   /// Persists an empty links list when clearing all links.
-  Future<void> _handleClearAll() => _submitLinks(const <EntityLinkViewModel>[]);
+  Future<void> _handleClearAll() => _submitLinks(const <TaskLink>[]);
 
   /// Validates the inline title/URI inputs and inserts or updates the target link row.
   bool _handleCommitLinkInput() {
     final editingIndex = _editingIndex;
-    final error = TaskController.validateLinkInput(
+    final error = TaskScheduleHelper.validateLinkInput(
       rawTitle: _titleController.text,
       rawUri: _uriController.text,
       currentCount: _draftLinks.length,
+      localizations: AppLocalizations.of(context),
       isEditingExisting: editingIndex != null,
       isLabel: widget.isLabel,
-      locale: Localizations.localeOf(context),
     );
     if (error != null) {
       setState(() => _inputErrorText = error);
       return false;
     }
-    final nextLink = EntityLinkViewModel(
+    final nextLink = TaskLink(
       title: _titleController.text.trim(),
       uri: _uriController.text.trim(),
     );
-    final nextLinks = List<EntityLinkViewModel>.of(_draftLinks);
+    final nextLinks = List<TaskLink>.of(_draftLinks);
     if (editingIndex != null &&
         editingIndex >= 0 &&
         editingIndex < nextLinks.length) {
@@ -737,12 +748,11 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
   }
 
   /// Deletes the draft link row at [index] and keeps [_editingIndex] consistent.
-  void _handleDeleteRow(EntityLinkViewModel link, int index) {
+  void _handleDeleteRow(TaskLink link, int index) {
     if (index < 0 || index >= _draftLinks.length) {
       return;
     }
-    final nextLinks = List<EntityLinkViewModel>.of(_draftLinks)
-      ..removeAt(index);
+    final nextLinks = List<TaskLink>.of(_draftLinks)..removeAt(index);
     int? nextEditingIndex = _editingIndex;
     if (nextEditingIndex == index) {
       nextEditingIndex = null;
@@ -766,24 +776,19 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
     }
   }
 
-  /// Opens [uri] through [linkActionControllerProvider] and shows a danger notice on failure.
+  /// Opens [uri] through [openExternalLinkProvider] and shows a danger notice on failure.
   Future<void> _handleOpenLink(String uri) async {
-    final outcome = await ref.read(linkActionControllerProvider).openLink(uri);
-    if (!mounted) {
+    final opened = await ref.read(openExternalLinkProvider)(uri);
+    if (!mounted || opened) {
       return;
     }
-    switch (outcome) {
-      case LinkOpenOutcome.opened:
-        return;
-      case LinkOpenOutcome.failed:
-        final localizations = AppLocalizations.of(context);
-        ref
-            .read(floatingNoticeControllerProvider.notifier)
-            .showNotice(
-              localizations.errorOpenLinkFailed,
-              tone: NoticeTone.danger,
-            );
-    }
+    final localizations = AppLocalizations.of(context);
+    ref
+        .read(floatingNoticeProvider.notifier)
+        .showNotice(
+          localizations.errorOpenLinkFailed,
+          tone: FloatingNoticeTone.danger,
+        );
   }
 
   /// Reorders the draft links list between [oldIndex] and [newIndex].
@@ -795,7 +800,7 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
         oldIndex == newIndex) {
       return;
     }
-    final nextLinks = List<EntityLinkViewModel>.of(_draftLinks);
+    final nextLinks = List<TaskLink>.of(_draftLinks);
     final moved = nextLinks.removeAt(oldIndex);
     nextLinks.insert(newIndex, moved);
     int? nextEditingIndex = _editingIndex;
@@ -823,7 +828,7 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
   }
 
   /// Loads [link] at [index] into the inline link inputs for updating.
-  void _handleStartRowEdit(EntityLinkViewModel link, int index) {
+  void _handleStartRowEdit(TaskLink link, int index) {
     setState(() {
       _editingIndex = index;
       _titleController.text = link.title;
@@ -833,7 +838,7 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
   }
 
   /// Submits [links] to [widget.onSave] and displays inline failure messages if rejected.
-  Future<void> _submitLinks(List<EntityLinkViewModel> links) async {
+  Future<void> _submitLinks(List<TaskLink> links) async {
     if (widget.isBusy || _isSubmitting) {
       return;
     }
@@ -841,9 +846,7 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
       _isSubmitting = true;
       _saveErrorText = null;
     });
-    final result = await widget.onSave(
-      List<EntityLinkViewModel>.unmodifiable(links),
-    );
+    final result = await widget.onSave(List<TaskLink>.unmodifiable(links));
     if (!mounted) {
       return;
     }
@@ -870,7 +873,7 @@ class _EntityReadOnlyLinkRow extends StatefulWidget {
   const _EntityReadOnlyLinkRow({required this.link, required this.onTap});
 
   /// Link title and target URI.
-  final EntityLinkViewModel link;
+  final TaskLink link;
 
   /// Callback launching [link].
   final VoidCallback onTap;
@@ -954,7 +957,7 @@ class _EntityReadOnlyLinkSurface extends StatelessWidget {
   final bool isHovered;
 
   /// Link title and target URI.
-  final EntityLinkViewModel link;
+  final TaskLink link;
 
   /// Renders an outer `1px` `accent` keyboard focus ring when true.
   final bool showFocusRing;

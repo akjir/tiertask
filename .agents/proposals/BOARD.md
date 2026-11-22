@@ -11,7 +11,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 
 | ID | Title | Type | Status | Specification |
 | :--- | :--- | :--- | :--- | :--- |
-| *(None)* | | | | |
+| TEP-020 | Unified UI Integration, Package Dissolution, and Direct Reactive State Architecture | architecture | review | [`tep-020-unified-ui-integration-and-reactive-architecture.md`](tep-020-unified-ui-integration-and-reactive-architecture.md) |
 
 ### Completed Proposals
 

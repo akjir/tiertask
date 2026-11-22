@@ -17,18 +17,28 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/task_controller.dart';
-import '../../presentation/tasks_view_model.dart';
+import '../../models/task_item.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_sync_metadata.dart';
+import '../../models/webdav_config.dart';
+import '../../providers/board_actions_provider.dart';
+import '../../providers/board_providers.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../components/ui_ordered_item_list.dart';
+import '../components/ui_searchable_picker.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_pill.dart';
+import '../primitives/ui_toggle_row.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
 import '../widgets/entity_date_time_fields.dart';
-
-/// Maximum single-line text length allowed by `TDF 0.8.0` (`maxTdfTextLength`).
-const int _maxSingleLineLength = 500;
 
 /// Controller-backed mutable draft row for inline and draft subtask editors.
 class EditableSubtaskRow {
@@ -58,14 +68,18 @@ class TaskHistorySection extends ConsumerStatefulWidget {
   const TaskHistorySection({
     super.key,
     required this.task,
+    required this.configuration,
     required this.currentLocalDateTimeHint,
   });
+
+  /// Active workspace configuration supplying local timezone formatting.
+  final WebDavConfig configuration;
 
   /// Current workspace local wall-clock timestamp (`YYYY-MM-DD HH:MM`) seeding optional timestamp overrides.
   final String currentLocalDateTimeHint;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item whose history journal is displayed and mutated.
+  final TaskItem task;
 
   @override
   ConsumerState<TaskHistorySection> createState() => _TaskHistorySectionState();
@@ -77,6 +91,7 @@ class TaskPrerequisitesSection extends ConsumerStatefulWidget {
   const TaskPrerequisitesSection({
     super.key,
     required this.task,
+    required this.tasksById,
     required this.isEditing,
     required this.onStartEdit,
     required this.onCancelEdit,
@@ -91,8 +106,11 @@ class TaskPrerequisitesSection extends ConsumerStatefulWidget {
   /// Callback opening inline edit mode for this section.
   final VoidCallback onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item whose prerequisites are displayed and edited.
+  final TaskItem task;
+
+  /// Lookup map of all workspace tasks by identifier for resolving prerequisite titles and status.
+  final Map<String, TaskItem> tasksById;
 
   @override
   ConsumerState<TaskPrerequisitesSection> createState() =>
@@ -147,8 +165,8 @@ class TaskSubtasksSection extends ConsumerStatefulWidget {
   /// Callback opening inline edit mode for this section.
   final VoidCallback onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item whose subtasks are displayed and edited.
+  final TaskItem task;
 
   @override
   ConsumerState<TaskSubtasksSection> createState() =>
@@ -348,7 +366,7 @@ class _HistoryAddTextField extends StatelessWidget {
       kind: UiFieldKind.text,
       controller: controller,
       hintText: localizations.historyEntryTextHint,
-      maxLength: _maxSingleLineLength,
+      maxLength: maxTdfTextLength,
       enabled: !isBusy,
       textInputAction: TextInputAction.done,
       onChanged: onChanged,
@@ -532,7 +550,7 @@ class _HistoryEditTextField extends StatelessWidget {
       key: ValueKey<String>('history_edit_text_${taskId}_$index'),
       kind: UiFieldKind.text,
       controller: controller,
-      maxLength: _maxSingleLineLength,
+      maxLength: maxTdfTextLength,
       autofocus: true,
       enabled: !isBusy,
       semanticLabel: localizations.historyEntryTextLabel,
@@ -543,13 +561,19 @@ class _HistoryEditTextField extends StatelessWidget {
   }
 }
 
-/// Read-only display row for a single [HistoryEntryViewModel].
+/// Read-only display row for a single [TaskHistoryEntry].
 class _HistoryReadRow extends StatelessWidget {
   /// Creates a [_HistoryReadRow].
-  const _HistoryReadRow({required this.entry});
+  const _HistoryReadRow({
+    required this.formattedLocalTimestamp,
+    required this.text,
+  });
 
-  /// History journal entry projection.
-  final HistoryEntryViewModel entry;
+  /// Entry timestamp formatted in the active workspace timezone.
+  final String formattedLocalTimestamp;
+
+  /// Single-line history entry description text.
+  final String text;
 
   @override
   Widget build(BuildContext context) {
@@ -561,14 +585,14 @@ class _HistoryReadRow extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
         Text(
-          entry.formattedLocalTimestamp,
+          formattedLocalTimestamp,
           style: UiTypographyTokens.mono(
             tokens.typography.monoSmall.copyWith(color: colors.muted),
           ),
         ),
         const SizedBox(height: 2.0),
         Text(
-          entry.text,
+          text,
           style: tokens.typography.control.copyWith(
             color: colors.ink,
             fontWeight: FontWeight.w400,
@@ -582,10 +606,13 @@ class _HistoryReadRow extends StatelessWidget {
 /// Read-only prerequisite status row inside [_TaskPrerequisitesReadCard].
 class _PrerequisiteReadRow extends StatelessWidget {
   /// Creates a [_PrerequisiteReadRow].
-  const _PrerequisiteReadRow({required this.item});
+  const _PrerequisiteReadRow({required this.title, required this.isSatisfied});
 
-  /// Prerequisite task summary view model.
-  final PrerequisiteItemViewModel item;
+  /// Whether the prerequisite completion threshold is currently met.
+  final bool isSatisfied;
+
+  /// Resolved prerequisite task title or fallback task identifier.
+  final String title;
 
   @override
   Widget build(BuildContext context) {
@@ -598,22 +625,20 @@ class _PrerequisiteReadRow extends StatelessWidget {
         children: <Widget>[
           ExcludeSemantics(
             child: Icon(
-              item.isSatisfied
+              isSatisfied
                   ? Icons.check_circle_outline_rounded
                   : Icons.radio_button_unchecked_rounded,
               size: tokens.spacing.iconSm,
-              color: item.isSatisfied ? colors.success : colors.warning,
+              color: isSatisfied ? colors.success : colors.warning,
             ),
           ),
           const SizedBox(width: 8.0),
           Expanded(
             child: Text(
-              item.title,
+              title,
               style: tokens.typography.control.copyWith(
-                color: item.isSatisfied ? colors.muted : colors.ink,
-                decoration: item.isSatisfied
-                    ? TextDecoration.lineThrough
-                    : null,
+                color: isSatisfied ? colors.muted : colors.ink,
+                decoration: isSatisfied ? TextDecoration.lineThrough : null,
               ),
             ),
           ),
@@ -666,7 +691,7 @@ class _SubtaskAddBar extends StatelessWidget {
             controller: controller,
             focusNode: focusNode,
             hintText: localizations.subtaskInputHint,
-            maxLength: _maxSingleLineLength,
+            maxLength: maxTdfTextLength,
             autofocus: autofocus,
             enabled: !isBusy,
             textInputAction: TextInputAction.done,
@@ -777,7 +802,7 @@ class _SubtaskEditRow extends StatelessWidget {
           child: UiField(
             kind: UiFieldKind.text,
             controller: row.controller,
-            maxLength: _maxSingleLineLength,
+            maxLength: maxTdfTextLength,
             enabled: !isBusy,
             semanticLabel: localizations.subtasksSectionTitle,
           ),
@@ -822,8 +847,8 @@ class _TaskHistoryCardShell extends StatelessWidget {
   /// Body widget rendered inside the inset history card.
   final Widget child;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item whose history journal is displayed.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
@@ -834,7 +859,7 @@ class _TaskHistoryCardShell extends StatelessWidget {
       headerIcon: Icons.history_rounded,
       headerTitle: localizations.historySectionTitle,
       headerBadge: UiPill(
-        label: '${task.history.length} / ${task.maxHistoryCount}',
+        label: '${task.history.length} / $maxTdfHistoryPerTask',
         variant: UiPillVariant.count,
       ),
       child: child,
@@ -847,6 +872,7 @@ class _TaskHistoryOrderedList extends StatelessWidget {
   /// Creates a [_TaskHistoryOrderedList].
   const _TaskHistoryOrderedList({
     required this.task,
+    required this.configuration,
     required this.editingIndex,
     required this.editTextController,
     required this.editTimestampController,
@@ -861,6 +887,9 @@ class _TaskHistoryOrderedList extends StatelessWidget {
 
   /// Bottom live add bar widget.
   final Widget addBar;
+
+  /// Active workspace configuration supplying local timezone formatting.
+  final WebDavConfig configuration;
 
   /// Controller for the edited history text.
   final TextEditingController editTextController;
@@ -878,7 +907,7 @@ class _TaskHistoryOrderedList extends StatelessWidget {
   final VoidCallback onCancelEdit;
 
   /// Callback deleting a history entry row.
-  final UiOrderedItemActionCallback<HistoryEntryViewModel> onDeleteEntry;
+  final UiOrderedItemActionCallback<TaskHistoryEntry> onDeleteEntry;
 
   /// Callback clearing errors when text changes.
   final ValueChanged<String> onInputChanged;
@@ -887,39 +916,48 @@ class _TaskHistoryOrderedList extends StatelessWidget {
   final VoidCallback onSaveEdit;
 
   /// Callback starting inline editing for a history entry row.
-  final UiOrderedItemActionCallback<HistoryEntryViewModel> onStartEdit;
+  final UiOrderedItemActionCallback<TaskHistoryEntry> onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item whose history journal is rendered.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
 
-    return UiOrderedItemList<HistoryEntryViewModel>(
+    return UiOrderedItemList<TaskHistoryEntry>(
       items: task.history,
       editingIndex: editingIndex,
       emptyText: localizations.historyEmptyHint,
       itemKey: (entry, index) => ValueKey<String>(
-        'history_entry_${task.id}_${entry.index}_${entry.timestampUtcIso}',
+        'history_entry_${task.id}_${index}_${entry.timestampUtc.toIso8601String()}',
       ),
       onEdit: isBusy ? null : onStartEdit,
       editTooltip: localizations.tooltipEditHistoryEntry,
       onDelete: isBusy ? null : onDeleteEntry,
       deleteTooltip: localizations.tooltipDeleteHistoryEntry,
-      itemBuilder: (context, entry, index, isEditing) => isEditing
-          ? _HistoryEditRow(
-              taskId: task.id,
-              index: index,
-              fallbackLocalTimestamp: entry.formattedLocalTimestamp,
-              textController: editTextController,
-              timestampController: editTimestampController,
-              isBusy: isBusy,
-              onChanged: onInputChanged,
-              onSave: onSaveEdit,
-              onCancel: onCancelEdit,
-            )
-          : _HistoryReadRow(entry: entry),
+      itemBuilder: (context, entry, index, isEditing) {
+        final formattedTimestamp = TaskScheduleHelper.formatLocalTimestamp(
+          entry.timestampUtc,
+          configuration,
+        );
+        return isEditing
+            ? _HistoryEditRow(
+                taskId: task.id,
+                index: index,
+                fallbackLocalTimestamp: formattedTimestamp,
+                textController: editTextController,
+                timestampController: editTimestampController,
+                isBusy: isBusy,
+                onChanged: onInputChanged,
+                onSave: onSaveEdit,
+                onCancel: onCancelEdit,
+              )
+            : _HistoryReadRow(
+                formattedLocalTimestamp: formattedTimestamp,
+                text: entry.text,
+              );
+      },
       addBar: addBar,
     );
   }
@@ -982,7 +1020,7 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
   @override
   Widget build(BuildContext context) {
     final isControllerBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final isBusy = _isSubmitting || isControllerBusy;
 
@@ -990,6 +1028,7 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
       task: widget.task,
       child: _TaskHistoryOrderedList(
         task: widget.task,
+        configuration: widget.configuration,
         editingIndex: _editingIndex,
         editTextController: _editTextController,
         editTimestampController: _editTimestampController,
@@ -1015,7 +1054,7 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
     );
   }
 
-  /// Appends a new history entry via [TaskController.addHistoryEntry].
+  /// Appends a new history entry via [BoardActionsNotifier.addHistoryEntry].
   Future<void> _handleAddEntry() async {
     if (_isSubmitting) {
       return;
@@ -1025,7 +1064,7 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
       _errorText = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .addHistoryEntry(
           widget.task.id,
           rawText: _addTextController.text,
@@ -1065,11 +1104,8 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
     });
   }
 
-  /// Removes [entry] via [TaskController.deleteHistoryEntry].
-  Future<void> _handleDeleteEntry(
-    HistoryEntryViewModel entry,
-    int index,
-  ) async {
+  /// Removes [entry] via [BoardActionsNotifier.deleteHistoryEntry].
+  Future<void> _handleDeleteEntry(TaskHistoryEntry entry, int index) async {
     if (_isSubmitting) {
       return;
     }
@@ -1078,10 +1114,10 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
       _errorText = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .deleteHistoryEntry(
           widget.task.id,
-          timestampUtcIso: entry.timestampUtcIso,
+          timestampUtcIso: entry.timestampUtc.toIso8601String(),
           text: entry.text,
           locale: Localizations.localeOf(context),
         );
@@ -1126,7 +1162,7 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
       _errorText = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .updateHistoryEntry(
           widget.task.id,
           oldTimestampUtcIso: oldTimestampUtcIso,
@@ -1157,13 +1193,16 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
   }
 
   /// Opens inline editing for [entry] at [index].
-  void _handleStartEdit(HistoryEntryViewModel entry, int index) {
+  void _handleStartEdit(TaskHistoryEntry entry, int index) {
     setState(() {
       _editingIndex = index;
-      _editingOldTimestampUtcIso = entry.timestampUtcIso;
+      _editingOldTimestampUtcIso = entry.timestampUtc.toIso8601String();
       _editingOldText = entry.text;
       _editTextController.text = entry.text;
-      _editTimestampController.text = entry.formattedLocalTimestamp;
+      _editTimestampController.text = TaskScheduleHelper.formatLocalTimestamp(
+        entry.timestampUtc,
+        widget.configuration,
+      );
       _errorText = null;
     });
   }
@@ -1187,7 +1226,7 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
   void _triggerAddEntry() => unawaited(_handleAddEntry());
 
   /// Dispatches async history delete from synchronous list callbacks.
-  void _triggerDeleteEntry(HistoryEntryViewModel entry, int index) {
+  void _triggerDeleteEntry(TaskHistoryEntry entry, int index) {
     unawaited(_handleDeleteEntry(entry, index));
   }
 
@@ -1211,7 +1250,7 @@ class _TaskPrerequisitesEditCard extends StatelessWidget {
   });
 
   /// Candidate open tasks including cycle-blocked markers.
-  final List<PrerequisiteCandidateViewModel> candidates;
+  final List<PrerequisiteCandidate> candidates;
 
   /// Optional validation or persistence error text.
   final String? errorText;
@@ -1283,7 +1322,7 @@ class _TaskPrerequisitesPickerBody extends StatelessWidget {
   });
 
   /// Candidate open tasks including cycle-blocked markers.
-  final List<PrerequisiteCandidateViewModel> candidates;
+  final List<PrerequisiteCandidate> candidates;
 
   /// Whether a save mutation is in flight.
   final bool isBusy;
@@ -1315,7 +1354,7 @@ class _TaskPrerequisitesPickerBody extends StatelessWidget {
           options: _pickerOptions(localizations),
           selectedIds: selectedIds,
           autoFocusSearch: true,
-          searchMaxLength: _maxSingleLineLength,
+          searchMaxLength: maxTdfTextLength,
           searchPlaceholder: localizations.blockedBySearchHint,
           searchClearTooltip: localizations.tooltipClearSearch,
           emptyText: localizations.blockedBySearchNoResults,
@@ -1333,7 +1372,7 @@ class _TaskPrerequisitesPickerBody extends StatelessWidget {
     }
   }
 
-  /// Maps candidate view models into [UiPickerOption] entries.
+  /// Maps prerequisite candidates into [UiPickerOption] entries.
   List<UiPickerOption<String>> _pickerOptions(AppLocalizations localizations) {
     return <UiPickerOption<String>>[
       for (final candidate in candidates)
@@ -1355,6 +1394,7 @@ class _TaskPrerequisitesReadCard extends StatelessWidget {
   /// Creates a [_TaskPrerequisitesReadCard].
   const _TaskPrerequisitesReadCard({
     required this.task,
+    required this.tasksById,
     required this.isBusy,
     required this.onStartEdit,
   });
@@ -1365,23 +1405,29 @@ class _TaskPrerequisitesReadCard extends StatelessWidget {
   /// Callback entering inline edit mode.
   final VoidCallback onStartEdit;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item whose dependencies are displayed.
+  final TaskItem task;
+
+  /// Lookup map of all workspace tasks by identifier.
+  final Map<String, TaskItem> tasksById;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final rows = _resolveRows();
+    final satisfiedCount = _countSatisfied(rows);
 
     return UiCard.inset(
       key: ValueKey<String>('task_prerequisites_read_${task.id}'),
       headerIcon: Icons.lock_outline_rounded,
       headerTitle: localizations.taskBlockedBySectionTitle,
-      headerBadge: task.prerequisitesProgressLabel != null
-          ? UiPill(
-              label: task.prerequisitesProgressLabel ?? '',
-              variant: UiPillVariant.count,
-            )
-          : null,
+      headerBadge: UiPill(
+        label: localizations.taskInfoBlockedByProgress(
+          '$satisfiedCount',
+          '${rows.length}',
+        ),
+        variant: UiPillVariant.count,
+      ),
       headerTrailing: task.isCompleted
           ? null
           : _TaskSectionEditButton(
@@ -1395,11 +1441,45 @@ class _TaskPrerequisitesReadCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          for (final item in task.prerequisites)
-            _PrerequisiteReadRow(item: item),
+          for (final row in rows)
+            _PrerequisiteReadRow(
+              title: row.title,
+              isSatisfied: row.isSatisfied,
+            ),
         ],
       ),
     );
+  }
+
+  /// Counts how many resolved prerequisite rows are currently satisfied.
+  int _countSatisfied(List<({String title, bool isSatisfied})> rows) {
+    var count = 0;
+    for (final row in rows) {
+      if (row.isSatisfied) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /// Resolves a single dependency's display title and satisfaction against [tasksById].
+  ({String title, bool isSatisfied}) _resolveDependency(
+    TdfTaskDependency dependency,
+  ) {
+    final target = tasksById[dependency.taskId];
+    return (
+      title: target?.title ?? dependency.taskId,
+      isSatisfied:
+          target != null && target.completions >= dependency.requiredCompletion,
+    );
+  }
+
+  /// Resolves display title and completion satisfaction for every dependency on [task].
+  List<({String title, bool isSatisfied})> _resolveRows() {
+    return <({String title, bool isSatisfied})>[
+      for (final dependency in task.dependencies)
+        _resolveDependency(dependency),
+    ];
   }
 }
 
@@ -1414,7 +1494,7 @@ class _TaskPrerequisitesSectionState
   void initState() {
     super.initState();
     _selectedIds = <String>{
-      for (final item in widget.task.prerequisites) item.id,
+      for (final dependency in widget.task.dependencies) dependency.taskId,
     };
   }
 
@@ -1423,7 +1503,7 @@ class _TaskPrerequisitesSectionState
     super.didUpdateWidget(oldWidget);
     if (!oldWidget.isEditing && widget.isEditing) {
       _selectedIds = <String>{
-        for (final item in widget.task.prerequisites) item.id,
+        for (final dependency in widget.task.dependencies) dependency.taskId,
       };
       _errorText = null;
       _isSubmitting = false;
@@ -1436,15 +1516,16 @@ class _TaskPrerequisitesSectionState
   @override
   Widget build(BuildContext context) {
     final isControllerBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final isBusy = _isSubmitting || isControllerBusy;
 
     if (!widget.isEditing || widget.task.isCompleted) {
-      return widget.task.prerequisites.isEmpty
+      return widget.task.dependencies.isEmpty
           ? const SizedBox.shrink()
           : _TaskPrerequisitesReadCard(
               task: widget.task,
+              tasksById: widget.tasksById,
               isBusy: isBusy,
               onStartEdit: widget.onStartEdit,
             );
@@ -1456,7 +1537,7 @@ class _TaskPrerequisitesSectionState
     return _TaskPrerequisitesEditCard(
       candidates: candidates,
       selectedIds: _selectedIds,
-      hasExistingPrerequisites: widget.task.prerequisites.isNotEmpty,
+      hasExistingPrerequisites: widget.task.dependencies.isNotEmpty,
       errorText: _errorText,
       isBusy: isBusy,
       onToggleOption: _handleToggleOption,
@@ -1478,7 +1559,7 @@ class _TaskPrerequisitesSectionState
     });
   }
 
-  /// Persists [prerequisiteIds] via [TaskController.savePrerequisites].
+  /// Persists [prerequisiteIds] via [BoardActionsNotifier.savePrerequisites].
   Future<void> _submitPrerequisites(List<String> prerequisiteIds) async {
     if (_isSubmitting) {
       return;
@@ -1488,7 +1569,7 @@ class _TaskPrerequisitesSectionState
       _errorText = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .savePrerequisites(
           widget.task.id,
           prerequisiteIds,
@@ -1847,9 +1928,13 @@ class _TaskSubtasksReadBody extends StatelessWidget {
   /// Creates a [_TaskSubtasksReadBody].
   const _TaskSubtasksReadBody({
     required this.task,
+    required this.completedCount,
     required this.isBusy,
     required this.onToggleSubtask,
   });
+
+  /// Number of completed subtask steps on [task].
+  final int completedCount;
 
   /// Whether a task mutation is in flight.
   final bool isBusy;
@@ -1857,8 +1942,8 @@ class _TaskSubtasksReadBody extends StatelessWidget {
   /// Callback toggling live subtask completion at step index.
   final ValueChanged<int> onToggleSubtask;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item whose subtasks are rendered.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
@@ -1866,7 +1951,7 @@ class _TaskSubtasksReadBody extends StatelessWidget {
     final tokens = UiThemeTokens.of(context);
     final ratio = task.subtasks.isEmpty
         ? 0.0
-        : task.subtasksCompletedCount / task.subtasks.length;
+        : completedCount / task.subtasks.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1881,18 +1966,16 @@ class _TaskSubtasksReadBody extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 6.0),
-        for (final subtask in task.subtasks)
+        for (var i = 0; i < task.subtasks.length; i++)
           UiToggleRow(
-            key: ValueKey<String>(
-              'task_subtask_toggle_${task.id}_${subtask.index}',
-            ),
-            label: subtask.title,
-            value: subtask.isCompleted,
+            key: ValueKey<String>('task_subtask_toggle_${task.id}_$i'),
+            label: task.subtasks[i].title,
+            value: task.subtasks[i].isCompleted,
             isDense: true,
             enabled: !task.isCompleted && !isBusy,
             onChanged: task.isCompleted || isBusy
                 ? null
-                : (_) => onToggleSubtask(subtask.index),
+                : (_) => onToggleSubtask(i),
           ),
       ],
     );
@@ -1918,12 +2001,13 @@ class _TaskSubtasksReadCard extends StatelessWidget {
   /// Callback toggling live subtask completion at step index.
   final ValueChanged<int> onToggleSubtask;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item whose subtasks are rendered.
+  final TaskItem task;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final completedCount = _countCompletedSubtasks(task.subtasks);
 
     return UiCard.inset(
       key: ValueKey<String>('task_subtasks_read_${task.id}'),
@@ -1931,12 +2015,13 @@ class _TaskSubtasksReadCard extends StatelessWidget {
           ? Icons.check_box_outlined
           : Icons.checklist_rounded,
       headerTitle: localizations.subtasksSectionTitle,
-      headerBadge: task.subtasksProgressLabel != null
-          ? UiPill(
-              label: task.subtasksProgressLabel ?? '',
-              variant: UiPillVariant.count,
-            )
-          : null,
+      headerBadge: UiPill(
+        label: localizations.taskInfoSubtasksProgress(
+          '$completedCount',
+          '${task.subtasks.length}',
+        ),
+        variant: UiPillVariant.count,
+      ),
       headerTrailing: task.isCompleted
           ? null
           : _TaskSectionEditButton(
@@ -1948,6 +2033,7 @@ class _TaskSubtasksReadCard extends StatelessWidget {
             ),
       child: _TaskSubtasksReadBody(
         task: task,
+        completedCount: completedCount,
         isBusy: isBusy,
         onToggleSubtask: onToggleSubtask,
       ),
@@ -2002,7 +2088,7 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
   @override
   Widget build(BuildContext context) {
     final isControllerBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final isBusy = _isSubmitting || isControllerBusy;
 
@@ -2100,10 +2186,10 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
     });
   }
 
-  /// Toggles a live subtask step directly via [TaskController.toggleSubtask].
+  /// Toggles a live subtask step directly via [BoardActionsNotifier.toggleSubtask].
   Future<void> _handleToggleSubtask(int stepIndex) async {
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .toggleSubtask(
           widget.task.id,
           stepIndex,
@@ -2118,8 +2204,8 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
       case ActionValidationFailed(:final message):
       case ActionPersistFailed(:final message):
         ref
-            .read(floatingNoticeControllerProvider.notifier)
-            .showNotice(message, tone: NoticeTone.danger);
+            .read(floatingNoticeProvider.notifier)
+            .showNotice(message, tone: FloatingNoticeTone.danger);
     }
   }
 
@@ -2138,9 +2224,9 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
     _autoFinish = widget.task.subtasksAutoFinish;
   }
 
-  /// Persists [inputs] and [autoFinish] via [TaskController.saveSubtasks].
+  /// Persists [subtasks] and [autoFinish] via [BoardActionsNotifier.saveSubtasks].
   Future<void> _submitSubtasks(
-    List<SubtaskInput> inputs, {
+    List<SubtaskItem> subtasks, {
     required bool autoFinish,
   }) async {
     if (_isSubmitting) {
@@ -2151,10 +2237,10 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
       _errorText = null;
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .saveSubtasks(
           widget.task.id,
-          inputs,
+          subtasks,
           autoFinish: autoFinish,
           locale: Localizations.localeOf(context),
         );
@@ -2175,22 +2261,33 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
 
   /// Dispatches clearing all subtasks.
   void _triggerClear() {
-    unawaited(_submitSubtasks(const <SubtaskInput>[], autoFinish: false));
+    unawaited(_submitSubtasks(const <SubtaskItem>[], autoFinish: false));
   }
 
   /// Dispatches saving current editable subtasks (including any typed pending row).
   void _triggerSave() {
-    final inputs = <SubtaskInput>[
+    final subtasks = <SubtaskItem>[
       for (final row in _rows)
-        SubtaskInput(title: row.controller.text, isCompleted: row.isCompleted),
+        SubtaskItem(title: row.controller.text, isCompleted: row.isCompleted),
       if (_newStepController.text.trim().isNotEmpty)
-        SubtaskInput(title: _newStepController.text.trim()),
+        SubtaskItem(title: _newStepController.text.trim()),
     ];
-    unawaited(_submitSubtasks(inputs, autoFinish: _autoFinish));
+    unawaited(_submitSubtasks(subtasks, autoFinish: _autoFinish));
   }
 
   /// Dispatches live subtask checkbox toggle.
   void _triggerToggleSubtask(int stepIndex) {
     unawaited(_handleToggleSubtask(stepIndex));
   }
+}
+
+/// Counts completed steps across [subtasks] in a single linear pass.
+int _countCompletedSubtasks(List<SubtaskItem> subtasks) {
+  var count = 0;
+  for (final step in subtasks) {
+    if (step.isCompleted) {
+      count++;
+    }
+  }
+  return count;
 }

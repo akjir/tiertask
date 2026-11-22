@@ -66,6 +66,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   String? _conflictWatchDigest;
   Future<void>? _inFlightSync;
   String? _lastFailedWatchDigest;
+  bool _lastMutationCommitted = true;
   String? _lastSelfWipeDigest;
   int _mutationEpoch = 0;
   int _nextUndoSequence = 0;
@@ -73,6 +74,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   final Set<int> _rolledBackEpochs = <int>{};
   final ListQueue<TaskUndoEntry> _undoStack = ListQueue<TaskUndoEntry>();
   String? _undoWorkspaceId;
+
+  /// Whether the most recent board mutation committed locally without rolling back.
+  bool get lastMutationCommitted => _lastMutationCommitted;
 
   /// Returns the current [TaskBoard] snapshot or an empty board if not yet loaded.
   TaskBoard get _currentBoard => state.asData?.value ?? TaskBoard.empty();
@@ -96,6 +100,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     _pendingConflictOriginBoard = null;
     _conflictWatchDigest = null;
     _lastFailedWatchDigest = null;
+    _lastMutationCommitted = true;
     _lastSelfWipeDigest = null;
     state = const AsyncLoading();
     final storageBinding = await ref.watch(
@@ -339,6 +344,62 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           )
         : null;
     await _commitMutation(updatedBoard, undoEntry: undoEntry);
+  }
+
+  /// Atomically creates a label with [name] and assigns it to [taskId] in a single board persistence cycle.
+  Future<TdfLabel?> createLabelAndAssignToTask({
+    required String taskId,
+    required String name,
+    String? color,
+    String? id,
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final boardBefore = _currentBoard;
+    final existingTask = boardBefore.findTask(taskId);
+    if (existingTask == null || existingTask.isCompleted) {
+      return null;
+    }
+    final timeZone = _resolveTimeZone(utcNow);
+    final dueLeadWindow = _currentDueLeadWindow;
+    final generatedId =
+        id ??
+        generateLabelId(
+          existingIds: <String>{
+            for (final label in boardBefore.labels) label.id,
+          },
+        );
+    final boardWithLabel = boardBefore.addLabel(
+      name,
+      color: color,
+      id: generatedId,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    );
+    final createdLabel = boardWithLabel.findLabel(generatedId);
+    if (createdLabel == null) {
+      return null;
+    }
+    final selectedSet = <String>{...existingTask.labelIds, createdLabel.id};
+    final orderedLabelIds = <String>[
+      for (final label in boardWithLabel.labels)
+        if (selectedSet.contains(label.id)) label.id,
+    ];
+    final updatedBoard = boardWithLabel.updateTask(
+      taskId,
+      labelIds: orderedLabelIds,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    );
+    final committed = await _commitMutation(updatedBoard);
+    if (!committed) {
+      return null;
+    }
+    return _currentBoard.findLabel(createdLabel.id) ?? createdLabel;
   }
 
   /// Deletes the label with [labelId], strips its reference from all tasks, and persists to storage.
@@ -648,6 +709,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     _pendingConflictOriginBoard = null;
     _conflictWatchDigest = null;
     _lastFailedWatchDigest = null;
+    _lastMutationCommitted = true;
     _lastSelfWipeDigest = null;
     _clearUndoStack('select_local_file');
     await TaskSyncPipeline.resetLocalSyncBaseline(ref, workspace.id);
@@ -949,6 +1011,62 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     );
   }
 
+  /// Atomically updates [taskId]'s subtasks and completes [taskId] in one persistence cycle with Undo capture.
+  Future<void> updateTaskAndComplete(
+    String taskId, {
+    required List<SubtaskItem> subtasks,
+    required bool subtasksAutoFinish,
+    DateTime? currentDate,
+  }) async {
+    final (utcNow, localNow) = _resolveTimestamps(currentDate);
+    final boardBefore = _currentBoard;
+    final taskBefore = boardBefore.findTask(taskId);
+    if (taskBefore == null || taskBefore.isCompleted) {
+      return;
+    }
+    final timeZone = _resolveTimeZone(utcNow);
+    final dueLeadWindow = _currentDueLeadWindow;
+    final stagedSubtasks =
+        subtasksAutoFinish &&
+            subtasks.isNotEmpty &&
+            subtasks.every((step) => step.isCompleted)
+        ? <SubtaskItem>[
+            for (var i = 0; i < subtasks.length; i++)
+              i == subtasks.length - 1
+                  ? subtasks[i].copyWith(isCompleted: false)
+                  : subtasks[i],
+          ]
+        : subtasks;
+    final withSubtasks = boardBefore.updateTask(
+      taskId,
+      subtasks: stagedSubtasks,
+      subtasksAutoFinish: subtasksAutoFinish,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    );
+    final completedBoard = withSubtasks.completeTask(
+      taskId,
+      currentDate: utcNow,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    );
+    final updatedTask = completedBoard.findTask(taskId);
+    final undoEntry =
+        updatedTask != null && updatedTask.completions > taskBefore.completions
+        ? TaskBoardUndo.capture(
+            sequence: ++_nextUndoSequence,
+            kind: TaskUndoActionKind.complete,
+            boardBefore: boardBefore,
+            taskBefore: taskBefore,
+            boardAfter: completedBoard,
+          )
+        : null;
+    await _commitMutation(completedBoard, undoEntry: undoEntry);
+  }
+
   /// Replaces an existing `(oldTimestampUtc, oldText)` history entry on [taskId] and persists to storage when changed.
   Future<void> updateTaskHistoryEntry(
     String taskId, {
@@ -1138,6 +1256,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       mutationEpoch: epoch,
     );
     final rolledBack = _rolledBackEpochs.remove(epoch);
+    _lastMutationCommitted = !rolledBack;
     if (rolledBack && undoEntry != null) {
       _rollbackOptimisticUndoEntry(undoEntry, evictedEntry: evictedEntry);
     }

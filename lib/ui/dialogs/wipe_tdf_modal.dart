@@ -17,12 +17,15 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/settings_controller.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/ui_telemetry.dart';
+import '../../providers/settings_draft_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/ui_telemetry.dart';
+import '../components/ui_dialog_frame.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_toggle_row.dart';
 import '../widgets/entity_card_chrome.dart';
 
 /// Centered destructive confirmation modal enforcing the `U-UX-005` typed-filename guard before wiping a `.tdf` file.
@@ -144,7 +147,7 @@ class _WipeTdfModalState extends ConsumerState<_WipeTdfModal> {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final isBusy = ref.watch(
-      settingsControllerProvider.select((state) => state.isBusy),
+      settingsDraftProvider.select((state) => state.isStorageOperationBusy),
     );
     return UiDialogFrame(
       key: ValueKey<String>(
@@ -182,12 +185,12 @@ class _WipeTdfModalState extends ConsumerState<_WipeTdfModal> {
     setState(() => _createBackup = nextValue);
   }
 
-  /// Commits local or remote `.tdf` wipe through [SettingsController] and closes on success.
+  /// Commits local or remote `.tdf` wipe through [SettingsDraftNotifier] and closes on success.
   Future<void> _handleConfirm() async {
     if (!_isConfirmEnabled) {
       return;
     }
-    final notifier = ref.read(settingsControllerProvider.notifier);
+    final notifier = ref.read(settingsDraftProvider.notifier);
     final result = widget.isRemote
         ? await notifier.wipeRemoteFile(createBackup: _createBackup)
         : await notifier.wipeLocalFile(createBackup: _createBackup);
@@ -230,13 +233,13 @@ class _WipeTdfModalState extends ConsumerState<_WipeTdfModal> {
 
   /// Dispatches async wipe confirmation from synchronous button callbacks.
   void _triggerConfirm() {
-    _handleConfirm();
+    unawaited(_handleConfirm());
   }
 
   /// Dispatches async wipe confirmation on `Enter` when the guard passes and idle.
   void _triggerConfirmIfReady({required bool isBusy}) {
     if (_isConfirmEnabled && !isBusy) {
-      _handleConfirm();
+      unawaited(_handleConfirm());
     }
   }
 }

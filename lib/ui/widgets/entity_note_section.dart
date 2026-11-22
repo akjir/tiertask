@@ -18,15 +18,16 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/shell_models.dart';
+import '../../models/tdf_error.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../tokens/ui_theme_tokens.dart';
 import 'entity_card_chrome.dart';
-
-/// Maximum note length allowed by `TDF 0.8.0` (`maxTdfNoteLength`).
-const int _maxNoteLength = 2000;
 
 /// Shared read-only and inline-editable multi-line Note section for Tasks, Labels, and Locations.
 class EntityNoteSection extends ConsumerStatefulWidget {
@@ -132,7 +133,7 @@ class _EntityNoteEditCard extends StatelessWidget {
         kind: UiFieldKind.multiline,
         controller: controller,
         hintText: localizations.taskNoteHint,
-        maxLength: _maxNoteLength,
+        maxLength: maxTdfNoteLength,
         autofocus: true,
         enabled: !isBusy,
         onChanged: onChanged,
@@ -304,7 +305,7 @@ class _EntityNoteSectionState extends ConsumerState<EntityNoteSection> {
     }
     final localizations = AppLocalizations.of(context);
     ref
-        .read(floatingNoticeControllerProvider.notifier)
+        .read(floatingNoticeProvider.notifier)
         .showNotice(localizations.noteCopiedSnackBar);
     widget.onNoteCopied?.call();
   }

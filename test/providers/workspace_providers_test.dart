@@ -18,6 +18,7 @@ import 'dart:io';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
@@ -431,5 +432,72 @@ void main() {
         equals(LocationStatus.disabled),
       );
     });
+
+    test('updateActiveConfig does not invalidate workspaceSummariesProvider when name and localFilePath are unchanged', () async {
+      final countingRepo = _CountingSummariesSettingsRepository(
+        const WebDavConfig(
+          language: AppLanguage.english,
+          themePalette: AppThemePalette.calm,
+          localFilePath: 'tasks.tdf',
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [settingsRepositoryProvider.overrideWithValue(countingRepo)],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(activeWorkspaceProvider.future);
+      await container.read(workspaceSummariesProvider.future);
+      final initialLoads = countingRepo.summaryLoadCount;
+
+      await container
+          .read(activeWorkspaceProvider.notifier)
+          .updateActiveConfig(
+            const WebDavConfig(
+              language: AppLanguage.german,
+              themePalette: AppThemePalette.plumUmber,
+              localFilePath: 'tasks.tdf',
+            ),
+          );
+      await container.read(workspaceSummariesProvider.future);
+
+      expect(
+        countingRepo.summaryLoadCount,
+        equals(initialLoads),
+        reason: 'Unchanged workspace name and localFilePath must not reload workspaceSummariesProvider',
+      );
+
+      await container
+          .read(activeWorkspaceProvider.notifier)
+          .updateActiveConfig(
+            const WebDavConfig(
+              language: AppLanguage.german,
+              themePalette: AppThemePalette.plumUmber,
+              localFilePath: 'renamed.tdf',
+            ),
+          );
+      final updatedSummaries = await container.read(
+        workspaceSummariesProvider.future,
+      );
+      expect(
+        countingRepo.summaryLoadCount,
+        equals(initialLoads + 1),
+        reason:
+            'Changing localFilePath must refresh workspaceSummariesProvider',
+      );
+      expect(updatedSummaries.single.localFilePath, equals('renamed.tdf'));
+    });
   });
+}
+
+class _CountingSummariesSettingsRepository extends InMemorySettingsRepository {
+  _CountingSummariesSettingsRepository(super.initialConfig);
+
+  int summaryLoadCount = 0;
+
+  @override
+  Future<List<WorkspaceSummary>> loadWorkspaceSummaries() async {
+    summaryLoadCount++;
+    return super.loadWorkspaceSummaries();
+  }
 }

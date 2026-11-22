@@ -17,109 +17,99 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/ui_telemetry.dart';
-import '../../presentation/workspace_controller.dart';
+import '../../models/app_workspace.dart';
+import '../../models/tdf_file_path.dart';
+import '../../providers/entity_actions_provider.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/ui_telemetry.dart';
+import '../../providers/workspace_providers.dart';
+import '../components/ui_dialog_frame.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_pill.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
 
-/// Maximum character length for workspace display names.
-const int _maxWorkspaceNameLength = 128;
-
-/// Input and submit row inside [_WorkspaceCreateSection].
-class _WorkspaceCreateRow extends StatelessWidget {
-  /// Creates a [_WorkspaceCreateRow].
-  const _WorkspaceCreateRow({
-    required this.controller,
+/// Isolated create-workspace button and live suggested `.tdf` filename preview rebuilt per keystroke.
+class _WorkspaceCreateContent extends StatelessWidget {
+  /// Creates a [_WorkspaceCreateContent].
+  const _WorkspaceCreateContent({
+    required this.fieldChild,
+    required this.rawName,
     required this.canCreateMore,
-    required this.canSubmit,
     required this.isBusy,
-    required this.onChanged,
     required this.onSubmit,
   });
 
-  /// Whether another workspace may still be created.
+  /// Whether another workspace may still be created within [AppWorkspace.maxWorkspaces].
   final bool canCreateMore;
 
-  /// Whether submit button is enabled.
-  final bool canSubmit;
+  /// Pre-built text input widget preserved across keystrokes.
+  final Widget fieldChild;
 
-  /// Controller for the new workspace name.
-  final TextEditingController controller;
-
-  /// Whether a workspace mutation is executing.
+  /// Whether a workspace mutation is currently executing.
   final bool isBusy;
 
-  /// Callback notified on input changes.
-  final ValueChanged<String> onChanged;
-
-  /// Callback submitting workspace creation.
+  /// Callback submitting new workspace creation.
   final VoidCallback onSubmit;
+
+  /// Current raw text inside the create-workspace field.
+  final String rawName;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    final hasInput = rawName.trim().isNotEmpty;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Expanded(
-          child: UiField(
-            key: const ValueKey<String>('workspace_create_field'),
-            controller: controller,
-            hintText: localizations.createWorkspaceHint,
-            maxLength: _maxWorkspaceNameLength,
-            enabled: canCreateMore && !isBusy,
-            showClearButton: true,
-            clearTooltip: localizations.tooltipClearInput,
-            helperText: canCreateMore
-                ? null
-                : localizations.errorWorkspaceMaxExceeded,
-            textInputAction: TextInputAction.done,
-            onChanged: onChanged,
-            onSubmitted: _handleSubmitted,
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(child: fieldChild),
+            const SizedBox(width: 8.0),
+            UiButton(
+              key: const ValueKey<String>('workspace_create_button'),
+              label: localizations.actionAdd,
+              leadingIcon: Icons.add_rounded,
+              variant: UiButtonVariant.primary,
+              density: UiButtonDensity.standard,
+              tooltip: localizations.tooltipCreateWorkspace,
+              isLoading: isBusy,
+              onPressed: (canCreateMore && !isBusy && hasInput)
+                  ? onSubmit
+                  : null,
+            ),
+          ],
         ),
-        const SizedBox(width: 8.0),
-        KeyedSubtree(
-          key: ValueKey<bool>(isBusy),
-          child: UiButton(
-            key: const ValueKey<String>('workspace_create_button'),
-            label: localizations.actionAdd,
-            leadingIcon: Icons.add_rounded,
-            variant: UiButtonVariant.primary,
-            density: UiButtonDensity.standard,
-            tooltip: localizations.tooltipCreateWorkspace,
-            isLoading: isBusy,
-            onPressed: canSubmit ? onSubmit : null,
-          ),
-        ),
+        if (canCreateMore && hasInput) ...<Widget>[
+          const SizedBox(height: 6.0),
+          _WorkspaceSuggestedFileCaption(rawName: rawName),
+        ],
       ],
     );
   }
-
-  /// Submits creation on `Enter` when workspace capacity allows and no mutation is active.
-  void _handleSubmitted(String _) {
-    if (canCreateMore && !isBusy) {
-      onSubmit();
-    }
-  }
 }
 
-/// Bottom create-workspace form displaying the input, live suggested `.tdf` caption, and primary create button.
+/// Bottom create-workspace form isolating live `.tdf` filename preview rebuilds via [ValueListenableBuilder].
 class _WorkspaceCreateSection extends StatelessWidget {
   /// Creates a [_WorkspaceCreateSection].
   const _WorkspaceCreateSection({
     required this.controller,
     required this.canCreateMore,
     required this.isBusy,
-    required this.suggestedFileName,
     required this.onChanged,
     required this.onSubmit,
   });
 
-  /// Whether another workspace can still be created within `maxWorkspaces`.
+  /// Whether another workspace can still be created within [AppWorkspace.maxWorkspaces].
   final bool canCreateMore;
 
   /// Controller for the new workspace name input.
@@ -134,39 +124,45 @@ class _WorkspaceCreateSection extends StatelessWidget {
   /// Callback invoked when submitting creation via button or `Enter`.
   final VoidCallback onSubmit;
 
-  /// Suggested lowercase `.tdf` filename derived from current text.
-  final String suggestedFileName;
-
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final hasInput = controller.text.trim().isNotEmpty;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _WorkspaceCreateRow(
-          controller: controller,
-          canCreateMore: canCreateMore,
-          canSubmit: canCreateMore && !isBusy && hasInput,
-          isBusy: isBusy,
-          onChanged: onChanged,
-          onSubmit: onSubmit,
-        ),
-        if (canCreateMore && hasInput) ...<Widget>[
-          const SizedBox(height: 6.0),
-          Text(
-            localizations.workspaceSuggestedFileLabel(suggestedFileName),
-            key: const ValueKey<String>('workspace_suggested_file'),
-            style: UiTypographyTokens.mono(
-              tokens.typography.monoSmall.copyWith(color: tokens.colors.muted),
-            ),
-          ),
-        ],
-      ],
+    final field = UiField(
+      key: const ValueKey<String>('workspace_create_field'),
+      controller: controller,
+      hintText: localizations.createWorkspaceHint,
+      maxLength: AppWorkspace.maxNameLength,
+      enabled: canCreateMore && !isBusy,
+      showClearButton: true,
+      clearTooltip: localizations.tooltipClearInput,
+      helperText: canCreateMore
+          ? null
+          : localizations.errorWorkspaceMaxExceeded,
+      textInputAction: TextInputAction.done,
+      onChanged: onChanged,
+      onSubmitted: _handleSubmitted,
     );
+
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      child: field,
+      builder: (context, value, fieldChild) {
+        return _WorkspaceCreateContent(
+          fieldChild: fieldChild ?? field,
+          rawName: value.text,
+          canCreateMore: canCreateMore,
+          isBusy: isBusy,
+          onSubmit: onSubmit,
+        );
+      },
+    );
+  }
+
+  /// Submits creation on `Enter` when workspace capacity allows and no mutation is active.
+  void _handleSubmitted(String _) {
+    if (canCreateMore && !isBusy) {
+      onSubmit();
+    }
   }
 }
 
@@ -174,7 +170,7 @@ class _WorkspaceCreateSection extends StatelessWidget {
 class _WorkspaceDeleteConfirmBar extends StatelessWidget {
   /// Creates a [_WorkspaceDeleteConfirmBar].
   const _WorkspaceDeleteConfirmBar({
-    required this.row,
+    required this.summary,
     required this.isBusy,
     required this.onCancel,
     required this.onConfirm,
@@ -189,8 +185,8 @@ class _WorkspaceDeleteConfirmBar extends StatelessWidget {
   /// Callback confirming deletion.
   final VoidCallback onConfirm;
 
-  /// Workspace row being confirmed for deletion.
-  final WorkspaceRowViewModel row;
+  /// Workspace summary being confirmed for deletion.
+  final WorkspaceSummary summary;
 
   @override
   Widget build(BuildContext context) {
@@ -198,9 +194,9 @@ class _WorkspaceDeleteConfirmBar extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(top: 8.0),
       child: UiBanner(
-        key: ValueKey<String>('workspace_delete_confirm_${row.id}'),
+        key: ValueKey<String>('workspace_delete_confirm_${summary.id}'),
         variant: UiBannerVariant.inlineConfirm,
-        message: localizations.deleteWorkspaceConfirmMessage(row.name),
+        message: localizations.deleteWorkspaceConfirmMessage(summary.name),
         cancelLabel: localizations.actionCancel,
         onCancel: isBusy ? null : onCancel,
         confirmLabel: localizations.actionDelete,
@@ -285,7 +281,7 @@ class _WorkspaceInlineRenameRow extends StatelessWidget {
             key: ValueKey<String>('workspace_rename_field_$workspaceId'),
             controller: controller,
             autofocus: true,
-            maxLength: _maxWorkspaceNameLength,
+            maxLength: AppWorkspace.maxNameLength,
             enabled: !isBusy,
             showClearButton: true,
             clearTooltip: localizations.tooltipClearInput,
@@ -313,7 +309,8 @@ class _WorkspaceInlineRenameRow extends StatelessWidget {
 class _WorkspaceListSection extends StatelessWidget {
   /// Creates a [_WorkspaceListSection].
   const _WorkspaceListSection({
-    required this.workspaces,
+    required this.summaries,
+    required this.activeWorkspaceId,
     required this.isBusy,
     required this.renamingWorkspaceId,
     required this.pendingDeleteWorkspaceId,
@@ -327,6 +324,9 @@ class _WorkspaceListSection extends StatelessWidget {
     required this.onCancelDelete,
     required this.onConfirmDelete,
   });
+
+  /// Identifier of the currently loaded active workspace.
+  final String activeWorkspaceId;
 
   /// Whether a workspace mutation is currently executing.
   final bool isBusy;
@@ -352,8 +352,8 @@ class _WorkspaceListSection extends StatelessWidget {
   /// Callback switching active workspace to an inactive workspace identifier.
   final ValueChanged<String> onSelectWorkspace;
 
-  /// Callback entering inline rename mode for a workspace row.
-  final ValueChanged<WorkspaceRowViewModel> onStartRename;
+  /// Callback entering inline rename mode for a workspace summary.
+  final ValueChanged<WorkspaceSummary> onStartRename;
 
   /// Identifier of the workspace currently showing inline delete confirmation, if any.
   final String? pendingDeleteWorkspaceId;
@@ -364,33 +364,36 @@ class _WorkspaceListSection extends StatelessWidget {
   /// Identifier of the workspace currently being renamed inline, if any.
   final String? renamingWorkspaceId;
 
-  /// Ordered persisted workspace rows.
-  final List<WorkspaceRowViewModel> workspaces;
+  /// Ordered persisted workspace summaries.
+  final List<WorkspaceSummary> summaries;
 
   @override
   Widget build(BuildContext context) {
+    final canDelete = summaries.length > 1;
     return ListView.separated(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: workspaces.length,
+      itemCount: summaries.length,
       separatorBuilder: (_, _) => const SizedBox(height: 8.0),
       itemBuilder: (context, index) {
-        final row = workspaces[index];
+        final summary = summaries[index];
         return _WorkspaceModalRowCard(
-          key: ValueKey<String>('workspace_card_${row.id}'),
-          row: row,
+          key: ValueKey<String>('workspace_card_${summary.id}'),
+          summary: summary,
+          isActive: summary.id == activeWorkspaceId,
+          canDelete: canDelete,
           isBusy: isBusy,
-          isRenaming: renamingWorkspaceId == row.id,
-          isConfirmingDelete: pendingDeleteWorkspaceId == row.id,
+          isRenaming: renamingWorkspaceId == summary.id,
+          isConfirmingDelete: pendingDeleteWorkspaceId == summary.id,
           renameController: renameController,
-          onSelect: () => onSelectWorkspace(row.id),
-          onStartRename: () => onStartRename(row),
+          onSelect: () => onSelectWorkspace(summary.id),
+          onStartRename: () => onStartRename(summary),
           onCancelRename: onCancelRename,
-          onSaveRename: () => onSaveRename(row.id),
+          onSaveRename: () => onSaveRename(summary.id),
           onRenameChanged: onRenameChanged,
-          onRequestDelete: () => onRequestDelete(row.id),
+          onRequestDelete: () => onRequestDelete(summary.id),
           onCancelDelete: onCancelDelete,
-          onConfirmDelete: () => onConfirmDelete(row.id),
+          onConfirmDelete: () => onConfirmDelete(summary.id),
         );
       },
     );
@@ -416,14 +419,13 @@ class _WorkspaceLoadingBanner extends StatelessWidget {
 class _WorkspaceModalBody extends StatelessWidget {
   /// Creates a [_WorkspaceModalBody].
   const _WorkspaceModalBody({
-    required this.viewModel,
+    required this.snapshot,
     required this.isBusy,
     required this.renamingWorkspaceId,
     required this.pendingDeleteWorkspaceId,
     required this.errorMessage,
     required this.createController,
     required this.renameController,
-    required this.suggestedFileName,
     required this.onSelectWorkspace,
     required this.onStartRename,
     required this.onCancelRename,
@@ -476,8 +478,8 @@ class _WorkspaceModalBody extends StatelessWidget {
   /// Callback switching active workspace to an inactive workspace identifier.
   final ValueChanged<String> onSelectWorkspace;
 
-  /// Callback entering inline rename mode for a workspace row.
-  final ValueChanged<WorkspaceRowViewModel> onStartRename;
+  /// Callback entering inline rename mode for a workspace summary.
+  final ValueChanged<WorkspaceSummary> onStartRename;
 
   /// Identifier of the workspace currently showing inline delete confirmation, if any.
   final String? pendingDeleteWorkspaceId;
@@ -488,15 +490,12 @@ class _WorkspaceModalBody extends StatelessWidget {
   /// Identifier of the workspace currently being renamed inline, if any.
   final String? renamingWorkspaceId;
 
-  /// Live suggested `.tdf` filename for [createController].
-  final String suggestedFileName;
-
-  /// Workspace list projection from [workspacesViewModelProvider].
-  final WorkspacesViewModel viewModel;
+  /// Resolved live workspace listing snapshot from domain providers.
+  final _WorkspaceListSnapshot snapshot;
 
   @override
   Widget build(BuildContext context) {
-    if (viewModel.isLoading) {
+    if (snapshot.isLoading) {
       return const _WorkspaceLoadingBanner();
     }
 
@@ -505,7 +504,8 @@ class _WorkspaceModalBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         _WorkspaceListSection(
-          workspaces: viewModel.workspaces,
+          summaries: snapshot.summaries,
+          activeWorkspaceId: snapshot.activeWorkspaceId,
           isBusy: isBusy,
           renamingWorkspaceId: renamingWorkspaceId,
           pendingDeleteWorkspaceId: pendingDeleteWorkspaceId,
@@ -523,9 +523,8 @@ class _WorkspaceModalBody extends StatelessWidget {
           errorMessage: errorMessage,
           onDismissError: onDismissError,
           createController: createController,
-          canCreateMore: viewModel.canCreateMore,
+          canCreateMore: snapshot.canCreateMore,
           isBusy: isBusy,
-          suggestedFileName: suggestedFileName,
           onCreateChanged: onCreateChanged,
           onCreateSubmit: onCreateSubmit,
         ),
@@ -543,12 +542,11 @@ class _WorkspaceModalFooter extends StatelessWidget {
     required this.createController,
     required this.canCreateMore,
     required this.isBusy,
-    required this.suggestedFileName,
     required this.onCreateChanged,
     required this.onCreateSubmit,
   });
 
-  /// Whether the workspace count is below the configured cap.
+  /// Whether the workspace count is below [AppWorkspace.maxWorkspaces].
   final bool canCreateMore;
 
   /// Controller for the bottom create-workspace input.
@@ -569,9 +567,6 @@ class _WorkspaceModalFooter extends StatelessWidget {
   /// Callback dismissing [errorMessage].
   final VoidCallback onDismissError;
 
-  /// Live suggested `.tdf` filename for [createController].
-  final String suggestedFileName;
-
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -590,7 +585,6 @@ class _WorkspaceModalFooter extends StatelessWidget {
           controller: createController,
           canCreateMore: canCreateMore,
           isBusy: isBusy,
-          suggestedFileName: suggestedFileName,
           onChanged: onCreateChanged,
           onSubmit: onCreateSubmit,
         ),
@@ -604,7 +598,9 @@ class _WorkspaceModalRowCard extends StatelessWidget {
   /// Creates a [_WorkspaceModalRowCard].
   const _WorkspaceModalRowCard({
     super.key,
-    required this.row,
+    required this.summary,
+    required this.isActive,
+    required this.canDelete,
     required this.isBusy,
     required this.isRenaming,
     required this.isConfirmingDelete,
@@ -618,6 +614,12 @@ class _WorkspaceModalRowCard extends StatelessWidget {
     required this.onCancelDelete,
     required this.onConfirmDelete,
   });
+
+  /// Whether deleting this workspace is allowed (requires more than one workspace).
+  final bool canDelete;
+
+  /// Whether this workspace is currently active in memory.
+  final bool isActive;
 
   /// Whether any workspace mutation is currently executing.
   final bool isBusy;
@@ -634,7 +636,7 @@ class _WorkspaceModalRowCard extends StatelessWidget {
   /// Callback cancelling inline rename.
   final VoidCallback onCancelRename;
 
-  /// Callback confirming deletion of [row].
+  /// Callback confirming deletion of [summary].
   final VoidCallback onConfirmDelete;
 
   /// Callback notified when rename input changes.
@@ -646,7 +648,7 @@ class _WorkspaceModalRowCard extends StatelessWidget {
   /// Callback saving inline rename.
   final VoidCallback onSaveRename;
 
-  /// Callback switching to [row] when inactive.
+  /// Callback switching to [summary] when inactive.
   final VoidCallback onSelect;
 
   /// Callback opening inline rename mode.
@@ -655,13 +657,13 @@ class _WorkspaceModalRowCard extends StatelessWidget {
   /// Text controller used when [isRenaming] is true.
   final TextEditingController renameController;
 
-  /// Workspace row projection.
-  final WorkspaceRowViewModel row;
+  /// Persisted domain workspace summary.
+  final WorkspaceSummary summary;
 
   @override
   Widget build(BuildContext context) {
     return UiCard.standard(
-      isHighlighted: row.isActive,
+      isHighlighted: isActive,
       padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -669,7 +671,7 @@ class _WorkspaceModalRowCard extends StatelessWidget {
         children: <Widget>[
           if (isRenaming)
             _WorkspaceInlineRenameRow(
-              workspaceId: row.id,
+              workspaceId: summary.id,
               controller: renameController,
               isBusy: isBusy,
               onChanged: onRenameChanged,
@@ -678,15 +680,17 @@ class _WorkspaceModalRowCard extends StatelessWidget {
             )
           else
             _WorkspaceRowMainContent(
-              row: row,
+              summary: summary,
+              isActive: isActive,
+              canDelete: canDelete,
               isBusy: isBusy,
               onSelect: onSelect,
               onStartRename: onStartRename,
               onRequestDelete: onRequestDelete,
             ),
-          if (isConfirmingDelete && row.canDelete)
+          if (isConfirmingDelete && canDelete)
             _WorkspaceDeleteConfirmBar(
-              row: row,
+              summary: summary,
               isBusy: isBusy,
               onCancel: onCancelDelete,
               onConfirm: onConfirmDelete,
@@ -700,10 +704,13 @@ class _WorkspaceModalRowCard extends StatelessWidget {
 /// Workspace title, active badge, and monospace `.tdf` filename column inside [_WorkspaceRowIdentity].
 class _WorkspaceRowDetails extends StatelessWidget {
   /// Creates a [_WorkspaceRowDetails].
-  const _WorkspaceRowDetails({required this.row});
+  const _WorkspaceRowDetails({required this.summary, required this.isActive});
 
-  /// Workspace row projection.
-  final WorkspaceRowViewModel row;
+  /// Whether this workspace is currently active in memory.
+  final bool isActive;
+
+  /// Persisted domain workspace summary.
+  final WorkspaceSummary summary;
 
   @override
   Widget build(BuildContext context) {
@@ -721,13 +728,13 @@ class _WorkspaceRowDetails extends StatelessWidget {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: <Widget>[
             Text(
-              row.name,
+              summary.name,
               style: tokens.typography.control.copyWith(
                 color: colors.ink,
                 fontWeight: FontWeight.w600,
               ),
             ),
-            if (row.isActive)
+            if (isActive)
               UiPill(
                 label: localizations.workspaceActiveBadge,
                 variant: UiPillVariant.badge,
@@ -737,7 +744,7 @@ class _WorkspaceRowDetails extends StatelessWidget {
         ),
         const SizedBox(height: 2.0),
         Text(
-          row.localFileName,
+          TdfFilePath.extractFileNameFromPath(summary.localFilePath),
           style: UiTypographyTokens.mono(
             tokens.typography.monoSmall.copyWith(color: colors.muted),
           ),
@@ -750,10 +757,13 @@ class _WorkspaceRowDetails extends StatelessWidget {
 /// Workspace icon, display name, active badge, and monospace `.tdf` filename inside [_WorkspaceRowMainContent].
 class _WorkspaceRowIdentity extends StatelessWidget {
   /// Creates a [_WorkspaceRowIdentity].
-  const _WorkspaceRowIdentity({required this.row});
+  const _WorkspaceRowIdentity({required this.summary, required this.isActive});
 
-  /// Workspace row projection.
-  final WorkspaceRowViewModel row;
+  /// Whether this workspace is currently active in memory.
+  final bool isActive;
+
+  /// Persisted domain workspace summary.
+  final WorkspaceSummary summary;
 
   @override
   Widget build(BuildContext context) {
@@ -764,15 +774,17 @@ class _WorkspaceRowIdentity extends StatelessWidget {
       children: <Widget>[
         ExcludeSemantics(
           child: Icon(
-            row.isActive
+            isActive
                 ? Icons.check_circle_outline_rounded
                 : Icons.workspaces_outlined,
             size: tokens.spacing.iconSm,
-            color: row.isActive ? colors.accent : colors.muted,
+            color: isActive ? colors.accent : colors.muted,
           ),
         ),
         const SizedBox(width: 10.0),
-        Expanded(child: _WorkspaceRowDetails(row: row)),
+        Expanded(
+          child: _WorkspaceRowDetails(summary: summary, isActive: isActive),
+        ),
       ],
     );
   }
@@ -782,12 +794,20 @@ class _WorkspaceRowIdentity extends StatelessWidget {
 class _WorkspaceRowMainContent extends StatelessWidget {
   /// Creates a [_WorkspaceRowMainContent].
   const _WorkspaceRowMainContent({
-    required this.row,
+    required this.summary,
+    required this.isActive,
+    required this.canDelete,
     required this.isBusy,
     required this.onSelect,
     required this.onStartRename,
     required this.onRequestDelete,
   });
+
+  /// Whether deleting this workspace is allowed.
+  final bool canDelete;
+
+  /// Whether this workspace is currently active in memory.
+  final bool isActive;
 
   /// Whether a workspace mutation is currently executing.
   final bool isBusy;
@@ -795,14 +815,14 @@ class _WorkspaceRowMainContent extends StatelessWidget {
   /// Callback opening inline delete confirmation.
   final VoidCallback onRequestDelete;
 
-  /// Callback switching to [row] when inactive.
+  /// Callback switching to [summary] when inactive.
   final VoidCallback onSelect;
 
   /// Callback opening inline rename mode.
   final VoidCallback onStartRename;
 
-  /// Workspace row projection.
-  final WorkspaceRowViewModel row;
+  /// Persisted domain workspace summary.
+  final WorkspaceSummary summary;
 
   @override
   Widget build(BuildContext context) {
@@ -811,14 +831,15 @@ class _WorkspaceRowMainContent extends StatelessWidget {
       children: <Widget>[
         Expanded(
           child: _WorkspaceSelectableArea(
-            row: row,
-            canSwitch: !row.isActive && !isBusy,
+            summary: summary,
+            isActive: isActive,
+            canSwitch: !isActive && !isBusy,
             onSelect: onSelect,
           ),
         ),
         const SizedBox(width: 8.0),
         UiButton(
-          key: ValueKey<String>('workspace_rename_button_${row.id}'),
+          key: ValueKey<String>('workspace_rename_button_${summary.id}'),
           leadingIcon: Icons.edit_outlined,
           variant: UiButtonVariant.icon,
           density: UiButtonDensity.compact,
@@ -827,13 +848,13 @@ class _WorkspaceRowMainContent extends StatelessWidget {
         ),
         const SizedBox(width: 2.0),
         UiButton(
-          key: ValueKey<String>('workspace_delete_button_${row.id}'),
+          key: ValueKey<String>('workspace_delete_button_${summary.id}'),
           leadingIcon: Icons.delete_outline_rounded,
           variant: UiButtonVariant.icon,
           density: UiButtonDensity.compact,
           isDangerHover: true,
           tooltip: localizations.tooltipDeleteWorkspace,
-          onPressed: (row.canDelete && !isBusy) ? onRequestDelete : null,
+          onPressed: (canDelete && !isBusy) ? onRequestDelete : null,
         ),
       ],
     );
@@ -844,7 +865,8 @@ class _WorkspaceRowMainContent extends StatelessWidget {
 class _WorkspaceSelectableArea extends StatelessWidget {
   /// Creates a [_WorkspaceSelectableArea].
   const _WorkspaceSelectableArea({
-    required this.row,
+    required this.summary,
+    required this.isActive,
     required this.canSwitch,
     required this.onSelect,
   });
@@ -852,24 +874,30 @@ class _WorkspaceSelectableArea extends StatelessWidget {
   /// Whether tapping or activating this area switches workspaces.
   final bool canSwitch;
 
+  /// Whether this workspace is currently active in memory.
+  final bool isActive;
+
   /// Switch callback.
   final VoidCallback onSelect;
 
-  /// Workspace row projection.
-  final WorkspaceRowViewModel row;
+  /// Persisted domain workspace summary.
+  final WorkspaceSummary summary;
 
   @override
   Widget build(BuildContext context) {
-    final identity = _WorkspaceRowIdentity(row: row);
+    final identity = _WorkspaceRowIdentity(
+      summary: summary,
+      isActive: isActive,
+    );
     if (!canSwitch) {
       return KeyedSubtree(
-        key: ValueKey<String>('workspace_select_${row.id}'),
+        key: ValueKey<String>('workspace_select_${summary.id}'),
         child: identity,
       );
     }
     return Semantics(
       button: true,
-      label: row.name,
+      label: summary.name,
       child: FocusableActionDetector(
         mouseCursor: SystemMouseCursors.click,
         actions: <Type, Action<Intent>>{
@@ -887,11 +915,35 @@ class _WorkspaceSelectableArea extends StatelessWidget {
           ),
         },
         child: GestureDetector(
-          key: ValueKey<String>('workspace_select_${row.id}'),
+          key: ValueKey<String>('workspace_select_${summary.id}'),
           behavior: HitTestBehavior.opaque,
           onTap: onSelect,
           child: identity,
         ),
+      ),
+    );
+  }
+}
+
+/// Monospace suggested `.tdf` filename preview rendered below the create-workspace input.
+class _WorkspaceSuggestedFileCaption extends StatelessWidget {
+  /// Creates a [_WorkspaceSuggestedFileCaption].
+  const _WorkspaceSuggestedFileCaption({required this.rawName});
+
+  /// Raw workspace display name used to derive the suggested `.tdf` filename.
+  final String rawName;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final tokens = UiThemeTokens.of(context);
+    return Text(
+      localizations.workspaceSuggestedFileLabel(
+        AppWorkspace.suggestFileName(rawName),
+      ),
+      key: const ValueKey<String>('workspace_suggested_file'),
+      style: UiTypographyTokens.mono(
+        tokens.typography.monoSmall.copyWith(color: tokens.colors.muted),
       ),
     );
   }
@@ -927,11 +979,13 @@ class _WorkspacesModalState extends ConsumerState<_WorkspacesModal> {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final viewModel = ref.watch(workspacesViewModelProvider);
-    final controllerState = ref.watch(workspaceControllerProvider);
-    final suggestedFileName = ref
-        .read(workspaceControllerProvider.notifier)
-        .suggestWorkspaceFileName(_createController.text);
+    final snapshot = _resolveWorkspaceSnapshot(
+      ref.watch(activeWorkspaceProvider),
+      ref.watch(workspaceSummariesProvider),
+    );
+    final isBusy = ref.watch(
+      workspaceActionsProvider.select((state) => state.isBusy),
+    );
 
     return UiDialogFrame(
       key: const ValueKey<String>('workspaces_modal'),
@@ -941,14 +995,13 @@ class _WorkspacesModalState extends ConsumerState<_WorkspacesModal> {
       closeTooltip: localizations.actionClose,
       onClose: widget.onClose,
       body: _WorkspaceModalBody(
-        viewModel: viewModel,
-        isBusy: controllerState.isBusy,
+        snapshot: snapshot,
+        isBusy: isBusy,
         renamingWorkspaceId: _renamingWorkspaceId,
         pendingDeleteWorkspaceId: _pendingDeleteWorkspaceId,
         errorMessage: _errorMessage,
         createController: _createController,
         renameController: _renameController,
-        suggestedFileName: suggestedFileName,
         onSelectWorkspace: _triggerSwitchWorkspace,
         onStartRename: _handleStartRename,
         onCancelRename: _handleCancelRename,
@@ -984,11 +1037,11 @@ class _WorkspacesModalState extends ConsumerState<_WorkspacesModal> {
     });
   }
 
-  /// Deletes [workspaceId] via [WorkspaceController] and clears confirmation on success.
+  /// Deletes [workspaceId] via [WorkspaceActionsNotifier] and clears confirmation on success.
   Future<void> _handleConfirmDelete(String workspaceId) async {
     _clearError();
     final result = await ref
-        .read(workspaceControllerProvider.notifier)
+        .read(workspaceActionsProvider.notifier)
         .deleteWorkspace(workspaceId);
     if (!mounted) {
       return;
@@ -1008,16 +1061,16 @@ class _WorkspacesModalState extends ConsumerState<_WorkspacesModal> {
     }
   }
 
-  /// Updates live `.tdf` filename suggestion and clears errors when create text changes.
+  /// Clears any visible error banner when create text changes without rebuilding the workspace list.
   void _handleCreateInputChanged(String _) {
-    setState(() => _errorMessage = null);
+    _clearError();
   }
 
   /// Creates and activates a workspace from [_createController], closing the modal on success.
   Future<void> _handleCreateWorkspace() async {
     _clearError();
     final result = await ref
-        .read(workspaceControllerProvider.notifier)
+        .read(workspaceActionsProvider.notifier)
         .createWorkspace(_createController.text, activate: true);
     if (!mounted) {
       return;
@@ -1045,11 +1098,11 @@ class _WorkspacesModalState extends ConsumerState<_WorkspacesModal> {
     });
   }
 
-  /// Saves inline rename for [workspaceId] via [WorkspaceController].
+  /// Saves inline rename for [workspaceId] via [WorkspaceActionsNotifier].
   Future<void> _handleSaveRename(String workspaceId) async {
     _clearError();
     final result = await ref
-        .read(workspaceControllerProvider.notifier)
+        .read(workspaceActionsProvider.notifier)
         .renameWorkspace(workspaceId, _renameController.text);
     if (!mounted) {
       return;
@@ -1066,15 +1119,15 @@ class _WorkspacesModalState extends ConsumerState<_WorkspacesModal> {
     }
   }
 
-  /// Opens inline rename mode pre-filled with [row.name].
-  void _handleStartRename(WorkspaceRowViewModel row) {
+  /// Opens inline rename mode pre-filled with [summary.name].
+  void _handleStartRename(WorkspaceSummary summary) {
     setState(() {
       _pendingDeleteWorkspaceId = null;
       _errorMessage = null;
-      _renamingWorkspaceId = row.id;
+      _renamingWorkspaceId = summary.id;
       _renameController.value = TextEditingValue(
-        text: row.name,
-        selection: TextSelection.collapsed(offset: row.name.length),
+        text: summary.name,
+        selection: TextSelection.collapsed(offset: summary.name.length),
       );
     });
   }
@@ -1083,7 +1136,7 @@ class _WorkspacesModalState extends ConsumerState<_WorkspacesModal> {
   Future<void> _handleSwitchWorkspace(String workspaceId) async {
     _clearError();
     final result = await ref
-        .read(workspaceControllerProvider.notifier)
+        .read(workspaceActionsProvider.notifier)
         .switchWorkspace(workspaceId);
     if (!mounted) {
       return;
@@ -1106,24 +1159,32 @@ class _WorkspacesModalState extends ConsumerState<_WorkspacesModal> {
 
   /// Dispatches async deletion for [workspaceId] from synchronous callbacks.
   void _triggerConfirmDelete(String workspaceId) {
-    _handleConfirmDelete(workspaceId);
+    unawaited(_handleConfirmDelete(workspaceId));
   }
 
   /// Dispatches async creation from synchronous callbacks.
   void _triggerCreateWorkspace() {
-    _handleCreateWorkspace();
+    unawaited(_handleCreateWorkspace());
   }
 
   /// Dispatches async rename save for [workspaceId] from synchronous callbacks.
   void _triggerSaveRename(String workspaceId) {
-    _handleSaveRename(workspaceId);
+    unawaited(_handleSaveRename(workspaceId));
   }
 
   /// Dispatches async workspace switch for [workspaceId] from synchronous callbacks.
   void _triggerSwitchWorkspace(String workspaceId) {
-    _handleSwitchWorkspace(workspaceId);
+    unawaited(_handleSwitchWorkspace(workspaceId));
   }
 }
+
+/// Immutable per-frame workspace listing snapshot derived from [activeWorkspaceProvider] and [workspaceSummariesProvider].
+typedef _WorkspaceListSnapshot = ({
+  String activeWorkspaceId,
+  bool canCreateMore,
+  bool isLoading,
+  List<WorkspaceSummary> summaries,
+});
 
 /// Presents the isolated workspaces manager modal supporting switching, creation, inline rename, and inline deletion.
 Future<void> showWorkspacesModal(BuildContext context) {
@@ -1134,5 +1195,26 @@ Future<void> showWorkspacesModal(BuildContext context) {
     barrierLabel: localizations.workspacesDialogTitle,
     builder: (modalContext) =>
         _WorkspacesModal(onClose: () => Navigator.of(modalContext).maybePop()),
+  );
+}
+
+/// Resolves active workspace ID, summary list, capacity flag, and initial loading state from live async providers.
+_WorkspaceListSnapshot _resolveWorkspaceSnapshot(
+  AsyncValue<AppWorkspace> activeWorkspaceAsync,
+  AsyncValue<List<WorkspaceSummary>> summariesAsync,
+) {
+  final activeWorkspace =
+      activeWorkspaceAsync.asData?.value ?? AppWorkspace.defaultWorkspace;
+  final summaries =
+      summariesAsync.asData?.value ??
+      <WorkspaceSummary>[activeWorkspace.summary];
+  final isLoading =
+      (activeWorkspaceAsync.isLoading && !activeWorkspaceAsync.hasValue) ||
+      (summariesAsync.isLoading && !summariesAsync.hasValue);
+  return (
+    activeWorkspaceId: activeWorkspace.id,
+    canCreateMore: summaries.length < AppWorkspace.maxWorkspaces,
+    isLoading: isLoading,
+    summaries: summaries,
   );
 }

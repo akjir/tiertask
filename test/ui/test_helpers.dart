@@ -36,7 +36,7 @@ import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/repositories/window_control_repository.dart';
 import 'package:tiertask/services/sha256_service.dart';
 import 'package:tiertask/services/tdf_service.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
+import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
 
 /// Fake [LocalFileRepository] returning an in-memory `.tdf` document for widget tests.
 class FakeLocalFileRepository extends LocalFileRepository {
@@ -288,4 +288,29 @@ Future<ProviderContainer> pumpLeafWidget(
     await tester.pump();
   }
   return container;
+}
+
+/// Pumps a standalone design-system widget [child] inside a [MaterialApp] themed with [tokens] at [surfaceSize].
+Future<void> pumpUiWidget(
+  WidgetTester tester,
+  Widget child, {
+  UiThemeTokens? tokens,
+  Size surfaceSize = const Size(1280, 800),
+  bool wrapInScaffold = true,
+}) async {
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = surfaceSize;
+  addTearDown(() {
+    tester.view.resetPhysicalSize();
+    tester.view.resetDevicePixelRatio();
+  });
+
+  final activeTokens = tokens ?? UiThemePresets.calm.light;
+  await tester.pumpWidget(
+    MaterialApp(
+      theme: activeTokens.toThemeData(),
+      home: wrapInScaffold ? Scaffold(body: child) : child,
+    ),
+  );
+  await tester.pump();
 }

@@ -13,13 +13,13 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:async';
-
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_field.dart';
 
+/// Lower date bound accepted by Material date pickers.
 final DateTime _firstPickerDate = DateTime(2000);
 
 /// Upper date bound accepted by Material date pickers.

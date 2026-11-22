@@ -17,15 +17,18 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/location_state.dart';
+import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
-import 'package:tiertask/presentation/entity_controller.dart';
-import 'package:tiertask/presentation/view_model_primitives.dart';
-import 'package:tiertask/presentation/workspace_controller.dart';
+import 'package:tiertask/providers/shell_providers.dart';
+import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
@@ -36,7 +39,9 @@ import 'package:tiertask/ui/dialogs/local_file_modals.dart';
 import 'package:tiertask/ui/dialogs/location_status_modal.dart';
 import 'package:tiertask/ui/dialogs/wipe_tdf_modal.dart';
 import 'package:tiertask/ui/dialogs/workspaces_modal.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/primitives/ui_field.dart';
+import 'package:tiertask/ui/primitives/ui_toggle_row.dart';
 
 import 'test_helpers.dart';
 
@@ -202,11 +207,18 @@ void main() {
           find.byKey(const ValueKey<String>('workspaces_modal')),
           findsNothing,
         );
-        final viewModel = container.read(workspacesViewModelProvider);
-        expect(viewModel.workspaces.length, 2);
+        final summaries = await container.read(
+          workspaceSummariesProvider.future,
+        );
+        final activeWorkspace = await container.read(
+          activeWorkspaceProvider.future,
+        );
+        expect(summaries.length, equals(2));
         expect(
-          viewModel.workspaces.any(
-            (row) => row.name == 'Work Projects' && row.isActive,
+          summaries.any(
+            (summary) =>
+                summary.name == 'Work Projects' &&
+                summary.id == activeWorkspace.id,
           ),
           isTrue,
         );
@@ -282,8 +294,8 @@ void main() {
           findsNothing,
         );
         expect(
-          container.read(workspacesViewModelProvider).activeWorkspaceId,
-          created.id,
+          (await container.read(activeWorkspaceProvider.future)).id,
+          equals(created.id),
         );
 
         // Reopen modal and delete the workspace via inline confirmation banner.
@@ -309,8 +321,8 @@ void main() {
 
         expect(find.text('Client Work'), findsNothing);
         expect(
-          container.read(workspacesViewModelProvider).workspaces.length,
-          1,
+          (await container.read(workspaceSummariesProvider.future)).length,
+          equals(1),
         );
       },
     );
@@ -871,24 +883,24 @@ void main() {
   });
 
   group('showGeocodingCandidatesModal', () {
-    testWidgets('returns selected candidate index on tap and null on cancel', (
+    testWidgets('returns selected candidate on tap and null on cancel', (
       tester,
     ) async {
-      int? chosenIndex = -1;
-      const candidates = <GeocodingCandidateViewModel>[
-        GeocodingCandidateViewModel(
-          index: 0,
+      GeocodingCandidate? chosenCandidate = const GeocodingCandidate(
+        displayName: 'Placeholder',
+        latitude: 0.0,
+        longitude: 0.0,
+      );
+      const candidates = <GeocodingCandidate>[
+        GeocodingCandidate(
           displayName: 'Erfurt, Thuringia, Germany',
           latitude: 50.9787,
           longitude: 11.03283,
-          coordinatesSummary: '50.978700, 11.032830',
         ),
-        GeocodingCandidateViewModel(
-          index: 1,
+        GeocodingCandidate(
           displayName: 'Erfurt-Nord, Thuringia, Germany',
           latitude: 51.01,
           longitude: 11.02,
-          coordinatesSummary: '51.010000, 11.020000',
         ),
       ];
 
@@ -896,7 +908,7 @@ void main() {
         tester,
         _ModalHost(
           onTrigger: (context) async {
-            chosenIndex = await showGeocodingCandidatesModal(
+            chosenCandidate = await showGeocodingCandidatesModal(
               context,
               candidates: candidates,
             );
@@ -910,12 +922,12 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Erfurt, Thuringia, Germany'), findsOneWidget);
-      expect(find.text('51.010000, 11.020000'), findsOneWidget);
+      expect(find.text(candidates[1].formattedCoordinates), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey<String>('picker_opt_1')));
       await tester.pumpAndSettle();
 
-      expect(chosenIndex, 1);
+      expect(chosenCandidate, equals(candidates[1]));
 
       await tester.tap(
         find.byKey(const ValueKey<String>('open_modal_trigger')),
@@ -928,7 +940,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(chosenIndex, isNull);
+      expect(chosenCandidate, isNull);
     });
   });
 
@@ -939,22 +951,21 @@ void main() {
         final toggled = <String>[];
         final created = <String>[];
         final openedInfo = <String>[];
-        const labels = <LabelPickerOptionViewModel>[
-          LabelPickerOptionViewModel(
-            id: 'lbl_errands',
+        const labels = <TdfLabel>[
+          TdfLabel(
+            id: 'errands001',
             name: 'Errands',
-            colorValue: 0xFF2196F3,
+            color: '#2196F3',
             isScoped: false,
-            openCount: 3,
           ),
-          LabelPickerOptionViewModel(
-            id: 'lbl_work',
+          TdfLabel(
+            id: 'work000001',
             name: 'Work',
-            colorValue: 0xFF4CAF50,
+            color: '#4CAF50',
             isScoped: true,
-            openCount: 5,
           ),
         ];
+        final board = TaskBoard.evaluate(tasks: const [], labels: labels);
 
         await pumpLeafWidget(
           tester,
@@ -962,14 +973,20 @@ void main() {
             onTrigger: (context) => showCompactLabelPickerSheet(
               context,
               title: localizations.taskLabelsSectionTitle,
-              allLabels: labels,
-              hasBothScopedAndGlobal: true,
-              selectedIds: const <String>{'lbl_errands'},
+              initialSelectedLabelIds: const <String>{'errands001'},
               onToggleLabel: toggled.add,
-              onCreateAndAssign: created.add,
+              onCreateLabel: (rawName) async {
+                created.add(rawName);
+                const newLabelId = 'urgent0001';
+                await ProviderScope.containerOf(context, listen: false)
+                    .read(taskNotifierProvider.notifier)
+                    .addLabel(rawName, id: newLabelId);
+                return const ActionSucceeded(entityId: newLabelId);
+              },
               onOpenLabelInfo: openedInfo.add,
             ),
           ),
+          board: board,
           surfaceSize: const Size(390, 844),
         );
 
@@ -1004,22 +1021,22 @@ void main() {
 
         // Initial selected chip is present; toggling Work adds its chip live.
         expect(
-          find.byKey(const ValueKey<String>('picker_chip_lbl_errands')),
+          find.byKey(const ValueKey<String>('picker_chip_errands001')),
           findsOneWidget,
         );
         expect(
-          find.byKey(const ValueKey<String>('picker_chip_lbl_work')),
+          find.byKey(const ValueKey<String>('picker_chip_work000001')),
           findsNothing,
         );
 
         await tester.tap(
-          find.byKey(const ValueKey<String>('picker_opt_lbl_work')),
+          find.byKey(const ValueKey<String>('picker_opt_work000001')),
         );
         await tester.pumpAndSettle();
 
-        expect(toggled, <String>['lbl_work']);
+        expect(toggled, equals(<String>['work000001']));
         expect(
-          find.byKey(const ValueKey<String>('picker_chip_lbl_work')),
+          find.byKey(const ValueKey<String>('picker_chip_work000001')),
           findsOneWidget,
         );
 
@@ -1029,11 +1046,11 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(
-          find.byKey(const ValueKey<String>('picker_opt_lbl_work')),
+          find.byKey(const ValueKey<String>('picker_opt_work000001')),
           findsOneWidget,
         );
         expect(
-          find.byKey(const ValueKey<String>('picker_opt_lbl_errands')),
+          find.byKey(const ValueKey<String>('picker_opt_errands001')),
           findsNothing,
         );
 
@@ -1052,9 +1069,9 @@ void main() {
         await tester.tap(createRow);
         await tester.pumpAndSettle();
 
-        expect(created, <String>['Urgent']);
+        expect(created, equals(<String>['Urgent']));
         expect(
-          find.byKey(const ValueKey<String>('picker_chip__created_0')),
+          find.byKey(const ValueKey<String>('picker_chip_urgent0001')),
           findsOneWidget,
         );
 
@@ -1071,7 +1088,7 @@ void main() {
           findsOneWidget,
         );
         expect(
-          find.byKey(const ValueKey<String>('picker_opt_lbl_errands')),
+          find.byKey(const ValueKey<String>('picker_opt_errands001')),
           findsOneWidget,
         );
 
@@ -1089,13 +1106,13 @@ void main() {
         await tester.pumpAndSettle();
 
         final infoButton = find.descendant(
-          of: find.byKey(const ValueKey<String>('picker_opt_lbl_work')),
+          of: find.byKey(const ValueKey<String>('picker_opt_work000001')),
           matching: find.byIcon(Icons.info_outline_rounded),
         );
         await tester.tap(infoButton);
         await tester.pumpAndSettle();
 
-        expect(openedInfo, <String>['lbl_work']);
+        expect(openedInfo, equals(<String>['work000001']));
         expect(
           find.byKey(const ValueKey<String>('ui_bottom_sheet')),
           findsNothing,
@@ -1103,18 +1120,18 @@ void main() {
       },
     );
 
-    testWidgets('omits scope filters when hasBothScopedAndGlobal is false', (
+    testWidgets('omits scope filters when all labels share the same scope', (
       tester,
     ) async {
-      const labels = <LabelPickerOptionViewModel>[
-        LabelPickerOptionViewModel(
-          id: 'lbl_home',
+      const labels = <TdfLabel>[
+        TdfLabel(
+          id: 'home000001',
           name: 'Home',
-          colorValue: 0xFF2196F3,
+          color: '#2196F3',
           isScoped: false,
-          openCount: 1,
         ),
       ];
+      final board = TaskBoard.evaluate(tasks: const [], labels: labels);
 
       await pumpLeafWidget(
         tester,
@@ -1122,14 +1139,13 @@ void main() {
           onTrigger: (context) => showCompactLabelPickerSheet(
             context,
             title: localizations.taskLabelsSectionTitle,
-            allLabels: labels,
-            hasBothScopedAndGlobal: false,
-            selectedIds: const <String>{},
+            initialSelectedLabelIds: const <String>{},
             onToggleLabel: (_) {},
-            onCreateAndAssign: (_) {},
+            onCreateLabel: (_) async => const ActionSucceeded(),
             onOpenLabelInfo: (_) {},
           ),
         ),
+        board: board,
         surfaceSize: const Size(390, 844),
       );
 

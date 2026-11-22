@@ -17,20 +17,23 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/entity_controller.dart';
-import '../../presentation/entity_view_models.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/view_model_primitives.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_metadata.dart';
+import '../../providers/entity_actions_provider.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../components/ui_quick_composer.dart';
+import '../layout/ui_page_header.dart';
+import '../primitives/ui_banner.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
 import 'label_card.dart';
 
-/// Maximum Unicode scalar length for single-line label titles.
-const int _maxSingleLineLength = 500;
-
+/// Estimated vertical extent per collapsed label card used to pre-scroll offscreen reveals.
 const double _estimatedCardExtent = 84.0;
 
 /// Duration for smooth scroll-to-card reveals (`U-CARD-001`).
@@ -55,12 +58,8 @@ class _LabelListSlot extends StatelessWidget {
   const _LabelListSlot({
     required this.cardScrollKey,
     required this.label,
-    required this.allLocations,
     required this.bottomGap,
   });
-
-  /// Saved workspace locations forwarded to Activation Conditions.
-  final List<LocationOptionViewModel> allLocations;
 
   /// Bottom gap between sibling cards (`cardListGap` or `0.0` on final card).
   final double bottomGap;
@@ -68,18 +67,14 @@ class _LabelListSlot extends StatelessWidget {
   /// [GlobalKey] attached around the card for smooth reveal scrolling.
   final GlobalKey cardScrollKey;
 
-  /// Label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label rendered by this card.
+  final TdfLabel label;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: EdgeInsets.only(bottom: bottomGap),
-      child: LabelCard(
-        cardScrollKey: cardScrollKey,
-        label: label,
-        allLocations: allLocations,
-      ),
+      child: LabelCard(cardScrollKey: cardScrollKey, label: label),
     );
   }
 }
@@ -129,7 +124,7 @@ class _LabelQuickCreateBar extends StatelessWidget {
           controller: controller,
           focusNode: focusNode,
           isCollapsibleOnCompact: false,
-          maxLength: _maxSingleLineLength,
+          maxLength: maxTdfTextLength,
           placeholder: localizations.quickCreateLabelHint,
           submitLabel: localizations.actionAdd,
           expandDraftLabel: localizations.actionOpenAsDraft,
@@ -146,11 +141,12 @@ class _LabelQuickCreateBar extends StatelessWidget {
   }
 }
 
-/// Top header plus Quick-Create bar or uncommitted Label Draft Card inside [_LabelsScrollBody].
-class _LabelsHeaderContent extends StatelessWidget {
-  /// Creates a [_LabelsHeaderContent].
-  const _LabelsHeaderContent({
-    required this.viewModel,
+/// Vertical header plus Quick-Create bar or uncommitted Label Draft Card inside [_LabelsHeaderContent].
+class _LabelsHeaderColumn extends StatelessWidget {
+  /// Creates a [_LabelsHeaderColumn].
+  const _LabelsHeaderColumn({
+    required this.labelsCount,
+    required this.nextPresetColorHex,
     required this.returnContext,
     required this.isDraftOpen,
     required this.draftSeedTitle,
@@ -172,6 +168,12 @@ class _LabelsHeaderContent extends StatelessWidget {
 
   /// Whether Quick-Create is disabled while busy.
   final bool isQuickCreateBusy;
+
+  /// Total number of persisted workspace labels.
+  final int labelsCount;
+
+  /// Next rotating preset `#RRGGBB` color seeding an open Label Draft Card.
+  final String nextPresetColorHex;
 
   /// Back navigation callback when [returnContext] is set.
   final VoidCallback onBack;
@@ -197,9 +199,6 @@ class _LabelsHeaderContent extends StatelessWidget {
   /// Saved originating task or search context, if any.
   final ReturnContext? returnContext;
 
-  /// Live model-free Labels manager projection.
-  final LabelsManagerViewModel viewModel;
-
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
@@ -214,14 +213,13 @@ class _LabelsHeaderContent extends StatelessWidget {
           onBack: returnContext != null ? onBack : null,
           title: localizations.drawerLabels,
           subtitle: localizations.labelsManagerSubtitle,
-          countLabel: '${viewModel.labels.length}',
+          countLabel: '$labelsCount',
         ),
         SizedBox(height: tokens.spacing.space4),
         if (isDraftOpen)
           LabelDraftCard(
             seedTitle: draftSeedTitle,
-            initialColorHex: viewModel.nextPresetColorHex,
-            allLocations: viewModel.allLocations,
+            initialColorHex: nextPresetColorHex,
             onCancel: onCancelDraft,
           )
         else
@@ -234,6 +232,86 @@ class _LabelsHeaderContent extends StatelessWidget {
             onSubmit: () => unawaited(onQuickCreateSubmit()),
           ),
       ],
+    );
+  }
+}
+
+/// Selective shell-state subscriber wiring return context, draft seed, and busy flags into [_LabelsHeaderColumn].
+class _LabelsHeaderContent extends ConsumerWidget {
+  /// Creates a [_LabelsHeaderContent].
+  const _LabelsHeaderContent({
+    required this.labelsCount,
+    required this.nextPresetColorHex,
+    required this.isDraftOpen,
+    required this.isQuickCreating,
+    required this.quickCreateController,
+    required this.quickCreateFocusNode,
+    required this.quickCreateError,
+    required this.onBack,
+    required this.onExpandDraft,
+    required this.onQuickCreateSubmit,
+    required this.onCancelDraft,
+  });
+
+  /// Whether an uncommitted Label Draft Card replaces Quick-Create.
+  final bool isDraftOpen;
+
+  /// Whether a local Quick-Create submission is currently awaiting persistence.
+  final bool isQuickCreating;
+
+  /// Total number of persisted workspace labels.
+  final int labelsCount;
+
+  /// Next rotating preset `#RRGGBB` color seeding an open Label Draft Card.
+  final String nextPresetColorHex;
+
+  /// Back navigation callback when `returnContext` is set.
+  final VoidCallback onBack;
+
+  /// Callback cancelling the active draft card.
+  final VoidCallback onCancelDraft;
+
+  /// Callback opening the uncommitted draft card.
+  final VoidCallback onExpandDraft;
+
+  /// Callback submitting the Quick-Create label name.
+  final Future<void> Function() onQuickCreateSubmit;
+
+  /// Text controller backing the Quick-Create input.
+  final TextEditingController quickCreateController;
+
+  /// Optional inline Quick-Create validation or persistence error text.
+  final String? quickCreateError;
+
+  /// Focus node backing the Quick-Create input.
+  final FocusNode quickCreateFocusNode;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final returnContext = ref.watch(
+      shellProvider.select((shell) => shell.returnContext),
+    );
+    final draftSeedTitle = ref.watch(
+      shellProvider.select((shell) => shell.draftSeedTitle),
+    );
+    final isBusy = ref.watch(
+      entityActionsProvider.select((state) => state.isBusy),
+    );
+
+    return _LabelsHeaderColumn(
+      labelsCount: labelsCount,
+      nextPresetColorHex: nextPresetColorHex,
+      returnContext: returnContext,
+      isDraftOpen: isDraftOpen,
+      draftSeedTitle: draftSeedTitle,
+      isQuickCreateBusy: isBusy || isQuickCreating,
+      quickCreateController: quickCreateController,
+      quickCreateFocusNode: quickCreateFocusNode,
+      quickCreateError: quickCreateError,
+      onBack: onBack,
+      onExpandDraft: onExpandDraft,
+      onQuickCreateSubmit: onQuickCreateSubmit,
+      onCancelDraft: onCancelDraft,
     );
   }
 }
@@ -264,21 +342,21 @@ class _LabelsListSliver extends StatelessWidget {
   const _LabelsListSliver({
     required this.padding,
     required this.showEmptyState,
-    required this.viewModel,
+    required this.labels,
     required this.cardKeyFor,
   });
 
   /// Lookup returning the reveal [GlobalKey] for a label card.
   final GlobalKey Function(String labelId) cardKeyFor;
 
+  /// Alphabetically sorted domain labels displayed in the manager list.
+  final List<TdfLabel> labels;
+
   /// Outer padding applied around the empty state or label card list.
   final EdgeInsets padding;
 
   /// Whether to render the plain-text empty-state banner instead of label cards.
   final bool showEmptyState;
-
-  /// Live model-free Labels manager projection.
-  final LabelsManagerViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
@@ -296,12 +374,11 @@ class _LabelsListSliver extends StatelessWidget {
               ),
             )
           : SliverList.builder(
-              itemCount: viewModel.labels.length,
+              itemCount: labels.length,
               itemBuilder: (context, index) => _LabelListSlot(
-                cardScrollKey: cardKeyFor(viewModel.labels[index].id),
-                label: viewModel.labels[index],
-                allLocations: viewModel.allLocations,
-                bottomGap: index + 1 < viewModel.labels.length
+                cardScrollKey: cardKeyFor(labels[index].id),
+                label: labels[index],
+                bottomGap: index + 1 < labels.length
                     ? tokens.spacing.cardListGap
                     : 0.0,
               ),
@@ -315,11 +392,10 @@ class _LabelsScrollBody extends StatelessWidget {
   /// Creates a [_LabelsScrollBody].
   const _LabelsScrollBody({
     required this.scrollController,
-    required this.viewModel,
-    required this.returnContext,
+    required this.labels,
+    required this.nextPresetColorHex,
     required this.isDraftOpen,
-    required this.draftSeedTitle,
-    required this.isQuickCreateBusy,
+    required this.isQuickCreating,
     required this.quickCreateController,
     required this.quickCreateFocusNode,
     required this.quickCreateError,
@@ -333,16 +409,19 @@ class _LabelsScrollBody extends StatelessWidget {
   /// Lookup returning the reveal [GlobalKey] for a label card.
   final GlobalKey Function(String labelId) cardKeyFor;
 
-  /// Seeded name transferred into an open Label Draft Card.
-  final String draftSeedTitle;
-
   /// Whether an uncommitted Label Draft Card currently replaces the Quick-Create bar.
   final bool isDraftOpen;
 
-  /// Whether Quick-Create submissions are disabled while busy.
-  final bool isQuickCreateBusy;
+  /// Whether a local Quick-Create submission is currently awaiting persistence.
+  final bool isQuickCreating;
 
-  /// Back navigation callback wired when [returnContext] is active.
+  /// Alphabetically sorted workspace labels.
+  final List<TdfLabel> labels;
+
+  /// Next rotating preset `#RRGGBB` color seeding an open Label Draft Card.
+  final String nextPresetColorHex;
+
+  /// Back navigation callback wired when `returnContext` is active.
   final VoidCallback onBack;
 
   /// Callback cancelling the open Label Draft Card.
@@ -363,14 +442,8 @@ class _LabelsScrollBody extends StatelessWidget {
   /// Focus node backing the Quick-Create input.
   final FocusNode quickCreateFocusNode;
 
-  /// Saved originating task or search context for context-preserving Back navigation.
-  final ReturnContext? returnContext;
-
   /// Scroll controller driving the outer [CustomScrollView].
   final ScrollController scrollController;
-
-  /// Live model-free Labels manager projection.
-  final LabelsManagerViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
@@ -384,11 +457,10 @@ class _LabelsScrollBody extends StatelessWidget {
         _LabelsHeaderSliver(
           padding: contentPadding.copyWith(bottom: 0.0),
           child: _LabelsHeaderContent(
-            viewModel: viewModel,
-            returnContext: returnContext,
+            labelsCount: labels.length,
+            nextPresetColorHex: nextPresetColorHex,
             isDraftOpen: isDraftOpen,
-            draftSeedTitle: draftSeedTitle,
-            isQuickCreateBusy: isQuickCreateBusy,
+            isQuickCreating: isQuickCreating,
             quickCreateController: quickCreateController,
             quickCreateFocusNode: quickCreateFocusNode,
             quickCreateError: quickCreateError,
@@ -400,8 +472,8 @@ class _LabelsScrollBody extends StatelessWidget {
         ),
         _LabelsListSliver(
           padding: contentPadding.copyWith(top: tokens.spacing.space4),
-          showEmptyState: viewModel.labels.isEmpty && !isDraftOpen,
-          viewModel: viewModel,
+          showEmptyState: labels.isEmpty && !isDraftOpen,
+          labels: labels,
           cardKeyFor: cardKeyFor,
         ),
       ],
@@ -411,7 +483,7 @@ class _LabelsScrollBody extends StatelessWidget {
 
 /// Coordinates Quick-Create, scroll reveal, and draft lifecycle for [LabelsView].
 class _LabelsViewState extends ConsumerState<LabelsView> {
-  final Map<String, GlobalKey> _cardKeys = <String, GlobalKey>{};
+  final Map<String, GlobalKey> _ownedCardKeys = <String, GlobalKey>{};
   late final TextEditingController _quickCreateController;
   late final FocusNode _quickCreateFocusNode;
 
@@ -438,7 +510,7 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
       if (!mounted) {
         return;
       }
-      _scheduleReveal(ref.read(appShellControllerProvider).revealEntityRequest);
+      _scheduleReveal(ref.read(shellProvider).revealEntityRequest);
     });
   }
 
@@ -466,28 +538,27 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
   @override
   Widget build(BuildContext context) {
     _registerShellListeners();
-    final viewModel = ref.watch(labelsManagerViewModelProvider);
-    final returnContext = ref.watch(
-      appShellControllerProvider.select((shell) => shell.returnContext),
+    final labels = ref.watch(
+      taskNotifierProvider.select(
+        (boardAsync) =>
+            boardAsync.asData?.value.sortedLabels ?? const <TdfLabel>[],
+      ),
     );
-    final activeDraft = ref.watch(
-      appShellControllerProvider.select((shell) => shell.activeDraft),
+    final isDraftOpen = ref.watch(
+      shellProvider.select(
+        (shell) => shell.activeDraft == EntityDraftKind.label,
+      ),
     );
-    final draftSeedTitle = ref.watch(
-      appShellControllerProvider.select((shell) => shell.draftSeedTitle),
-    );
-    final isBusy = ref.watch(
-      entityControllerProvider.select((state) => state.isBusy),
-    );
-    _pruneCardKeys(viewModel.labels);
+    _pruneOwnedCardKeys(labels);
 
     return _LabelsScrollBody(
       scrollController: _effectiveScrollController,
-      viewModel: viewModel,
-      returnContext: returnContext,
-      isDraftOpen: activeDraft == EntityDraftKind.label,
-      draftSeedTitle: draftSeedTitle,
-      isQuickCreateBusy: isBusy || _isQuickCreating,
+      labels: labels,
+      nextPresetColorHex:
+          canonicalLabelPresetHexColors[labels.length %
+              canonicalLabelPresetHexColors.length],
+      isDraftOpen: isDraftOpen,
+      isQuickCreating: _isQuickCreating,
       quickCreateController: _quickCreateController,
       quickCreateFocusNode: _quickCreateFocusNode,
       quickCreateError: _quickCreateError,
@@ -501,18 +572,16 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
 
   /// Returns a stable [GlobalKey] mapped to [labelId] for smooth reveal scrolling.
   GlobalKey _cardKeyFor(String labelId) =>
-      _cardKeys.putIfAbsent(labelId, GlobalKey.new);
+      _ownedCardKeys.putIfAbsent(labelId, GlobalKey.new);
 
-  /// Restores saved task or search context via `AppShellController`.
+  /// Restores saved task or search context via [shellProvider].
   void _handleBack() {
-    ref
-        .read(appShellControllerProvider.notifier)
-        .navigateBackFromReturnContext();
+    ref.read(shellProvider.notifier).navigateBackFromReturnContext();
   }
 
   /// Cancels the active uncommitted Label Draft Card.
   void _handleCancelDraft() {
-    ref.read(appShellControllerProvider.notifier).cancelDraft();
+    ref.read(shellProvider.notifier).cancelDraft();
   }
 
   /// Transfers any typed Quick-Create name into an uncommitted Label Draft Card (`U-CARD-006`).
@@ -523,11 +592,11 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
       setState(() => _quickCreateError = null);
     }
     ref
-        .read(appShellControllerProvider.notifier)
+        .read(shellProvider.notifier)
         .openDraft(EntityDraftKind.label, seedTitle: seedTitle);
   }
 
-  /// Submits Quick-Create text to `EntityController.quickCreateLabel` and clears input only on success.
+  /// Submits Quick-Create text to [EntityActionsNotifier.quickCreateLabel] and clears input only on success.
   Future<void> _handleQuickCreateSubmit() async {
     if (_isQuickCreating) {
       return;
@@ -538,7 +607,7 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
     });
     final locale = Localizations.localeOf(context);
     final result = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .quickCreateLabel(_quickCreateController.text, locale: locale);
     if (!mounted) {
       return;
@@ -572,10 +641,10 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
 
   /// Executes smooth `Scrollable.ensureVisible` to [labelId], pre-scrolling if offscreen in the lazy list.
   Future<void> _performReveal(String labelId) async {
-    final targetContext = _cardKeys[labelId]?.currentContext;
+    final targetContext = _ownedCardKeys[labelId]?.currentContext;
     if (targetContext != null) {
       _pendingRevealLabelId = null;
-      ref.read(appShellControllerProvider.notifier).clearRevealRequest();
+      ref.read(shellProvider.notifier).clearRevealRequest();
       await Scrollable.ensureVisible(
         targetContext,
         duration: _revealScrollDuration,
@@ -585,12 +654,14 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
       return;
     }
 
-    final labels = ref.read(labelsManagerViewModelProvider).labels;
+    final labels =
+        ref.read(taskNotifierProvider).asData?.value.sortedLabels ??
+        const <TdfLabel>[];
     final targetIndex = labels.indexWhere((label) => label.id == labelId);
     final controller = _effectiveScrollController;
     if (targetIndex < 0 || !controller.hasClients) {
       _pendingRevealLabelId = null;
-      ref.read(appShellControllerProvider.notifier).clearRevealRequest();
+      ref.read(shellProvider.notifier).clearRevealRequest();
       return;
     }
 
@@ -605,24 +676,24 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
   }
 
   /// Removes card [GlobalKey] entries for labels no longer present on the board.
-  void _pruneCardKeys(List<LabelCardViewModel> labels) {
-    if (_cardKeys.isEmpty) {
+  void _pruneOwnedCardKeys(List<TdfLabel> labels) {
+    if (_ownedCardKeys.isEmpty) {
       return;
     }
     final activeIds = <String>{for (final label in labels) label.id};
-    _cardKeys.removeWhere((id, _) => !activeIds.contains(id));
+    _ownedCardKeys.removeWhere((id, _) => !activeIds.contains(id));
   }
 
   /// Registers Riverpod listeners coordinating smooth card reveal and draft scroll-to-top behavior.
   void _registerShellListeners() {
     ref.listen<EntityRef?>(
-      appShellControllerProvider.select((shell) => shell.revealEntityRequest),
+      shellProvider.select((shell) => shell.revealEntityRequest),
       (previous, next) {
         _scheduleReveal(next);
       },
     );
     ref.listen<EntityDraftKind?>(
-      appShellControllerProvider.select((shell) => shell.activeDraft),
+      shellProvider.select((shell) => shell.activeDraft),
       (previous, next) {
         if (next == EntityDraftKind.label &&
             previous != EntityDraftKind.label) {
@@ -638,8 +709,8 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
       return;
     }
     _pendingRevealLabelId = null;
-    ref.read(appShellControllerProvider.notifier).clearRevealRequest();
-    final materializedContext = _cardKeys[labelId]?.currentContext;
+    ref.read(shellProvider.notifier).clearRevealRequest();
+    final materializedContext = _ownedCardKeys[labelId]?.currentContext;
     if (materializedContext == null) {
       return;
     }

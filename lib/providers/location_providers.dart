@@ -25,12 +25,21 @@ import 'workspace_providers.dart';
 
 /// Provides whether foreground location determination is currently enabled in the active workspace.
 final locationEnabledProvider = Provider<bool>((ref) {
-  final configAsync = ref.watch(webDavConfigProvider);
-  if (configAsync.asData?.value case final config?) {
-    return config.locationEnabled;
+  final fromConfig = ref.watch(
+    webDavConfigProvider.select(
+      (asyncConfig) => asyncConfig.asData?.value.locationEnabled,
+    ),
+  );
+  if (fromConfig != null) {
+    return fromConfig;
   }
-  final workspaceAsync = ref.watch(activeWorkspaceProvider);
-  return workspaceAsync.asData?.value.config.locationEnabled ?? false;
+  return ref.watch(
+        activeWorkspaceProvider.select(
+          (asyncWorkspace) =>
+              asyncWorkspace.asData?.value.config.locationEnabled,
+        ),
+      ) ??
+      false;
 });
 
 /// Provides the [LocationRepository] for foreground location determination.

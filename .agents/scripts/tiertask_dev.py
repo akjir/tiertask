@@ -50,11 +50,15 @@ GPL_HEADER = "\n".join(GPL_HEADER_LINES) + "\n"
 
 MAX_ARCH_ROW_WORDS = 65
 STAMP_REL_PATH = Path(".dart_tool/tiertask_verify_stamp.json")
-UI_PACKAGE_REL = Path("packages/tiertask_ui")
-UI_EXAMPLE_REL = Path("packages/tiertask_ui/example")
-UI_BARREL_REL = "packages/tiertask_ui/lib/tiertask_ui.dart"
 _SKIP_TREE_DIRS = frozenset({"build", "ephemeral", "coverage", "__pycache__"})
 _COLLAPSED_PLATFORM_DIRS = frozenset({"android", "linux", "windows"})
+_RETIRED_DIRS = (
+    "packages/tiertask_ui",
+    "lib/presentation",
+    "test/presentation",
+    "lib/ui_v2",
+    "test/ui_v2",
+)
 
 _MD_HEADING_RE = re.compile(r"^(#{1,4})\s+(.+?)\s*$")
 _DART_TYPE_RE = re.compile(
@@ -65,36 +69,13 @@ _DART_PROVIDER_RE = re.compile(
     r"^final\s+([A-Za-z_][A-Za-z0-9_]*Provider)\s*=",
 )
 _DART_IMPORT_RE = re.compile(r"^\s*import\s+['\"]([^'\"]+)['\"]")
-_DART_EXPORT_RE = re.compile(r"^\s*export\s+['\"]([^'\"]+)['\"]")
 _DART_FORBIDDEN_DIRECTIVE_RE = re.compile(r"^\s*(?:export\s+['\"]|part\s+['\"]|part\s+of\s+)")
-_DART_PART_DIRECTIVE_RE = re.compile(r"^\s*(?:part\s+['\"]|part\s+of\s+)")
-_PUBSPEC_FORBIDDEN_DEP_RE = re.compile(r"^\s{2,}(tiertask|flutter_riverpod)\s*:")
 _TRAILING_GENERIC_RE = re.compile(r"<[^>]*>$")
 _TEST_CALL_START_RE = re.compile(r"^(\s*)(group|test|testWidgets)\(\s*(.*)$")
 _STRING_LITERAL_RE = re.compile(r"(['\"])((?:\\.|(?!\1).)*)\1")
 _VALUE_KEY_RE = re.compile(r"(?:ValueKey|Key)\(\s*['\"]([^'\"$]+)['\"]\s*\)")
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 _IGNORE_COMMENT_RE = re.compile(r"//\s*ignore(?:_for_file)?:")
-_FORBIDDEN_UI_PROVIDERS = (
-    "appVersionRepositoryProvider",
-    "directoryPickerProvider",
-    "filePickerProvider",
-    "linkLauncherRepositoryProvider",
-    "localFileRepositoryProvider",
-    "locationRepositoryProvider",
-    "settingsRepositoryProvider",
-    "supportsDesktopWindowControlsProvider",
-    "supportsDirectoryPickerProvider",
-    "tdfServiceProvider",
-    "webDavRepositoryProvider",
-    "windowControlRepositoryProvider",
-)
-_FORBIDDEN_UI_PROVIDER_RE = re.compile(
-    r"\b(" + "|".join(_FORBIDDEN_UI_PROVIDERS) + r")\b"
-)
-_UI_FORBIDDEN_PROVIDER_DECL_RE = re.compile(
-    r"\b(?:(?:Async)?NotifierProvider|Provider)\s*(?:<|\(|\.)|\bextends\s+(?:AutoDispose)?(?:Async)?Notifier\b"
-)
 _L10N_MEMBER_TOKEN_RE = re.compile(r"\.([a-z][A-Za-z0-9_]*)\b")
 _L10N_BARE_TOKEN_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\b")
 _EMOJI_RE = re.compile(
@@ -114,29 +95,17 @@ def _is_generated_dart(rel_path: str) -> bool:
 
 
 def _is_test_dart(rel_path: str) -> bool:
-    """Returns True for Dart test files across the root and UI subpackages."""
-    return (
-        rel_path.startswith("test/")
-        or rel_path.startswith("packages/tiertask_ui/test/")
-        or rel_path.startswith("packages/tiertask_ui/example/test/")
-    )
+    """Returns True for Dart test files under test/."""
+    return rel_path.startswith("test/")
 
 
 def _dart_roots(root: Path) -> list[str]:
     """Returns existing repo-relative Dart source/test root directories."""
-    candidates = (
-        "lib",
-        "test",
-        "packages/tiertask_ui/lib",
-        "packages/tiertask_ui/test",
-        "packages/tiertask_ui/example/lib",
-        "packages/tiertask_ui/example/test",
-    )
-    return [sub for sub in candidates if (root / sub).exists()]
+    return [sub for sub in ("lib", "test") if (root / sub).exists()]
 
 
 def _iter_dart_files(root: Path, include_generated: bool = False) -> list[Path]:
-    """Returns sorted Dart files under root and UI package source/test trees."""
+    """Returns sorted Dart files under lib/ and test/."""
     results: list[Path] = []
     for sub in _dart_roots(root):
         base = root / sub
@@ -564,10 +533,7 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
 
     for p in _iter_dart_files(root):
         rel = p.relative_to(root).as_posix()
-        if layer == "ui_pkg":
-            if not rel.startswith("packages/tiertask_ui/"):
-                continue
-        elif layer and not rel.startswith(f"lib/{layer}/") and not rel.startswith(f"test/{layer}/"):
+        if layer and not rel.startswith(f"lib/{layer}/") and not rel.startswith(f"test/{layer}/"):
             continue
         lines = p.read_text(encoding="utf-8").splitlines()
         outlined = outline_dart_test(lines) if _is_test_dart(rel) else outline_dart_lib(lines)
@@ -595,41 +561,40 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
     return results
 
 
-def _resolve_dart_import(root: Path, source_file: Path, import_uri: str) -> str | None:
-    """Resolves a relative, package:tiertask/, or package:tiertask_ui/ URI to a repo-relative POSIX path."""
+def _resolve_import_rel_path(root: Path, source_file: Path, import_uri: str) -> str | None:
+    """Resolves a relative or package:tiertask/ URI to a repo-relative POSIX path without checking disk."""
     if import_uri.startswith("dart:"):
         return None
     if import_uri.startswith("package:tiertask/"):
-        rel = "lib/" + import_uri[len("package:tiertask/") :]
-        candidate = root / rel
-        return rel if candidate.exists() else None
-    if import_uri.startswith("package:tiertask_ui/"):
-        rel = "packages/tiertask_ui/lib/" + import_uri[len("package:tiertask_ui/") :]
-        candidate = root / rel
-        return rel if candidate.exists() else None
-    if import_uri.startswith("package:"):
+        candidate = (root / "lib" / import_uri[len("package:tiertask/") :]).resolve()
+    elif import_uri.startswith("package:"):
         return None
-    resolved = (source_file.parent / import_uri).resolve()
+    else:
+        candidate = (source_file.parent / import_uri).resolve()
     try:
-        rel_path = resolved.relative_to(root.resolve()).as_posix()
-        return rel_path if resolved.exists() else None
+        return candidate.relative_to(root.resolve()).as_posix()
     except ValueError:
         return None
 
 
+def _resolve_dart_import(root: Path, source_file: Path, import_uri: str) -> str | None:
+    """Resolves a relative or package:tiertask/ URI to an existing repo-relative POSIX path."""
+    rel_path = _resolve_import_rel_path(root, source_file, import_uri)
+    if rel_path is None:
+        return None
+    return rel_path if (root / rel_path).exists() else None
+
+
 def build_import_graph(root: Path) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-    """Builds forward (file -> imported/exported files) and reverse (file -> dependents) graphs."""
+    """Builds forward (file -> imported files) and reverse (file -> dependents) graphs."""
     forward: dict[str, set[str]] = {}
     reverse: dict[str, set[str]] = {}
     for p in _iter_dart_files(root, include_generated=True):
         rel = p.relative_to(root).as_posix()
         forward.setdefault(rel, set())
         reverse.setdefault(rel, set())
-        follow_exports = rel == UI_BARREL_REL
         for line in p.read_text(encoding="utf-8").splitlines():
             m = _DART_IMPORT_RE.match(line)
-            if not m and follow_exports:
-                m = _DART_EXPORT_RE.match(line)
             if not m:
                 continue
             target = _resolve_dart_import(root, p, m.group(1))
@@ -751,22 +716,10 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
         "test/providers/workspace_providers_test.dart",
         "test/ui/real_mechanics_test.dart",
     ],
-    "lib/presentation/shell_models.dart": [
-        "test/presentation/app_shell_controller_test.dart",
-        "test/presentation/board_view_models_test.dart",
-    ],
-    "lib/presentation/view_model_primitives.dart": [
-        "test/presentation/board_view_models_test.dart",
-    ],
-    "lib/presentation/shell_chrome_view_models.dart": [
-        "test/presentation/board_view_models_test.dart",
-    ],
-    "lib/presentation/tasks_view_model.dart": [
-        "test/presentation/board_view_models_test.dart",
-    ],
-    "lib/presentation/entity_view_models.dart": [
-        "test/presentation/board_view_models_test.dart",
-    ],
+    "lib/ui/tokens/ui_focus_tokens.dart": ["test/ui/tokens/ui_theme_tokens_test.dart"],
+    "lib/ui/tokens/ui_radius_tokens.dart": ["test/ui/tokens/ui_theme_tokens_test.dart"],
+    "lib/ui/tokens/ui_spacing_tokens.dart": ["test/ui/tokens/ui_theme_tokens_test.dart"],
+    "lib/ui/tokens/ui_typography_tokens.dart": ["test/ui/tokens/ui_theme_tokens_test.dart"],
     "lib/ui/dialogs/compact_label_picker_sheet.dart": ["test/ui/app_modals_test.dart"],
     "lib/ui/dialogs/geocoding_candidates_modal.dart": ["test/ui/app_modals_test.dart"],
     "lib/ui/dialogs/local_file_modals.dart": ["test/ui/app_modals_test.dart"],
@@ -819,18 +772,9 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
 
 
 def _find_mirror_tests(root: Path, lib_rel: str) -> set[str]:
-    """Finds direct mirror or subsystem-mapped test files for a lib/ or UI package Dart file."""
+    """Finds direct mirror or subsystem-mapped test files for a lib/ Dart file."""
     matched: set[str] = set()
-    if not lib_rel.endswith(".dart"):
-        return matched
-    ui_src_prefix = "packages/tiertask_ui/lib/src/"
-    if lib_rel.startswith(ui_src_prefix):
-        sub_rel = lib_rel[len(ui_src_prefix) : -len(".dart")]
-        exact = f"packages/tiertask_ui/test/{sub_rel}_test.dart"
-        if (root / exact).exists():
-            matched.add(exact)
-        return matched
-    if not lib_rel.startswith("lib/"):
+    if not lib_rel.endswith(".dart") or not lib_rel.startswith("lib/"):
         return matched
     if lib_rel in _SUBSYSTEM_TEST_MAP:
         for cand_rel in _SUBSYSTEM_TEST_MAP[lib_rel]:
@@ -864,16 +808,14 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
 
     app_hubs = {
         "lib/main.dart",
-        "lib/presentation/ui_telemetry.dart",
-        "lib/ui/tier_task_shell_screen.dart",
         "lib/providers/config_providers.dart",
         "lib/providers/sync_providers.dart",
         "lib/providers/task_providers.dart",
+        "lib/providers/ui_telemetry.dart",
         "lib/providers/workspace_providers.dart",
         "lib/services/app_logger.dart",
+        "lib/ui/tier_task_shell_screen.dart",
         "test/ui/test_helpers.dart",
-        UI_BARREL_REL,
-        "packages/tiertask_ui/test/test_helpers.dart",
     }
     is_pure_core = norm_target.startswith(("lib/models/", "lib/services/"))
     stop_at_hubs = norm_target not in app_hubs
@@ -902,11 +844,7 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
                 visited_all.add(dep)
                 queue_all.append(dep)
 
-    reverse_lib = sorted(
-        f
-        for f in visited_all
-        if f.startswith(("lib/", "packages/tiertask_ui/lib/", "packages/tiertask_ui/example/lib/"))
-    )
+    reverse_lib = sorted(f for f in visited_all if f.startswith("lib/"))
     mirror_tests = _find_mirror_tests(root, norm_target)
     if mirror_tests:
         return {
@@ -918,7 +856,7 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
 
     impacted_tests: set[str] = set()
     for direct_lib in visited_direct:
-        if not is_pure_core and direct_lib.startswith(("lib/ui/", "packages/tiertask_ui/lib/")):
+        if not is_pure_core and direct_lib.startswith("lib/ui/"):
             impacted_tests.update(_find_mirror_tests(root, direct_lib))
 
     for f in sorted(visited_all):
@@ -933,11 +871,6 @@ def compute_dependencies(root: Path, target_rel: str) -> dict[str, list[str]]:
             test_text = (root / f).read_text(encoding="utf-8")
             if any(sym in test_text for sym in target_symbols):
                 impacted_tests.add(f)
-
-    if not impacted_tests and norm_target.startswith("packages/tiertask_ui/lib/"):
-        impacted_tests.update(
-            f for f in visited_all if _is_test_dart(f) and f.endswith("_test.dart")
-        )
 
     return {
         "target": [norm_target],
@@ -1177,7 +1110,7 @@ def generate_architecture_tree(root: Path) -> str:
     ]
     existing_root_files = [f for f in root_files if (root / f).exists()]
     collapsed_dirs = [d for d in ("android", "assets", "linux", "spec", "windows") if (root / d).exists()]
-    expanded_dirs = [d for d in ("lib", "packages", "test") if (root / d).exists()]
+    expanded_dirs = [d for d in ("lib", "test") if (root / d).exists()]
 
     items: list[tuple[str, str]] = []
     for f in existing_root_files:
@@ -1230,8 +1163,6 @@ def _layer_section_for_path(rel_path: str) -> str:
     """Maps a repository-relative path to its section heading in ARCHITECTURE.md."""
     if "/" not in rel_path or rel_path.startswith("spec/"):
         return "## Root Files"
-    if rel_path.startswith("packages/tiertask_ui/lib/"):
-        return "## UI Component Library"
     if rel_path.startswith("lib/l10n/"):
         return "## Localization"
     if rel_path.startswith("lib/models/"):
@@ -1242,8 +1173,8 @@ def _layer_section_for_path(rel_path: str) -> str:
         return "## Repositories"
     if rel_path.startswith("lib/providers/"):
         return "## State Providers"
-    if rel_path.startswith("lib/presentation/"):
-        return "## Presentation"
+    if _design_system_layer_rank(rel_path) is not None:
+        return "## Design System"
     return "## User Interface"
 
 
@@ -1297,14 +1228,9 @@ def audit_architecture(root: Path) -> list[str]:
     if expected_tree not in content:
         issues.append("ARCH: Directory Layout ASCII tree is out of sync with disk (run `arch --sync-tree`)")
 
-    tracked_prefixes = ("lib/", "packages/tiertask_ui/lib/")
     table_files: dict[str, str] = {}
     for line in content.splitlines():
-        if (
-            line.startswith("| `lib/")
-            or line.startswith("| `packages/tiertask_ui/lib/")
-            or line.startswith("| `AGENTS.md`")
-        ):
+        if line.startswith("| `lib/") or line.startswith("| `AGENTS.md`"):
             parts = [p.strip() for p in line.split("|") if p.strip()]
             if len(parts) >= 2:
                 fpath = parts[0].strip("`")
@@ -1318,11 +1244,11 @@ def audit_architecture(root: Path) -> list[str]:
 
     for p in _iter_dart_files(root):
         rel = p.relative_to(root).as_posix()
-        if rel.startswith(tracked_prefixes) and rel not in table_files:
+        if rel.startswith("lib/") and rel not in table_files:
             issues.append(f"ARCH: Missing layer table row for `{rel}` in ARCHITECTURE.md")
 
     for fpath in sorted(table_files):
-        if fpath.startswith(tracked_prefixes) and not (root / fpath).exists():
+        if fpath.startswith("lib/") and not (root / fpath).exists():
             issues.append(f"ARCH: Stale table row in ARCHITECTURE.md for non-existent file `{fpath}`")
 
     return issues
@@ -1340,7 +1266,7 @@ def scaffold_file(root: Path, rel_path: str, description: str | None = None) -> 
         if not existing.startswith("// TierTask\n"):
             target.write_text(GPL_HEADER + "\n" + existing, encoding="utf-8")
     sync_architecture_tree(root)
-    if norm_path.startswith(("lib/", "packages/tiertask_ui/lib/")):
+    if norm_path.startswith("lib/"):
         stem_class = "".join(part.capitalize() for part in Path(norm_path).stem.split("_"))
         final_desc = description or f"Defines `{stem_class}` component."
         set_architecture_row(root, norm_path, final_desc)
@@ -1394,7 +1320,7 @@ def _check_markdown_rules(root: Path, fix: bool) -> list[str]:
 
 
 def _lib_layer_rank(rel_path: str) -> int | None:
-    """Returns the DAG architectural layer rank (0-8) for a non-generated lib/ Dart file."""
+    """Returns the DAG architectural layer rank (0-7) for a non-generated lib/ Dart file."""
     if not rel_path.startswith("lib/") or _is_generated_dart(rel_path):
         return None
     if rel_path == "lib/services/app_logger.dart":
@@ -1409,27 +1335,23 @@ def _lib_layer_rank(rel_path: str) -> int | None:
         return 4
     if rel_path.startswith("lib/providers/"):
         return 5
-    if rel_path.startswith("lib/presentation/"):
-        return 6
     if rel_path.startswith("lib/ui/"):
-        return 7
+        return 6
     if rel_path == "lib/main.dart":
-        return 8
+        return 7
     return None
 
 
-def _ui_pkg_layer_rank(rel_path: str) -> int | None:
-    """Returns the internal DAG layer rank (0-4) for a packages/tiertask_ui/lib/ Dart file."""
-    if rel_path.startswith("packages/tiertask_ui/lib/src/tokens/"):
+def _design_system_layer_rank(rel_path: str) -> int | None:
+    """Returns the internal DAG layer rank (0-3) for an integrated design-system Dart file."""
+    if rel_path.startswith("lib/ui/tokens/"):
         return 0
-    if rel_path.startswith("packages/tiertask_ui/lib/src/primitives/"):
+    if rel_path.startswith("lib/ui/primitives/"):
         return 1
-    if rel_path.startswith("packages/tiertask_ui/lib/src/layout/"):
+    if rel_path.startswith("lib/ui/layout/"):
         return 2
-    if rel_path.startswith("packages/tiertask_ui/lib/src/components/"):
+    if rel_path.startswith("lib/ui/components/"):
         return 3
-    if rel_path == UI_BARREL_REL:
-        return 4
     return None
 
 
@@ -1498,20 +1420,12 @@ def _check_dag_subgraph(
                 issues.append(
                     f"P-ACYCLIC-DAG: Upward cross-layer import `{src} -> {dst}` (rank {src_rank} -> {dst_rank})"
                 )
-            if src.startswith("lib/ui/") and (
-                dst.startswith(("lib/models/", "lib/providers/", "lib/repositories/", "lib/services/"))
-                or (dst.startswith("lib/l10n/") and dst != "lib/l10n/app_localizations.dart")
-            ):
-                issues.append(
-                    f"P-UDF-ARCHITECTURE: Forbidden direct import `{src} -> {dst}` "
-                    f"(strict Rank 7 UI whitelist)"
-                )
 
     return issues
 
 
 def _check_acyclic_dag(root: Path) -> list[str]:
-    """Enforces P-ACYCLIC-DAG across root lib/ and packages/tiertask_ui/lib/."""
+    """Enforces P-ACYCLIC-DAG, P-UDF-ARCHITECTURE, and P-DESIGN-SYSTEM-INDEPENDENCE across lib/."""
     forward, _ = build_import_graph(root)
     issues: list[str] = []
 
@@ -1520,58 +1434,28 @@ def _check_acyclic_dag(root: Path) -> list[str]:
     )
     issues.extend(_check_dag_subgraph(forward, lib_nodes, _lib_layer_rank))
 
-    ui_nodes = sorted(
-        rel for rel in forward if rel.startswith("packages/tiertask_ui/lib/")
+    ds_nodes = sorted(
+        rel for rel in lib_nodes if _design_system_layer_rank(rel) is not None
     )
-    if ui_nodes:
-        issues.extend(_check_dag_subgraph(forward, ui_nodes, _ui_pkg_layer_rank))
+    if ds_nodes:
+        issues.extend(_check_dag_subgraph(forward, ds_nodes, _design_system_layer_rank))
 
-    return issues
-
-
-def _check_ui_package_pubspecs(root: Path) -> list[str]:
-    """Ensures packages/tiertask_ui pubspecs never depend on tiertask or flutter_riverpod."""
-    issues: list[str] = []
-    for rel_pkg in (UI_PACKAGE_REL, UI_EXAMPLE_REL):
-        pubspec_path = root / rel_pkg / "pubspec.yaml"
-        if not pubspec_path.exists():
+    for src in lib_nodes:
+        is_ui = src.startswith("lib/ui/")
+        is_ds = _design_system_layer_rank(src) is not None
+        if not is_ui and not is_ds:
             continue
-        rel = pubspec_path.relative_to(root).as_posix()
-        for idx, line in enumerate(pubspec_path.read_text(encoding="utf-8").splitlines(), 1):
-            code_part = line.split("#", 1)[0]
-            m = _PUBSPEC_FORBIDDEN_DEP_RE.match(code_part)
-            if m:
+        for dst in sorted(forward.get(src, set())):
+            if is_ui and dst.startswith("lib/repositories/"):
                 issues.append(
-                    f"P-UI-ISOLATION: Forbidden `{m.group(1)}` dependency in `{rel}:{idx}`"
+                    f"P-UDF-ARCHITECTURE: Forbidden direct repository import `{src} -> {dst}`"
                 )
-    return issues
+            if is_ds and dst.startswith("lib/") and _design_system_layer_rank(dst) is None:
+                issues.append(
+                    f"P-DESIGN-SYSTEM-INDEPENDENCE: Forbidden non-design-system import `{src} -> {dst}`"
+                )
 
-
-def _is_allowed_ui_import(root: Path, source_file: Path, uri: str) -> bool:
-    """Enforces the global strict Rank 7 import whitelist for lib/ui/ files."""
-    if uri in (
-        "package:tiertask_ui/tiertask_ui.dart",
-        "package:flutter_riverpod/flutter_riverpod.dart",
-        "dart:async",
-        "dart:math",
-        "dart:ui",
-        "dart:collection",
-    ):
-        return True
-    if uri.startswith(("package:flutter/", "package:material_ui/")):
-        return True
-    if uri.startswith(("dart:", "package:")):
-        return False
-    resolved = (source_file.parent / uri).resolve()
-    try:
-        rel_target = resolved.relative_to(root.resolve()).as_posix()
-    except ValueError:
-        return False
-    return (
-        rel_target.startswith("lib/presentation/")
-        or rel_target.startswith("lib/ui/")
-        or rel_target == "lib/l10n/app_localizations.dart"
-    )
+    return list(dict.fromkeys(issues))
 
 
 def run_static_checks(root: Path, fix: bool = False) -> list[str]:
@@ -1581,11 +1465,10 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
 
     issues: list[str] = []
     issues.extend(_check_markdown_rules(root, fix=fix))
-    issues.extend(_check_ui_package_pubspecs(root))
-    for forbidden_dir in ("lib/ui_v2", "test/ui_v2"):
+    for forbidden_dir in _RETIRED_DIRS:
         if (root / forbidden_dir).exists():
             issues.append(
-                f"P-UDF-ARCHITECTURE: Forbidden transitional directory '{forbidden_dir}/'"
+                f"P-UDF-ARCHITECTURE: Forbidden retired directory '{forbidden_dir}/'"
             )
 
     for p in _iter_dart_files(root):
@@ -1605,78 +1488,53 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
             else:
                 issues.append(f"P-LICENSE-HEADER: Missing verbatim GPL-3.0 header in `{rel}`")
 
-        is_ui_pkg = rel.startswith("packages/tiertask_ui/")
-        is_ui_pkg_consumer = rel.startswith(
-            ("packages/tiertask_ui/test/", "packages/tiertask_ui/example/")
-        )
+        is_non_repo_lib = rel.startswith("lib/") and not rel.startswith("lib/repositories/")
+        is_ui = rel.startswith("lib/ui/")
+        is_ds = _design_system_layer_rank(rel) is not None
         lines = text.splitlines()
         for idx, line in enumerate(lines, 1):
             if _IGNORE_COMMENT_RE.search(line):
                 issues.append(f"P-NO-IGNORE: Forbidden analyzer ignore directive in `{rel}:{idx}`")
-            if rel == UI_BARREL_REL:
-                if _DART_PART_DIRECTIVE_RE.match(line):
-                    issues.append(f"P-FILE-SIZE: Forbidden `part` directive in `{rel}:{idx}`")
-            elif _DART_FORBIDDEN_DIRECTIVE_RE.match(line):
+            if _DART_FORBIDDEN_DIRECTIVE_RE.match(line):
                 issues.append(f"P-FILE-SIZE: Forbidden `export`/`part` directive in `{rel}:{idx}`")
-            if rel.startswith("lib/") and not rel.startswith("lib/repositories/"):
-                m = _DART_IMPORT_RE.match(line)
-                if m and m.group(1) in ("dart:io", "dart:ffi"):
-                    issues.append(f"P-IO-ISOLATION: Forbidden `{m.group(1)}` import in `{rel}:{idx}`")
+            m_import = _DART_IMPORT_RE.match(line)
+            if is_non_repo_lib:
+                if m_import and m_import.group(1) in ("dart:io", "dart:ffi"):
+                    issues.append(f"P-IO-ISOLATION: Forbidden `{m_import.group(1)}` import in `{rel}:{idx}`")
                 if "HttpClient" in line and not line.strip().startswith("//"):
                     issues.append(f"P-WEBDAV-API: Forbidden `HttpClient` usage outside repositories in `{rel}:{idx}`")
-            if is_ui_pkg:
-                dm = _DART_IMPORT_RE.match(line) or _DART_EXPORT_RE.match(line)
-                if dm:
-                    uri = dm.group(1)
-                    if uri in ("dart:io", "dart:ffi"):
-                        issues.append(f"P-IO-ISOLATION: Forbidden `{uri}` directive in `{rel}:{idx}`")
-                    if uri.startswith(("package:tiertask/", "package:flutter_riverpod/")):
-                        issues.append(f"P-UI-ISOLATION: Forbidden `{uri}` directive in `{rel}:{idx}`")
-                    if is_ui_pkg_consumer and uri.startswith("package:tiertask_ui/src/"):
+            if is_ui and m_import:
+                target_rel = _resolve_import_rel_path(root, p, m_import.group(1))
+                if (
+                    target_rel is not None
+                    and target_rel.startswith("lib/repositories/")
+                    and not (root / target_rel).exists()
+                ):
+                    issues.append(
+                        f"P-UDF-ARCHITECTURE: Forbidden direct repository import `{rel} -> {target_rel}` (`{rel}:{idx}`)"
+                    )
+            if is_ds and m_import:
+                uri = m_import.group(1)
+                if (
+                    uri.startswith("package:flutter_riverpod/")
+                    or uri == "package:flutter_riverpod"
+                    or uri in ("dart:io", "dart:ffi")
+                ):
+                    issues.append(
+                        f"P-DESIGN-SYSTEM-INDEPENDENCE: Forbidden `{uri}` import in `{rel}:{idx}`"
+                    )
+                else:
+                    target_rel = _resolve_import_rel_path(root, p, uri)
+                    if (
+                        target_rel is not None
+                        and target_rel.startswith("lib/")
+                        and _design_system_layer_rank(target_rel) is None
+                        and not (root / target_rel).exists()
+                    ):
                         issues.append(
-                            f"P-FILE-SIZE: Forbidden internal import `{uri}` in `{rel}:{idx}` "
-                            f"(use package:tiertask_ui/tiertask_ui.dart)"
+                            f"P-DESIGN-SYSTEM-INDEPENDENCE: Forbidden non-design-system import "
+                            f"`{rel} -> {target_rel}` (`{rel}:{idx}`)"
                         )
-                if "HttpClient" in line and not line.strip().startswith("//"):
-                    issues.append(f"P-WEBDAV-API: Forbidden `HttpClient` usage in `{rel}:{idx}`")
-            if rel.startswith(("lib/", "test/")):
-                m_root = _DART_IMPORT_RE.match(line)
-                if m_root and m_root.group(1).startswith("package:tiertask_ui/src/"):
-                    issues.append(
-                        f"P-FILE-SIZE: Forbidden internal import `{m_root.group(1)}` in `{rel}:{idx}` "
-                        f"(use package:tiertask_ui/tiertask_ui.dart)"
-                    )
-            if rel.startswith(
-                (
-                    "lib/models/",
-                    "lib/l10n/",
-                    "lib/services/",
-                    "lib/repositories/",
-                    "lib/providers/",
-                    "lib/presentation/",
-                )
-            ):
-                m_lower = _DART_IMPORT_RE.match(line)
-                if m_lower and m_lower.group(1).startswith("package:tiertask_ui/"):
-                    issues.append(
-                        f"P-UI-ISOLATION: Forbidden `{m_lower.group(1)}` import in lower layer `{rel}:{idx}`"
-                    )
-            if rel.startswith("lib/ui/"):
-                m_ui = _DART_IMPORT_RE.match(line)
-                if m_ui and not _is_allowed_ui_import(root, p, m_ui.group(1)):
-                    issues.append(
-                        f"P-UDF-ARCHITECTURE: Forbidden import `{m_ui.group(1)}` in `{rel}:{idx}` "
-                        f"(strict Rank 7 UI whitelist)"
-                    )
-                code_part = _strip_dart_line_comment(line)
-                if _DART_PROVIDER_RE.match(code_part.strip()) or _UI_FORBIDDEN_PROVIDER_DECL_RE.search(code_part):
-                    issues.append(
-                        f"P-UDF-ARCHITECTURE: Forbidden Riverpod provider/notifier declaration in `{rel}:{idx}`"
-                    )
-                for provider_name in dict.fromkeys(_FORBIDDEN_UI_PROVIDER_RE.findall(code_part)):
-                    issues.append(
-                        f"P-UDF-ARCHITECTURE: Forbidden `{provider_name}` reference in `{rel}:{idx}`"
-                    )
 
     issues.extend(_check_acyclic_dag(root))
     issues.extend(audit_l10n(root))
@@ -1692,10 +1550,6 @@ def compute_code_digest(root: Path) -> str:
         "pubspec.yaml",
         "l10n.yaml",
         "analysis_options.yaml",
-        "packages/tiertask_ui/pubspec.yaml",
-        "packages/tiertask_ui/analysis_options.yaml",
-        "packages/tiertask_ui/example/pubspec.yaml",
-        "packages/tiertask_ui/example/analysis_options.yaml",
     )
     for name in config_files:
         p = root / name
@@ -1738,49 +1592,23 @@ def _changed_files_from_git(root: Path) -> list[str]:
 
 
 def _is_code_relevant_change(rel_path: str) -> bool:
-    """Returns True when a changed path affects code, tests, builds, or subpackages."""
+    """Returns True when a changed path affects code, tests, or builds."""
     norm = Path(rel_path).as_posix()
-    return norm.startswith(("lib/", "test/", "linux/", "windows/", "android/", "packages/")) or norm in (
+    return norm.startswith(("lib/", "test/", "linux/", "windows/", "android/")) or norm in (
         "pubspec.yaml",
         "l10n.yaml",
         "analysis_options.yaml",
     )
 
 
-def partition_tests_by_package(test_paths: list[str]) -> dict[Path, list[str]]:
-    """Partitions repo-relative test file paths by Flutter package root with package-relative paths."""
-    partitioned: dict[Path, list[str]] = {}
-    example_prefix = UI_EXAMPLE_REL.as_posix() + "/"
-    pkg_prefix = UI_PACKAGE_REL.as_posix() + "/"
-    for rel in sorted(dict.fromkeys(Path(p).as_posix() for p in test_paths)):
-        if rel.startswith(example_prefix):
-            partitioned.setdefault(UI_EXAMPLE_REL, []).append(rel[len(example_prefix) :])
-        elif rel.startswith(pkg_prefix):
-            partitioned.setdefault(UI_PACKAGE_REL, []).append(rel[len(pkg_prefix) :])
-        else:
-            partitioned.setdefault(Path("."), []).append(rel)
-    return partitioned
-
-
 def resolve_impacted_tests(root: Path, changed_files: list[str]) -> list[str]:
-    """Maps changed root and UI subpackage files to all impacted *_test.dart suites."""
+    """Maps changed files to all impacted *_test.dart suites."""
     impacted: set[str] = set()
-    example_prefix = UI_EXAMPLE_REL.as_posix() + "/"
-    ui_lib_prefix = "packages/tiertask_ui/lib/"
     for rel in changed_files:
         norm_rel = Path(rel).as_posix()
         if _is_test_dart(norm_rel) and norm_rel.endswith("_test.dart") and (root / norm_rel).exists():
             impacted.add(norm_rel)
-        elif norm_rel.startswith(example_prefix):
-            example_test_dir = root / UI_EXAMPLE_REL / "test"
-            if example_test_dir.exists():
-                for cand in sorted(example_test_dir.rglob("*_test.dart")):
-                    impacted.add(cand.relative_to(root).as_posix())
-        elif (
-            norm_rel.startswith(("lib/", ui_lib_prefix))
-            and norm_rel.endswith(".dart")
-            and (root / norm_rel).exists()
-        ):
+        elif norm_rel.startswith("lib/") and norm_rel.endswith(".dart") and (root / norm_rel).exists():
             mirrors = _find_mirror_tests(root, norm_rel)
             if mirrors:
                 impacted.update(mirrors)
@@ -1793,35 +1621,6 @@ def resolve_impacted_tests(root: Path, changed_files: list[str]) -> list[str]:
     return sorted(impacted)
 
 
-def _packages_to_analyze(root: Path, mode: str, changed: list[str], force: bool) -> list[Path]:
-    """Selects package roots requiring flutter analyze for fast or full verification."""
-    all_pkgs = [Path(".")]
-    for sub in (UI_PACKAGE_REL, UI_EXAMPLE_REL):
-        if (root / sub / "pubspec.yaml").exists():
-            all_pkgs.append(sub)
-    if mode == "full" or force:
-        return all_pkgs
-    selected: list[Path] = []
-    pkg_prefix = UI_PACKAGE_REL.as_posix() + "/"
-    example_prefix = UI_EXAMPLE_REL.as_posix() + "/"
-    root_changed = any(
-        _is_code_relevant_change(f) and not Path(f).as_posix().startswith("packages/")
-        for f in changed
-    )
-    ui_pkg_changed = any(
-        Path(f).as_posix().startswith(pkg_prefix) and not Path(f).as_posix().startswith(example_prefix)
-        for f in changed
-    )
-    ui_example_changed = any(Path(f).as_posix().startswith(example_prefix) for f in changed)
-    if root_changed:
-        selected.append(Path("."))
-    if ui_pkg_changed and (root / UI_PACKAGE_REL / "pubspec.yaml").exists():
-        selected.append(UI_PACKAGE_REL)
-    if (ui_pkg_changed or ui_example_changed) and (root / UI_EXAMPLE_REL / "pubspec.yaml").exists():
-        selected.append(UI_EXAMPLE_REL)
-    return selected or [Path(".")]
-
-
 def run_verify(
     root: Path,
     mode: str = "fast",
@@ -1829,7 +1628,7 @@ def run_verify(
     force: bool = False,
     targets: list[str] | None = None,
 ) -> int:
-    """Runs static checks, formatting, analyzer, and smart or cached test execution across packages."""
+    """Runs static checks, formatting, analyzer, and smart or cached test execution."""
     t0 = time.monotonic()
     issues = run_static_checks(root, fix=fix)
     if issues:
@@ -1882,14 +1681,13 @@ def run_verify(
         if fmt_res.returncode != 0:
             return fmt_res.returncode
 
-    for pkg_rel in _packages_to_analyze(root, mode, changed, force):
-        ana_res = subprocess.run(
-            ["flutter", "analyze", "--no-pub", "--fatal-infos", "--fatal-warnings"],
-            cwd=root / pkg_rel,
-            check=False,
-        )
-        if ana_res.returncode != 0:
-            return ana_res.returncode
+    ana_res = subprocess.run(
+        ["flutter", "analyze", "--no-pub", "--fatal-infos", "--fatal-warnings"],
+        cwd=root,
+        check=False,
+    )
+    if ana_res.returncode != 0:
+        return ana_res.returncode
 
     if mode == "fast":
         target_tests = resolve_impacted_tests(root, changed)
@@ -1899,46 +1697,37 @@ def run_verify(
             dt = time.monotonic() - t0
             print(f"VERIFY FAST OK ({dt:.2f}s): Analyzer and static checks passed (0 impacted test suites).")
             return 0
-        for pkg_rel, pkg_tests in partition_tests_by_package(target_tests).items():
-            print(
-                f"Running {len(pkg_tests)} impacted test suite(s) in {pkg_rel.as_posix()}: "
-                f"{', '.join(pkg_tests)}"
-            )
-            test_res = subprocess.run(
-                [
-                    "flutter",
-                    "test",
-                    "--no-pub",
-                    "--no-test-assets",
-                    "-r",
-                    "failures-only",
-                    *pkg_tests,
-                ],
-                cwd=root / pkg_rel,
-                check=False,
-            )
-            if test_res.returncode != 0:
-                return test_res.returncode
+        print(f"Running {len(target_tests)} impacted test suite(s): {', '.join(target_tests)}")
+        test_res = subprocess.run(
+            [
+                "flutter",
+                "test",
+                "--no-pub",
+                "--no-test-assets",
+                "-r",
+                "failures-only",
+                *target_tests,
+            ],
+            cwd=root,
+            check=False,
+        )
+        if test_res.returncode != 0:
+            return test_res.returncode
     else:
-        test_pkgs = [Path(".")]
-        for sub in (UI_PACKAGE_REL, UI_EXAMPLE_REL):
-            if (root / sub / "test").exists():
-                test_pkgs.append(sub)
-        for pkg_rel in test_pkgs:
-            test_res = subprocess.run(
-                [
-                    "flutter",
-                    "test",
-                    "--no-pub",
-                    "--no-test-assets",
-                    "-r",
-                    "failures-only",
-                ],
-                cwd=root / pkg_rel,
-                check=False,
-            )
-            if test_res.returncode != 0:
-                return test_res.returncode
+        test_res = subprocess.run(
+            [
+                "flutter",
+                "test",
+                "--no-pub",
+                "--no-test-assets",
+                "-r",
+                "failures-only",
+            ],
+            cwd=root,
+            check=False,
+        )
+        if test_res.returncode != 0:
+            return test_res.returncode
 
     if issues:
         return 1
@@ -2057,7 +1846,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_find.add_argument("queries", nargs="+", help="One or more substrings to search for.")
     p_find.add_argument(
         "--layer",
-        help="Optional layer filter (models, services, repositories, providers, presentation, ui, ui_pkg, l10n, spec).",
+        help="Optional layer filter (models, services, repositories, providers, ui, l10n, spec).",
     )
 
     p_deps = sub.add_parser("deps", help="Show direct imports and transitive reverse lib/ and test/ dependents.")

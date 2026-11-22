@@ -17,16 +17,32 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/entity_controller.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/task_controller.dart';
-import '../../presentation/tasks_view_model.dart';
-import '../../presentation/view_model_primitives.dart';
+import '../../models/task_item.dart';
+import '../../models/task_tier.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_location.dart';
+import '../../models/tdf_metadata.dart';
+import '../../providers/board_actions_provider.dart';
+import '../../providers/board_providers.dart';
+import '../../providers/entity_actions_provider.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../components/ui_ordered_item_list.dart';
+import '../components/ui_searchable_picker.dart';
 import '../dialogs/compact_label_picker_sheet.dart';
+import '../layout/ui_responsive_grid.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_pill.dart';
+import '../primitives/ui_segmented_control.dart';
+import '../primitives/ui_toggle_row.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
 import '../widgets/entity_date_time_fields.dart';
 import '../widgets/entity_label_picker.dart';
@@ -44,38 +60,29 @@ const List<TaskSectionKind> _draftOptionalSectionOrder = <TaskSectionKind>[
   TaskSectionKind.conditions,
 ];
 
-/// Maximum reference links allowed per task (`TDF 0.8.0`).
-const int _maxLinksPerTask = 20;
-
-/// Maximum multi-line note length allowed by `TDF 0.8.0` (`maxTdfNoteLength`).
-const int _maxNoteLength = 2000;
-
-/// Maximum single-line text length allowed by `TDF 0.8.0` (`maxTdfTextLength`).
-const int _maxSingleLineLength = 500;
-
 /// Uncommitted accent-bordered Task Draft Card (`U-CARD-006`) allowing full task
-/// configuration before committing to the `.tdf` document via [TaskController.createTaskDraft].
+/// configuration before committing to the `.tdf` document via [BoardActionsNotifier.createTaskDraft].
 class TaskDraftCard extends ConsumerStatefulWidget {
   /// Creates a [TaskDraftCard].
   const TaskDraftCard({
     super.key,
     required this.allLabels,
     required this.allLocations,
-    required this.hasBothScopedAndGlobalLabels,
+    required this.openLabelCounts,
     required this.currentLocalDateTimeHint,
   });
 
   /// Workspace labels available in the searchable label picker.
-  final List<LabelPickerOptionViewModel> allLabels;
+  final List<TdfLabel> allLabels;
 
   /// Workspace locations available in the GPS conditions selector.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Current workspace local wall-clock timestamp (`YYYY-MM-DD HH:MM`) seeding pickers.
   final String currentLocalDateTimeHint;
 
-  /// Whether workspace contains both scoped and global labels.
-  final bool hasBothScopedAndGlobalLabels;
+  /// Open task counts keyed by label identifier for the searchable label picker.
+  final Map<String, int> openLabelCounts;
 
   @override
   ConsumerState<TaskDraftCard> createState() => _TaskDraftCardState();
@@ -198,13 +205,13 @@ class _DraftCallbacks {
   final VoidCallback onCommitLinkInput;
 
   /// Callback updating condition draft.
-  final ValueChanged<ConditionDraftViewModel> onConditionDraftChanged;
+  final ValueChanged<ConditionDraft> onConditionDraftChanged;
 
   /// Callback creating and assigning a new label.
   final ValueChanged<String> onCreateAndAssignLabel;
 
   /// Callback deleting a draft link row.
-  final UiOrderedItemActionCallback<EntityLinkInput> onDeleteLink;
+  final UiOrderedItemActionCallback<TaskLink> onDeleteLink;
 
   /// Callback deleting a draft subtask row.
   final UiOrderedItemActionCallback<EditableSubtaskRow> onDeleteSubtask;
@@ -225,7 +232,7 @@ class _DraftCallbacks {
   final ValueChanged<TaskSectionKind> onOpenSection;
 
   /// Callback changing draft placement.
-  final ValueChanged<TaskPlacementOption> onPlacementChanged;
+  final ValueChanged<QuickAddMode> onPlacementChanged;
 
   /// Callback removing a condition time window.
   final ValueChanged<int> onRemoveTimeWindow;
@@ -237,15 +244,15 @@ class _DraftCallbacks {
   final UiOrderedItemReorderCallback onReorderSubtasks;
 
   /// Callback changing recurrence unit.
-  final ValueChanged<ShellRepeatUnit> onRepeatUnitChanged;
+  final ValueChanged<RepeatUnit> onRepeatUnitChanged;
 
   /// Callback starting inline link row edit.
-  final UiOrderedItemActionCallback<EntityLinkInput> onStartEditLink;
+  final UiOrderedItemActionCallback<TaskLink> onStartEditLink;
 
   /// Callback submitting draft on `Enter` in title input.
   final VoidCallback onSubmitTitle;
 
-  /// Callback switching timed vs indefinite suspension.
+  /// Callback switching timed versus indefinite suspension.
   final ValueChanged<bool> onSuspendedModeChanged;
 
   /// Callback toggling a draft label.
@@ -517,7 +524,7 @@ class _DraftDayConditionSection extends StatelessWidget {
         if (draft.daysMode == ConditionDimensionMode.custom) ...<Widget>[
           SizedBox(height: tokens.spacing.space2),
           _DraftWeekdaysWrap(
-            selectedWeekdays: draft.selectedWeekdays,
+            selectedWeekdays: draft.weekdays,
             enabled: enabled,
             onToggleWeekday: _toggleWeekday,
           ),
@@ -529,14 +536,12 @@ class _DraftDayConditionSection extends StatelessWidget {
   /// Toggles ISO weekday [weekday] (`1..7`) in the draft condition weekdays.
   void _toggleWeekday(int weekday) {
     final draft = view.state.conditionDraft;
-    final nextDays = List<int>.of(draft.selectedWeekdays);
+    final nextDays = List<int>.of(draft.weekdays);
     if (!nextDays.remove(weekday)) {
       nextDays.add(weekday);
       nextDays.sort();
     }
-    view.callbacks.onConditionDraftChanged(
-      draft.copyWith(selectedWeekdays: nextDays),
-    );
+    view.callbacks.onConditionDraftChanged(draft.copyWith(weekdays: nextDays));
   }
 }
 
@@ -678,7 +683,7 @@ class _DraftDueNoteField extends StatelessWidget {
       controller: view.controllers.dueNote,
       label: localizations.taskDueNoteLabel,
       hintText: localizations.taskDueNoteHint,
-      maxLength: _maxNoteLength,
+      maxLength: maxTdfNoteLength,
       minLines: 2,
       maxLines: 4,
       enabled: !view.state.isBusy,
@@ -766,7 +771,7 @@ class _DraftLabelsInlinePickerCard extends StatelessWidget {
       child: EntitySearchableLabelPicker(
         allLabels: state.allLabels,
         selectedIds: state.selectedLabelIds,
-        hasBothScopedAndGlobal: state.hasBothScopedAndGlobalLabels,
+        openCountsByLabelId: state.openLabelCounts,
         autoFocusSearch: true,
         onToggleLabel: callbacks.onToggleLabel,
         onCreateAndAssign: callbacks.onCreateAndAssignLabel,
@@ -792,17 +797,14 @@ class _DraftLabelsSection extends StatelessWidget {
       return _DraftLabelsInlinePickerCard(view: view);
     }
 
-    final selectedOptions = _resolveSelectedLabels(
+    final selectedLabels = _resolveSelectedLabels(
       state.allLabels,
       state.selectedLabelIds,
     );
-    if (selectedOptions.isEmpty) {
+    if (selectedLabels.isEmpty) {
       return const SizedBox.shrink();
     }
-    return _DraftLabelsSummaryCard(
-      view: view,
-      selectedOptions: selectedOptions,
-    );
+    return _DraftLabelsSummaryCard(view: view, selectedLabels: selectedLabels);
   }
 }
 
@@ -811,11 +813,11 @@ class _DraftLabelsSummaryCard extends StatelessWidget {
   /// Creates a [_DraftLabelsSummaryCard].
   const _DraftLabelsSummaryCard({
     required this.view,
-    required this.selectedOptions,
+    required this.selectedLabels,
   });
 
-  /// Resolved label view models currently assigned to the draft.
-  final List<LabelPickerOptionViewModel> selectedOptions;
+  /// Resolved domain labels currently assigned to the draft.
+  final List<TdfLabel> selectedLabels;
 
   /// Shared draft card controllers, callbacks, and state snapshot.
   final _DraftCardView view;
@@ -828,12 +830,12 @@ class _DraftLabelsSummaryCard extends StatelessWidget {
       headerIcon: Icons.label_outline_rounded,
       headerTitle: localizations.taskLabelsSectionTitle,
       headerBadge: UiPill(
-        label: '${selectedOptions.length}',
+        label: '${selectedLabels.length}',
         variant: UiPillVariant.count,
       ),
       child: _DraftSelectedLabelsWrap(
         view: view,
-        selectedOptions: selectedOptions,
+        selectedLabels: selectedLabels,
       ),
     );
   }
@@ -923,7 +925,7 @@ class _DraftLinkAddFields extends StatelessWidget {
           kind: UiFieldKind.text,
           controller: titleController,
           hintText: localizations.linkTitleHint,
-          maxLength: _maxSingleLineLength,
+          maxLength: maxTdfTextLength,
           enabled: !isBusy,
           textInputAction: TextInputAction.next,
         ),
@@ -931,7 +933,7 @@ class _DraftLinkAddFields extends StatelessWidget {
           kind: UiFieldKind.text,
           controller: uriController,
           hintText: localizations.linkUriHint,
-          maxLength: _maxSingleLineLength,
+          maxLength: maxTdfTextLength,
           isMonospace: true,
           enabled: !isBusy,
           textInputAction: TextInputAction.done,
@@ -988,7 +990,7 @@ class _DraftLinkRowContent extends StatelessWidget {
   const _DraftLinkRowContent({required this.link});
 
   /// Draft link entry rendered by this row.
-  final EntityLinkInput link;
+  final TaskLink link;
 
   @override
   Widget build(BuildContext context) {
@@ -1036,7 +1038,7 @@ class _DraftLinksCard extends StatelessWidget {
       headerIcon: Icons.link_rounded,
       headerTitle: localizations.linksSectionTitle,
       headerBadge: UiPill(
-        label: '${view.state.draftLinks.length} / $_maxLinksPerTask',
+        label: '${view.state.draftLinks.length} / $maxTdfLinksPerTask',
         variant: UiPillVariant.count,
       ),
       headerTrailing: _DraftSectionCloseButton(
@@ -1067,7 +1069,7 @@ class _DraftLinksCardBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        UiOrderedItemList<EntityLinkInput>(
+        UiOrderedItemList<TaskLink>(
           items: state.draftLinks,
           editingIndex: state.editingLinkIndex,
           itemKey: (link, index) =>
@@ -1118,18 +1120,18 @@ class _DraftLocationConditionSection extends StatelessWidget {
       children: <Widget>[
         _DraftDimensionSelector(
           label: localizations.conditionLocationGroupTitle,
-          mode: draft.locationsMode,
+          mode: draft.locationMode,
           anyLabel: localizations.conditionLocationAnyLabel,
           enabled: enabled,
           onModeChanged: (mode) => view.callbacks.onConditionDraftChanged(
-            draft.copyWith(locationsMode: mode),
+            draft.copyWith(locationMode: mode),
           ),
         ),
-        if (draft.locationsMode == ConditionDimensionMode.custom) ...<Widget>[
+        if (draft.locationMode == ConditionDimensionMode.custom) ...<Widget>[
           SizedBox(height: tokens.spacing.space2),
           _DraftLocationsWrap(
             allLocations: view.state.allLocations,
-            selectedIds: draft.selectedLocationIds,
+            selectedIds: draft.locationIds,
             enabled: enabled,
             onToggleLocation: _toggleLocation,
           ),
@@ -1141,12 +1143,12 @@ class _DraftLocationConditionSection extends StatelessWidget {
   /// Toggles [locationId] in the draft condition location identifiers.
   void _toggleLocation(String locationId) {
     final draft = view.state.conditionDraft;
-    final nextIds = List<String>.of(draft.selectedLocationIds);
+    final nextIds = List<String>.of(draft.locationIds);
     if (!nextIds.remove(locationId)) {
       nextIds.add(locationId);
     }
     view.callbacks.onConditionDraftChanged(
-      draft.copyWith(selectedLocationIds: nextIds),
+      draft.copyWith(locationIds: nextIds),
     );
   }
 }
@@ -1162,7 +1164,7 @@ class _DraftLocationsWrap extends StatelessWidget {
   });
 
   /// All workspace locations.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Whether chips are interactive.
   final bool enabled;
@@ -1227,7 +1229,7 @@ class _DraftNoteCard extends StatelessWidget {
         kind: UiFieldKind.multiline,
         controller: view.controllers.note,
         hintText: localizations.taskNoteHint,
-        maxLength: _maxNoteLength,
+        maxLength: maxTdfNoteLength,
         minLines: 3,
         maxLines: 6,
         enabled: !state.isBusy,
@@ -1279,10 +1281,10 @@ class _DraftPlacementCard extends StatelessWidget {
   final bool isBusy;
 
   /// Callback notified when placement changes.
-  final ValueChanged<TaskPlacementOption> onChanged;
+  final ValueChanged<QuickAddMode> onChanged;
 
   /// Currently selected placement mode.
-  final TaskPlacementOption placement;
+  final QuickAddMode placement;
 
   @override
   Widget build(BuildContext context) {
@@ -1313,10 +1315,10 @@ class _DraftPlacementCardBody extends StatelessWidget {
   final bool isBusy;
 
   /// Callback notified when placement changes.
-  final ValueChanged<TaskPlacementOption> onChanged;
+  final ValueChanged<QuickAddMode> onChanged;
 
   /// Currently selected placement mode.
-  final TaskPlacementOption placement;
+  final QuickAddMode placement;
 
   @override
   Widget build(BuildContext context) {
@@ -1326,18 +1328,18 @@ class _DraftPlacementCardBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        UiSegmentedControl<TaskPlacementOption>(
-          segments: <UiSegment<TaskPlacementOption>>[
-            UiSegment<TaskPlacementOption>(
-              value: TaskPlacementOption.queue,
+        UiSegmentedControl<QuickAddMode>(
+          segments: <UiSegment<QuickAddMode>>[
+            UiSegment<QuickAddMode>(
+              value: QuickAddMode.standard,
               label: localizations.placementQueueOption,
             ),
-            UiSegment<TaskPlacementOption>(
-              value: TaskPlacementOption.priority,
+            UiSegment<QuickAddMode>(
+              value: QuickAddMode.priority,
               label: localizations.quickAddPriority,
             ),
-            UiSegment<TaskPlacementOption>(
-              value: TaskPlacementOption.someday,
+            UiSegment<QuickAddMode>(
+              value: QuickAddMode.someday,
               label: localizations.tier5Name,
             ),
           ],
@@ -1438,7 +1440,7 @@ class _DraftPrerequisitesPicker extends StatelessWidget {
           ),
       ],
       selectedIds: state.selectedPrerequisiteIds,
-      searchMaxLength: _maxSingleLineLength,
+      searchMaxLength: maxTdfTextLength,
       searchPlaceholder: localizations.blockedBySearchHint,
       searchClearTooltip: localizations.tooltipClearSearch,
       emptyText: localizations.blockedBySearchNoResults,
@@ -1557,26 +1559,26 @@ class _DraftRepeatUnitControl extends StatelessWidget {
   final bool isBusy;
 
   /// Callback notified when recurrence unit changes.
-  final ValueChanged<ShellRepeatUnit> onUnitChanged;
+  final ValueChanged<RepeatUnit> onUnitChanged;
 
   /// Selected recurrence unit.
-  final ShellRepeatUnit unit;
+  final RepeatUnit unit;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    return UiSegmentedControl<ShellRepeatUnit>(
-      segments: <UiSegment<ShellRepeatUnit>>[
-        UiSegment<ShellRepeatUnit>(
-          value: ShellRepeatUnit.days,
+    return UiSegmentedControl<RepeatUnit>(
+      segments: <UiSegment<RepeatUnit>>[
+        UiSegment<RepeatUnit>(
+          value: RepeatUnit.days,
           label: localizations.repeatUnitDays,
         ),
-        UiSegment<ShellRepeatUnit>(
-          value: ShellRepeatUnit.weeks,
+        UiSegment<RepeatUnit>(
+          value: RepeatUnit.weeks,
           label: localizations.repeatUnitWeeks,
         ),
-        UiSegment<ShellRepeatUnit>(
-          value: ShellRepeatUnit.months,
+        UiSegment<RepeatUnit>(
+          value: RepeatUnit.months,
           label: localizations.repeatUnitMonths,
         ),
       ],
@@ -1617,11 +1619,11 @@ class _DraftSelectedLabelsWrap extends StatelessWidget {
   /// Creates a [_DraftSelectedLabelsWrap].
   const _DraftSelectedLabelsWrap({
     required this.view,
-    required this.selectedOptions,
+    required this.selectedLabels,
   });
 
-  /// Resolved label view models currently assigned to the draft.
-  final List<LabelPickerOptionViewModel> selectedOptions;
+  /// Resolved domain labels currently assigned to the draft.
+  final List<TdfLabel> selectedLabels;
 
   /// Shared draft card controllers, callbacks, and state snapshot.
   final _DraftCardView view;
@@ -1637,16 +1639,19 @@ class _DraftSelectedLabelsWrap extends StatelessWidget {
       spacing: 6.0,
       runSpacing: 6.0,
       children: <Widget>[
-        for (final option in selectedOptions)
+        for (final label in selectedLabels)
           UiPill(
-            label: option.name,
+            label: label.name,
             variant: UiPillVariant.splitChip,
-            colorDot: _resolveColorDot(option.colorValue, tokens),
-            removeTooltip: localizations.labelPickerRemoveTooltip(option.name),
+            colorDot: _resolveColorDot(
+              TaskScheduleHelper.parseLabelColorValue(label.color),
+              tokens,
+            ),
+            removeTooltip: localizations.labelPickerRemoveTooltip(label.name),
             enabled: !state.isBusy,
             onRemove: state.isBusy
                 ? null
-                : () => callbacks.onToggleLabel(option.id),
+                : () => callbacks.onToggleLabel(label.id),
           ),
         UiPill(
           label: localizations.actionAdd,
@@ -1685,7 +1690,7 @@ class _DraftSubtaskAddBar extends StatelessWidget {
             controller: view.controllers.newSubtask,
             focusNode: view.controllers.newSubtaskFocusNode,
             hintText: localizations.subtaskInputHint,
-            maxLength: _maxSingleLineLength,
+            maxLength: maxTdfTextLength,
             enabled: !isBusy,
             textInputAction: TextInputAction.done,
             onSubmitted: (_) => onAdd(),
@@ -1738,7 +1743,7 @@ class _DraftSubtaskRowItem extends StatelessWidget {
           child: UiField(
             kind: UiFieldKind.text,
             controller: row.controller,
-            maxLength: _maxSingleLineLength,
+            maxLength: maxTdfTextLength,
             enabled: !isBusy,
             semanticLabel: localizations.subtasksSectionTitle,
           ),
@@ -1966,7 +1971,7 @@ class _DraftSuspendedNoteField extends StatelessWidget {
       controller: view.controllers.suspendedNote,
       label: localizations.taskSuspendedNoteLabel,
       hintText: localizations.taskSuspendedNoteHint,
-      maxLength: _maxNoteLength,
+      maxLength: maxTdfNoteLength,
       minLines: 2,
       maxLines: 4,
       enabled: !view.state.isBusy,
@@ -1999,14 +2004,14 @@ class _DraftTimeConditionSection extends StatelessWidget {
       children: <Widget>[
         _DraftDimensionSelector(
           label: localizations.conditionTimeGroupTitle,
-          mode: draft.timesMode,
+          mode: draft.timeMode,
           anyLabel: localizations.conditionTimeAnyLabel,
           enabled: enabled,
           onModeChanged: (mode) => view.callbacks.onConditionDraftChanged(
-            draft.copyWith(timesMode: mode),
+            draft.copyWith(timeMode: mode),
           ),
         ),
-        if (draft.timesMode == ConditionDimensionMode.custom) ...<Widget>[
+        if (draft.timeMode == ConditionDimensionMode.custom) ...<Widget>[
           SizedBox(height: tokens.spacing.space2),
           _DraftTimeWindowsEditor(view: view, enabled: enabled),
         ],
@@ -2107,7 +2112,7 @@ class _DraftTimeWindowsEditor extends StatelessWidget {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
 
-    return UiOrderedItemList<TimeWindowDraftViewModel>(
+    return UiOrderedItemList<TimeWindowDraft>(
       items: view.state.conditionDraft.timeWindows,
       itemKey: (window, index) => ValueKey<String>(
         'draft_time_window_${index}_${window.start}_${window.end}',
@@ -2143,7 +2148,7 @@ class _DraftTitleField extends StatelessWidget {
       kind: UiFieldKind.text,
       controller: view.controllers.title,
       hintText: localizations.taskNameLabel,
-      maxLength: _maxSingleLineLength,
+      maxLength: maxTdfTextLength,
       autofocus: true,
       enabled: !view.state.isBusy,
       errorText: view.state.fieldErrors['title'],
@@ -2167,11 +2172,11 @@ class _DraftViewState {
     required this.dueAutoPrioritize,
     required this.editingLinkIndex,
     required this.fieldErrors,
-    required this.hasBothScopedAndGlobalLabels,
     required this.isBusy,
     required this.isCompact,
     required this.isInlineLabelPickerOpen,
     required this.linkInputError,
+    required this.openLabelCounts,
     required this.openSections,
     required this.placement,
     required this.prerequisiteCandidates,
@@ -2186,19 +2191,19 @@ class _DraftViewState {
   });
 
   /// All workspace labels.
-  final List<LabelPickerOptionViewModel> allLabels;
+  final List<TdfLabel> allLabels;
 
   /// All workspace locations.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Current condition draft model.
-  final ConditionDraftViewModel conditionDraft;
+  final ConditionDraft conditionDraft;
 
   /// Current local timestamp hint.
   final String currentLocalDateTimeHint;
 
   /// Draft links list.
-  final List<EntityLinkInput> draftLinks;
+  final List<TaskLink> draftLinks;
 
   /// Auto-prioritize near deadline flag.
   final bool dueAutoPrioritize;
@@ -2208,9 +2213,6 @@ class _DraftViewState {
 
   /// Per-field validation errors keyed by logical field name.
   final Map<String, String> fieldErrors;
-
-  /// Whether both scoped and global labels exist.
-  final bool hasBothScopedAndGlobalLabels;
 
   /// Whether commit is in flight.
   final bool isBusy;
@@ -2224,17 +2226,20 @@ class _DraftViewState {
   /// Inline validation error for link input row.
   final String? linkInputError;
 
+  /// Open task counts keyed by label identifier.
+  final Map<String, int> openLabelCounts;
+
   /// Open optional sections.
   final Set<TaskSectionKind> openSections;
 
   /// Selected placement mode.
-  final TaskPlacementOption placement;
+  final QuickAddMode placement;
 
   /// Prerequisite candidate tasks.
-  final List<PrerequisiteCandidateViewModel> prerequisiteCandidates;
+  final List<PrerequisiteCandidate> prerequisiteCandidates;
 
   /// Selected repeat unit.
-  final ShellRepeatUnit repeatUnit;
+  final RepeatUnit repeatUnit;
 
   /// Selected label identifiers.
   final Set<String> selectedLabelIds;
@@ -2358,8 +2363,8 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   final Set<String> _selectedPrerequisiteIds = <String>{};
   final List<EditableSubtaskRow> _subtaskRows = <EditableSubtaskRow>[];
 
-  ConditionDraftViewModel _conditionDraft = ConditionDraftViewModel();
-  List<EntityLinkInput> _draftLinks = const <EntityLinkInput>[];
+  ConditionDraft _conditionDraft = ConditionDraft();
+  List<TaskLink> _draftLinks = const <TaskLink>[];
   bool _dueAutoPrioritize = true;
   int? _editingLinkIndex;
   Map<String, String> _fieldErrors = const <String, String>{};
@@ -2367,8 +2372,8 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   bool _labelPickerOpen = false;
   String? _linkInputError;
   int _nextSubtaskRowId = 1;
-  late TaskPlacementOption _placement;
-  ShellRepeatUnit _repeatUnit = ShellRepeatUnit.days;
+  late QuickAddMode _placement;
+  RepeatUnit _repeatUnit = RepeatUnit.days;
   late Set<String> _selectedLabelIds;
   String? _submitError;
   bool _subtasksAutoFinish = false;
@@ -2378,7 +2383,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   @override
   void initState() {
     super.initState();
-    final shellState = ref.read(appShellControllerProvider);
+    final shellState = ref.read(shellProvider);
     _placement = shellState.draftSeedPlacement;
     _selectedLabelIds = Set<String>.of(shellState.draftSeedLabelIds);
     _controllers = _DraftControllers(initialTitle: shellState.draftSeedTitle);
@@ -2425,17 +2430,20 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<_DraftSeedSnapshot>(
+      shellProvider.select(_selectDraftSeed),
+      _handleDraftSeedChanged,
+    );
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
     final isCompact = UiBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
-    final isControllerBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
-    );
-    final isBusy = _isSubmitting || isControllerBusy;
+    final isBusy =
+        _isSubmitting ||
+        ref.watch(boardActionsProvider.select((state) => state.isBusy));
     final prerequisiteCandidates =
         _openSections.contains(TaskSectionKind.prerequisites)
         ? ref.watch(taskPrerequisiteCandidatesProvider(null))
-        : const <PrerequisiteCandidateViewModel>[];
+        : const <PrerequisiteCandidate>[];
     final view = _createDraftCardView(
       isBusy: isBusy,
       isCompact: isCompact,
@@ -2475,7 +2483,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   _DraftCardView _createDraftCardView({
     required bool isBusy,
     required bool isCompact,
-    required List<PrerequisiteCandidateViewModel> prerequisiteCandidates,
+    required List<PrerequisiteCandidate> prerequisiteCandidates,
     required double spacing,
   }) {
     return _DraftCardView(
@@ -2490,11 +2498,11 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
         dueAutoPrioritize: _dueAutoPrioritize,
         editingLinkIndex: _editingLinkIndex,
         fieldErrors: _fieldErrors,
-        hasBothScopedAndGlobalLabels: widget.hasBothScopedAndGlobalLabels,
         isBusy: isBusy,
         isCompact: isCompact,
         isInlineLabelPickerOpen: _labelPickerOpen,
         linkInputError: _linkInputError,
+        openLabelCounts: widget.openLabelCounts,
         openSections: _openSections,
         placement: _placement,
         prerequisiteCandidates: prerequisiteCandidates,
@@ -2546,9 +2554,9 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
     }
     setState(() {
       _conditionDraft = _conditionDraft.copyWith(
-        timeWindows: <TimeWindowDraftViewModel>[
+        timeWindows: <TimeWindowDraft>[
           ..._conditionDraft.timeWindows,
-          TimeWindowDraftViewModel(start: startToken, end: endToken),
+          TimeWindowDraft(start: startToken, end: endToken),
         ],
       );
       _controllers.timeStart.clear();
@@ -2566,7 +2574,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
 
   /// Cancels and discards this uncommitted task draft.
   void _handleCancel() {
-    ref.read(appShellControllerProvider.notifier).cancelDraft();
+    ref.read(shellProvider.notifier).cancelDraft();
   }
 
   /// Exits inline draft link editing and clears link inputs.
@@ -2592,7 +2600,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
     });
   }
 
-  /// Validates and commits the entire draft via [TaskController.createTaskDraft].
+  /// Validates and commits the entire draft via [BoardActionsNotifier.createTaskDraft].
   Future<void> _handleCommit() async {
     if (_isSubmitting) {
       return;
@@ -2605,15 +2613,12 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
         return;
       }
     }
-    final submittedSubtasks = <SubtaskInput>[
-      if (_openSections.contains(TaskSectionKind.subtasks)) ...<SubtaskInput>[
+    final submittedSubtasks = <SubtaskItem>[
+      if (_openSections.contains(TaskSectionKind.subtasks)) ...<SubtaskItem>[
         for (final row in _subtaskRows)
-          SubtaskInput(
-            title: row.controller.text,
-            isCompleted: row.isCompleted,
-          ),
+          SubtaskItem(title: row.controller.text, isCompleted: row.isCompleted),
         if (_controllers.newSubtask.text.trim().isNotEmpty)
-          SubtaskInput(title: _controllers.newSubtask.text.trim()),
+          SubtaskItem(title: _controllers.newSubtask.text.trim()),
       ],
     ];
     final input = TaskDraftInput(
@@ -2625,7 +2630,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       labelIds: _selectedLabelIds,
       links: _openSections.contains(TaskSectionKind.links)
           ? _draftLinks
-          : const <EntityLinkInput>[],
+          : const <TaskLink>[],
       subtasks: submittedSubtasks,
       subtasksAutoFinish:
           _openSections.contains(TaskSectionKind.subtasks) &&
@@ -2648,7 +2653,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       prerequisiteTaskIds: _openSections.contains(TaskSectionKind.prerequisites)
           ? _selectedPrerequisiteIds
           : const <String>[],
-      conditionDraft: _openSections.contains(TaskSectionKind.conditions)
+      conditions: _openSections.contains(TaskSectionKind.conditions)
           ? _conditionDraft
           : null,
     );
@@ -2659,7 +2664,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       _fieldErrors = const <String, String>{};
     });
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .createTaskDraft(input, locale: Localizations.localeOf(context));
     if (!mounted) {
       return;
@@ -2684,23 +2689,23 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   /// Validates and appends/updates the link currently typed into the draft link fields.
   bool _handleCommitLinkInput() {
     final editingIndex = _editingLinkIndex;
-    final error = TaskController.validateLinkInput(
+    final error = TaskScheduleHelper.validateLinkInput(
       rawTitle: _controllers.linkTitle.text,
       rawUri: _controllers.linkUri.text,
       currentCount: _draftLinks.length,
+      localizations: AppLocalizations.of(context),
       isEditingExisting: editingIndex != null,
       isLabel: false,
-      locale: Localizations.localeOf(context),
     );
     if (error != null) {
       setState(() => _linkInputError = error);
       return false;
     }
-    final nextLink = EntityLinkInput(
+    final nextLink = TaskLink(
       title: _controllers.linkTitle.text.trim(),
       uri: _controllers.linkUri.text.trim(),
     );
-    final nextLinks = List<EntityLinkInput>.of(_draftLinks);
+    final nextLinks = List<TaskLink>.of(_draftLinks);
     if (editingIndex != null &&
         editingIndex >= 0 &&
         editingIndex < nextLinks.length) {
@@ -2721,27 +2726,27 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   }
 
   /// Updates [_conditionDraft] when condition controls change.
-  void _handleConditionDraftChanged(ConditionDraftViewModel nextDraft) {
+  void _handleConditionDraftChanged(ConditionDraft nextDraft) {
     setState(() => _conditionDraft = nextDraft);
     _clearFieldError('conditions');
   }
 
-  /// Creates a new workspace label from [rawName] and selects it on this draft.
-  Future<void> _handleCreateAndAssignLabel(String rawName) async {
+  /// Creates a new workspace label from [rawName], selects it on this draft, and returns the [ActionResult].
+  Future<ActionResult> _handleCreateAndAssignLabel(String rawName) async {
     final locale = Localizations.localeOf(context);
     final result = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .quickCreateLabel(rawName, locale: locale);
     if (!mounted) {
-      return;
+      return result;
     }
     switch (result) {
       case ActionSucceeded(:final entityId):
         if (entityId != null) {
-          final shell = ref.read(appShellControllerProvider);
+          final shell = ref.read(shellProvider);
           if (shell.expandedEntity ==
               EntityRef(kind: EntityKind.label, id: entityId)) {
-            ref.read(appShellControllerProvider.notifier).collapseEntity();
+            ref.read(shellProvider.notifier).collapseEntity();
           }
           setState(() {
             _selectedLabelIds = <String>{..._selectedLabelIds, entityId};
@@ -2751,14 +2756,15 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       case ActionPersistFailed(:final message):
         setState(() => _submitError = message);
     }
+    return result;
   }
 
   /// Removes a link row at [index] from [_draftLinks].
-  void _handleDeleteLink(EntityLinkInput link, int index) {
+  void _handleDeleteLink(TaskLink link, int index) {
     if (index < 0 || index >= _draftLinks.length) {
       return;
     }
-    final nextLinks = List<EntityLinkInput>.of(_draftLinks)..removeAt(index);
+    final nextLinks = List<TaskLink>.of(_draftLinks)..removeAt(index);
     var nextEditing = _editingLinkIndex;
     if (nextEditing == index) {
       nextEditing = null;
@@ -2784,6 +2790,34 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
     setState(() {});
   }
 
+  /// Applies updated shell draft seeds if [ShellNotifier.openDraft] re-seeds while mounted.
+  void _handleDraftSeedChanged(
+    _DraftSeedSnapshot? previous,
+    _DraftSeedSnapshot next,
+  ) {
+    if (ref.read(shellProvider).activeDraft != EntityDraftKind.task) {
+      return;
+    }
+    final sameTitle = previous?.title == next.title;
+    final samePlacement = previous?.placement == next.placement;
+    final sameLabels =
+        previous != null && _equalStringLists(previous.labelIds, next.labelIds);
+    if (sameTitle && samePlacement && sameLabels) {
+      return;
+    }
+    setState(() {
+      if (!sameTitle) {
+        _controllers.title.text = next.title;
+      }
+      if (!samePlacement) {
+        _placement = next.placement;
+      }
+      if (!sameLabels) {
+        _selectedLabelIds = Set<String>.of(next.labelIds);
+      }
+    });
+  }
+
   /// Updates the due auto-prioritize flag on the draft.
   void _handleDueAutoPrioritizeChanged(bool value) {
     setState(() => _dueAutoPrioritize = value);
@@ -2798,7 +2832,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   /// Opens [labelId] inside Labels manager preserving `returnContext`.
   void _handleOpenLabelInfo(String labelId) {
     ref
-        .read(appShellControllerProvider.notifier)
+        .read(shellProvider.notifier)
         .openEntityInManager(
           EntityRef(kind: EntityKind.label, id: labelId),
           preserveReturnContext: true,
@@ -2816,11 +2850,10 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       showCompactLabelPickerSheet(
         context,
         title: localizations.taskLabelsSectionTitle,
-        allLabels: widget.allLabels,
-        hasBothScopedAndGlobal: widget.hasBothScopedAndGlobalLabels,
-        selectedIds: Set<String>.of(_selectedLabelIds),
+        taskId: null,
+        initialSelectedLabelIds: Set<String>.of(_selectedLabelIds),
         onToggleLabel: _handleToggleLabel,
-        onCreateAndAssign: _triggerCreateAndAssignLabel,
+        onCreateLabel: _handleCreateAndAssignLabel,
         onOpenLabelInfo: _handleOpenLabelInfo,
       ),
     );
@@ -2832,7 +2865,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   }
 
   /// Updates the draft placement selection.
-  void _handlePlacementChanged(TaskPlacementOption nextPlacement) {
+  void _handlePlacementChanged(QuickAddMode nextPlacement) {
     setState(() => _placement = nextPlacement);
   }
 
@@ -2841,9 +2874,8 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
     if (index < 0 || index >= _conditionDraft.timeWindows.length) {
       return;
     }
-    final nextWindows = List<TimeWindowDraftViewModel>.of(
-      _conditionDraft.timeWindows,
-    )..removeAt(index);
+    final nextWindows = List<TimeWindowDraft>.of(_conditionDraft.timeWindows)
+      ..removeAt(index);
     setState(() {
       _conditionDraft = _conditionDraft.copyWith(timeWindows: nextWindows);
     });
@@ -2858,7 +2890,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
         oldIndex == newIndex) {
       return;
     }
-    final nextLinks = List<EntityLinkInput>.of(_draftLinks);
+    final nextLinks = List<TaskLink>.of(_draftLinks);
     final moved = nextLinks.removeAt(oldIndex);
     nextLinks.insert(newIndex, moved);
     setState(() => _draftLinks = nextLinks);
@@ -2879,12 +2911,12 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   }
 
   /// Updates the recurrence unit on the draft.
-  void _handleRepeatUnitChanged(ShellRepeatUnit nextUnit) {
+  void _handleRepeatUnitChanged(RepeatUnit nextUnit) {
     setState(() => _repeatUnit = nextUnit);
   }
 
   /// Loads an existing draft link row into the inline edit inputs.
-  void _handleStartEditLink(EntityLinkInput link, int index) {
+  void _handleStartEditLink(TaskLink link, int index) {
     setState(() {
       _editingLinkIndex = index;
       _controllers.linkTitle.text = link.title;
@@ -2936,7 +2968,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       case TaskSectionKind.note:
         _controllers.note.clear();
       case TaskSectionKind.links:
-        _draftLinks = const <EntityLinkInput>[];
+        _draftLinks = const <TaskLink>[];
         _editingLinkIndex = null;
         _controllers.linkTitle.clear();
         _controllers.linkUri.clear();
@@ -2954,7 +2986,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
         _dueAutoPrioritize = true;
       case TaskSectionKind.repeat:
         _controllers.repeatCount.text = '1';
-        _repeatUnit = ShellRepeatUnit.days;
+        _repeatUnit = RepeatUnit.days;
         _controllers.repeatLeadDays.text = '0';
       case TaskSectionKind.suspended:
         _suspendedIndefinitely = false;
@@ -2963,7 +2995,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       case TaskSectionKind.prerequisites:
         _selectedPrerequisiteIds.clear();
       case TaskSectionKind.conditions:
-        _conditionDraft = ConditionDraftViewModel();
+        _conditionDraft = ConditionDraft();
         _controllers.timeStart.clear();
         _controllers.timeEnd.clear();
         _timeInputError = null;
@@ -3006,6 +3038,13 @@ class _TaskDraftOptionalSections extends StatelessWidget {
   }
 }
 
+/// Narrow shell seed slice watched by [_TaskDraftCardState].
+typedef _DraftSeedSnapshot = ({
+  String title,
+  QuickAddMode placement,
+  List<String> labelIds,
+});
+
 /// Returns the outline icon for an optional draft section `+ Add` chip.
 IconData _draftAddSectionIcon(TaskSectionKind section) {
   return switch (section) {
@@ -3041,6 +3080,22 @@ String _draftAddSectionLabel(
   };
 }
 
+/// Compares two string lists element-by-element without extra imports.
+bool _equalStringLists(List<String> left, List<String> right) {
+  if (identical(left, right)) {
+    return true;
+  }
+  if (left.length != right.length) {
+    return false;
+  }
+  for (var i = 0; i < left.length; i++) {
+    if (left[i] != right[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 /// Parses a serialized [ConditionDimensionMode] name safely without unchecked casts.
 ConditionDimensionMode? _parseConditionDimensionMode(String value) {
   for (final mode in ConditionDimensionMode.values) {
@@ -3052,14 +3107,11 @@ ConditionDimensionMode? _parseConditionDimensionMode(String value) {
 }
 
 /// Returns the localized helper caption for [placement].
-String _placementHint(
-  TaskPlacementOption placement,
-  AppLocalizations localizations,
-) {
+String _placementHint(QuickAddMode placement, AppLocalizations localizations) {
   return switch (placement) {
-    TaskPlacementOption.queue => localizations.placementQueueHint,
-    TaskPlacementOption.priority => localizations.placementPriorityHint,
-    TaskPlacementOption.someday => localizations.placementSomedayHint,
+    QuickAddMode.standard => localizations.placementQueueHint,
+    QuickAddMode.priority => localizations.placementPriorityHint,
+    QuickAddMode.someday => localizations.placementSomedayHint,
   };
 }
 
@@ -3071,13 +3123,22 @@ Color _resolveColorDot(int? colorValue, UiThemeTokens tokens) {
   };
 }
 
-/// Collects [LabelPickerOptionViewModel] entries whose IDs exist in [selectedIds].
-List<LabelPickerOptionViewModel> _resolveSelectedLabels(
-  List<LabelPickerOptionViewModel> allLabels,
+/// Collects [TdfLabel] entries whose IDs exist in [selectedIds].
+List<TdfLabel> _resolveSelectedLabels(
+  List<TdfLabel> allLabels,
   Set<String> selectedIds,
 ) {
-  return <LabelPickerOptionViewModel>[
-    for (final option in allLabels)
-      if (selectedIds.contains(option.id)) option,
+  return <TdfLabel>[
+    for (final label in allLabels)
+      if (selectedIds.contains(label.id)) label,
   ];
+}
+
+/// Extracts the task draft seed slice from [shell].
+_DraftSeedSnapshot _selectDraftSeed(ShellState shell) {
+  return (
+    title: shell.draftSeedTitle,
+    placement: shell.draftSeedPlacement,
+    labelIds: shell.draftSeedLabelIds,
+  );
 }

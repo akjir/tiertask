@@ -3752,6 +3752,81 @@ void main() {
       expect(readError.report.remote?.isReadable, isTrue);
     }
   });
+
+  test('conflictDecisionsProvider and recoveryDecisionsProvider preserve user selections across locale and board updates and autoDispose when unwatched', () async {
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(
+          InMemorySettingsRepository(
+            const WebDavConfig(language: AppLanguage.english),
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(activeWorkspaceProvider.future);
+    await container.read(webDavConfigProvider.future);
+
+    const conflictOutcome = TdfSyncOutcomeException(
+      kind: TdfSyncOutcomeKind.deletionConflict,
+      message: 'Deletion conflict',
+      conflictedTaskIds: <String>['tsk0000001'],
+      conflictedLabelIds: <String>['lbl0000001'],
+    );
+    container
+        .read(syncStateProvider.notifier)
+        .setConflict('Conflict', outcome: conflictOutcome);
+
+    final sub = container.listen(conflictDecisionsProvider, (_, _) {});
+    final taskKey = resolutionDecisionKey('task', 'tsk0000001');
+    expect(
+      container.read(conflictDecisionsProvider)[taskKey],
+      equals(TdfDeletionResolution.undelete),
+    );
+    container
+        .read(conflictDecisionsProvider.notifier)
+        .selectDecision(taskKey, TdfDeletionResolution.delete);
+
+    // Locale update must NOT wipe the user's selected decision!
+    await container
+        .read(webDavConfigProvider.notifier)
+        .updateLanguage(AppLanguage.german);
+    expect(
+      container.read(conflictDecisionsProvider)[taskKey],
+      equals(TdfDeletionResolution.delete),
+      reason: 'Locale change must not reset conflict decisions',
+    );
+    sub.close();
+
+    // Recovery decisions default to recoverAsNew and survive locale updates.
+    const recoveryOutcome = TdfSyncOutcomeException(
+      kind: TdfSyncOutcomeKind.recoveryRequired,
+      message: 'Recovery required',
+      ambiguousTaskIds: <String>['rec0000001'],
+    );
+    container
+        .read(syncStateProvider.notifier)
+        .setConflict('Recovery', outcome: recoveryOutcome);
+    final recSub = container.listen(recoveryDecisionsProvider, (_, _) {});
+    final recKey = resolutionDecisionKey('task', 'rec0000001');
+    expect(
+      container.read(recoveryDecisionsProvider)[recKey],
+      equals(TdfRecoveryResolution.recoverAsNew),
+    );
+    container
+        .read(recoveryDecisionsProvider.notifier)
+        .selectDecision(recKey, TdfRecoveryResolution.discard);
+    await container
+        .read(webDavConfigProvider.notifier)
+        .updateLanguage(AppLanguage.english);
+    expect(
+      container.read(recoveryDecisionsProvider)[recKey],
+      equals(TdfRecoveryResolution.discard),
+      reason: 'Locale change must not reset recovery decisions',
+    );
+    recSub.close();
+  });
 }
 
 class _FailingReadLocalRepository extends LocalFileRepository {

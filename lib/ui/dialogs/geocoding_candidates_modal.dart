@@ -14,11 +14,13 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/entity_controller.dart';
-import '../../presentation/ui_telemetry.dart';
+import '../../models/location_state.dart';
+import '../../providers/ui_telemetry.dart';
+import '../components/ui_dialog_frame.dart';
+import '../components/ui_searchable_picker.dart';
+import '../primitives/ui_button.dart';
 
 /// Centered modal listing ranked forward-geocoding candidates for user disambiguation.
 class _GeocodingCandidatesModal extends StatelessWidget {
@@ -29,14 +31,14 @@ class _GeocodingCandidatesModal extends StatelessWidget {
     required this.onClose,
   });
 
-  /// Ranked geocoding candidate projections to list.
-  final List<GeocodingCandidateViewModel> candidates;
+  /// Ranked domain geocoding candidates to list.
+  final List<GeocodingCandidate> candidates;
 
   /// Callback dismissing the modal without selection.
   final VoidCallback onClose;
 
-  /// Callback returning the chosen candidate index.
-  final ValueChanged<int> onSelect;
+  /// Callback returning the chosen [GeocodingCandidate].
+  final ValueChanged<GeocodingCandidate> onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -47,7 +49,7 @@ class _GeocodingCandidatesModal extends StatelessWidget {
       size: UiDialogSize.medium,
       closeTooltip: localizations.actionClose,
       onClose: onClose,
-      body: UiSearchablePicker<int>(
+      body: UiSearchablePicker<GeocodingCandidate>(
         key: const ValueKey<String>('geocoding_candidates_picker'),
         options: _buildCandidateOptions(),
         selectedIds: const <String>{},
@@ -68,34 +70,35 @@ class _GeocodingCandidatesModal extends StatelessWidget {
     );
   }
 
-  /// Maps geocoding candidate projections to single-select picker rows.
-  List<UiPickerOption<int>> _buildCandidateOptions() {
-    return <UiPickerOption<int>>[
-      for (final candidate in candidates)
-        UiPickerOption<int>(
-          id: '${candidate.index}',
-          value: candidate.index,
-          label: candidate.displayName,
-          subtitle: candidate.coordinatesSummary,
+  /// Maps domain [GeocodingCandidate] entries to single-select picker rows.
+  List<UiPickerOption<GeocodingCandidate>> _buildCandidateOptions() {
+    return <UiPickerOption<GeocodingCandidate>>[
+      for (var i = 0; i < candidates.length; i++)
+        UiPickerOption<GeocodingCandidate>(
+          id: '$i',
+          value: candidates[i],
+          label: candidates[i].displayName,
+          subtitle: candidates[i].formattedCoordinates,
           icon: Icons.location_on_outlined,
         ),
     ];
   }
 }
 
-/// Presents the forward-geocoding candidate disambiguation modal and returns the chosen candidate index, or `null`.
-Future<int?> showGeocodingCandidatesModal(
+/// Presents the forward-geocoding candidate disambiguation modal and returns the chosen [GeocodingCandidate], or `null`.
+Future<GeocodingCandidate?> showGeocodingCandidatesModal(
   BuildContext context, {
-  required List<GeocodingCandidateViewModel> candidates,
+  required List<GeocodingCandidate> candidates,
 }) {
   UiTelemetry.logDialogOpened('geocoding_candidates');
   final localizations = AppLocalizations.of(context);
-  return UiDialogFrame.showModal<int>(
+  return UiDialogFrame.showModal<GeocodingCandidate>(
     context: context,
     barrierLabel: localizations.locationSelectCandidateTitle,
     builder: (modalContext) => _GeocodingCandidatesModal(
       candidates: candidates,
-      onSelect: (index) => Navigator.of(modalContext).pop<int>(index),
+      onSelect: (candidate) =>
+          Navigator.of(modalContext).pop<GeocodingCandidate>(candidate),
       onClose: () => Navigator.of(modalContext).maybePop(),
     ),
   );

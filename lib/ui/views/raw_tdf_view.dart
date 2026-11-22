@@ -19,14 +19,21 @@ import 'dart:math' as math;
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/shell_chrome_view_models.dart';
-import '../../presentation/shell_models.dart';
+import '../../models/tdf_error.dart';
+import '../../providers/board_providers.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../layout/ui_page_header.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 
+/// Minimum body height for flex-expanded layout before falling back to outer vertical scrolling.
 const double _minFlexBodyHeight = 440.0;
 
 /// Full-height canonical Raw `TDF 0.8.0` preview view with byte/line telemetry,
@@ -39,24 +46,23 @@ class RawTdfView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final viewModel = ref.watch(rawTdfViewModelProvider);
+    final preview = ref.watch(rawTdfPreviewProvider);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
 
     return Padding(
       padding: tokens.spacing.mainContentPadding(viewport),
       child: _RawTdfLayout(
-        viewModel: viewModel,
-        onBack: () => ref
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.tasks),
-        onCopy: viewModel.isLimitExceeded
+        preview: preview,
+        onBack: () =>
+            ref.read(shellProvider.notifier).openView(ShellView.tasks),
+        onCopy: preview.isLimitExceeded
             ? null
             : () {
                 unawaited(
                   _copyRawTdf(
                     context,
                     ref,
-                    content: viewModel.content,
+                    content: preview.content,
                     copiedNotice: localizations.rawTdfCopiedNotice,
                   ),
                 );
@@ -217,7 +223,7 @@ class _RawTdfHeaderSection extends StatelessWidget {
 class _RawTdfLayout extends StatelessWidget {
   /// Creates a [_RawTdfLayout].
   const _RawTdfLayout({
-    required this.viewModel,
+    required this.preview,
     required this.onBack,
     required this.onCopy,
   });
@@ -228,17 +234,18 @@ class _RawTdfLayout extends StatelessWidget {
   /// Clipboard copy callback, or `null` when preview limits are exceeded.
   final VoidCallback? onCopy;
 
-  /// Live Raw TDF view model snapshot.
-  final RawTdfViewModel viewModel;
+  /// Live auto-disposed Raw TDF preview snapshot.
+  final RawTdfPreview preview;
 
   @override
   Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
     final header = _RawTdfHeaderSection(
-      statsLabel: viewModel.statsLabel,
+      statsLabel: _formatRawTdfStatsLabel(preview, localizations),
       onBack: onBack,
       onCopy: onCopy,
     );
-    if (viewModel.isLimitExceeded) {
+    if (preview.isLimitExceeded) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
@@ -247,14 +254,14 @@ class _RawTdfLayout extends StatelessWidget {
             key: const ValueKey<String>('raw_tdf_limit_banner'),
             variant: UiBannerVariant.status,
             tone: UiBannerTone.warning,
-            title: viewModel.limitTitle,
-            message: viewModel.limitDescription,
+            title: localizations.rawTdfLimitExceededTitle,
+            message: localizations.rawTdfLimitExceededDescription,
           ),
         ],
       );
     }
 
-    return _RawTdfAdaptiveBody(header: header, content: viewModel.content);
+    return _RawTdfAdaptiveBody(header: header, content: preview.content);
   }
 }
 
@@ -421,8 +428,8 @@ Future<void> _copyRawTdf(
     return;
   }
   ref
-      .read(floatingNoticeControllerProvider.notifier)
-      .showNotice(copiedNotice, tone: NoticeTone.success);
+      .read(floatingNoticeProvider.notifier)
+      .showNotice(copiedNotice, tone: FloatingNoticeTone.success);
 }
 
 /// Returns the single longest `\n`-delimited line slice in [text] in one zero-split $O(N)$ pass.
@@ -448,4 +455,18 @@ String _findLongestLine(String text) {
     return '';
   }
   return text.substring(bestStart, bestStart + bestLength);
+}
+
+/// Formats localized byte and line telemetry for [preview], showing overflow sentinel bounds on early `TdfException` aborts.
+String _formatRawTdfStatsLabel(
+  RawTdfPreview preview,
+  AppLocalizations localizations,
+) {
+  final hasMeasuredCounts =
+      !preview.isLimitExceeded ||
+      preview.byteCount > 0 ||
+      preview.lineCount > 0;
+  final byteCount = hasMeasuredCounts ? preview.byteCount : maxTdfFileBytes + 1;
+  final lineCount = hasMeasuredCounts ? preview.lineCount : maxTdfLineCount + 1;
+  return localizations.rawTdfStatsSummary('$byteCount', '$lineCount');
 }

@@ -3681,7 +3681,117 @@ void main() {
         reason: 'Re-enabling both storageMode must reload local TDF storage',
       );
     });
+
+    test('updateTaskAndComplete and createLabelAndAssignToTask commit in one atomic persistence cycle each', () async {
+      final now = DateTime.utc(2026, 11, 16, 12, 0);
+      const config = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: 'tasks.tdf',
+      );
+      var localContent =
+          'tdf 0.8.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-16 10:00:00\n'
+          '    task atomTsk001\n'
+          '}\n\n'
+          'task atomTsk001 {\n'
+          '    name     "Atomic Task"\n'
+          '    created  2026-11-16 10:00:00\n'
+          '    modified 2026-11-16 10:00:00\n'
+          '}\n';
+      var saveCount = 0;
+      final localRepo = _CountingSaveWatchLocalRepository(
+        config: config,
+        getStore: () => localContent,
+        setStore: (value) {
+          saveCount++;
+          localContent = value;
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localFileRepositoryProvider.overrideWithValue(localRepo),
+          clockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      saveCount = 0;
+
+      final createdLabel = await container
+          .read(taskNotifierProvider.notifier)
+          .createLabelAndAssignToTask(
+            taskId: 'atomTsk001',
+            name: 'Urgent',
+            color: '#2196F3',
+          );
+      expect(createdLabel, isNotNull);
+      expect(
+        saveCount,
+        equals(1),
+        reason: 'createLabelAndAssignToTask must commit label creation and task assignment in one save',
+      );
+      final afterLabel = container.read(taskNotifierProvider).requireValue;
+      expect(afterLabel.findLabel(createdLabel!.id)?.name, equals('Urgent'));
+      expect(
+        afterLabel.findTask('atomTsk001')?.labelIds,
+        contains(createdLabel.id),
+      );
+
+      saveCount = 0;
+      await container
+          .read(taskNotifierProvider.notifier)
+          .updateTaskAndComplete(
+            'atomTsk001',
+            subtasks: const <SubtaskItem>[
+              SubtaskItem(title: 'Step 1', isCompleted: true),
+            ],
+            subtasksAutoFinish: true,
+          );
+      expect(
+        saveCount,
+        equals(1),
+        reason: 'updateTaskAndComplete must persist subtasks and completion in one atomic save',
+      );
+      final afterComplete = container.read(taskNotifierProvider).requireValue;
+      expect(afterComplete.findTask('atomTsk001')?.isCompleted, isTrue);
+      expect(
+        container.read(taskUndoStateProvider).canUndo,
+        isTrue,
+        reason: 'updateTaskAndComplete must capture a completion Undo entry',
+      );
+    });
   });
+}
+
+class _CountingSaveWatchLocalRepository extends LocalFileRepository {
+  _CountingSaveWatchLocalRepository({
+    required super.config,
+    required this.getStore,
+    required this.setStore,
+  });
+
+  final String Function() getStore;
+  final void Function(String value) setStore;
+
+  @override
+  Future<({String content, String? digest, bool exists})>
+  readTdfWithDigest() async {
+    final content = getStore();
+    final exists = content.isNotEmpty;
+    final digest = exists ? Sha256Service.hashHex(utf8.encode(content)) : null;
+    return (content: content, digest: digest, exists: exists);
+  }
+
+  @override
+  Future<void> saveTdf(String tdfContent) async => setStore(tdfContent);
+
+  @override
+  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) => action();
 }
 
 class _GateableWatchLocalRepository extends LocalFileRepository {

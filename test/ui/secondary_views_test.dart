@@ -25,21 +25,63 @@ import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
-import 'package:tiertask/presentation/app_shell_controller.dart';
-import 'package:tiertask/presentation/floating_notice_controller.dart';
-import 'package:tiertask/presentation/log_viewer_controller.dart';
-import 'package:tiertask/presentation/shell_models.dart';
-import 'package:tiertask/presentation/sync_controller.dart';
+import 'package:tiertask/providers/floating_notice_providers.dart';
+import 'package:tiertask/providers/log_viewer_providers.dart';
+import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
+import 'package:tiertask/ui/tokens/ui_typography_tokens.dart';
 import 'package:tiertask/ui/views/log_viewer_view.dart';
 import 'package:tiertask/ui/views/raw_tdf_view.dart';
 import 'package:tiertask/ui/views/resolution_views.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import 'test_helpers.dart';
+
+class _MetaPreservingLogViewerNotifier extends LogViewerNotifier {
+  _MetaPreservingLogViewerNotifier({required this.preservedMeta});
+
+  final List<DiagnosticLogLine> preservedMeta;
+
+  @override
+  DiagnosticLogSnapshot build() {
+    return DiagnosticLogSnapshot(
+      canSyncWebDav: false,
+      errorCount: 0,
+      filteredLines: <DiagnosticLogLine>[
+        ...preservedMeta,
+        const DiagnosticLogLine(
+          text: '2026-11-21T12:00:00Z [INFO ] [UI       ] transient entry',
+          severity: DiagnosticLogSeverity.normal,
+        ),
+      ],
+      hasEntries: true,
+      headerSummary: 'tiertask_2026-11-21_linux_work.log • v0.4.0 (linux)',
+      minimumLevel: LogLevel.debug,
+      selectedTag: null,
+      totalEntries: 1,
+      warningCount: 0,
+    );
+  }
+
+  @override
+  void clearLog() {
+    state = DiagnosticLogSnapshot(
+      canSyncWebDav: false,
+      errorCount: 0,
+      filteredLines: preservedMeta,
+      hasEntries: preservedMeta.isNotEmpty,
+      headerSummary: state.headerSummary,
+      minimumLevel: state.minimumLevel,
+      selectedTag: state.selectedTag,
+      totalEntries: 0,
+      warningCount: 0,
+    );
+  }
+}
 
 class _SpyResolutionTaskNotifier extends FakeTaskNotifier {
   _SpyResolutionTaskNotifier(
@@ -238,7 +280,7 @@ void main() {
         expect(lastCopiedText, contains('domain debug trace'));
         expect(lastCopiedText, contains('storage error line'));
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Diagnostic log copied to clipboard.'),
         );
 
@@ -292,17 +334,17 @@ void main() {
           reason: 'Metadata header summary must remain preserved after Clear',
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Diagnostic log cleared.'),
         );
       },
     );
 
     testWidgets(
-      'preserves @meta lines when controller retains header lines on Clear',
+      'preserves @meta lines when notifier retains header lines on Clear',
       (tester) async {
-        final preservedMeta = <DiagnosticLogLineViewModel>[
-          const DiagnosticLogLineViewModel(
+        final preservedMeta = <DiagnosticLogLine>[
+          const DiagnosticLogLine(
             text: '@meta format=1 app_version=0.4.0 platform=linux',
             severity: DiagnosticLogSeverity.normal,
           ),
@@ -311,8 +353,8 @@ void main() {
           tester,
           ProviderScope(
             overrides: [
-              logViewerControllerProvider.overrideWith(
-                () => _MetaPreservingLogViewerController(
+              logViewerProvider.overrideWith(
+                () => _MetaPreservingLogViewerNotifier(
                   preservedMeta: preservedMeta,
                 ),
               ),
@@ -336,7 +378,7 @@ void main() {
           reason: '@meta lines retained on Clear must remain visible',
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Diagnostic log cleared.'),
         );
       },
@@ -413,24 +455,24 @@ void main() {
         await tester.pumpAndSettle();
         expect(spyWebDav.uploadedFileNames.length, equals(1));
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Diagnostic log synced to WebDAV.'),
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.tone,
-          equals(NoticeTone.success),
+          container.read(floatingNoticeProvider)?.tone,
+          equals(FloatingNoticeTone.success),
         );
 
         failUpload = true;
         await tester.tap(uploadFinder);
         await tester.pumpAndSettle();
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           contains('Upload rejected (503).'),
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.tone,
-          equals(NoticeTone.danger),
+          container.read(floatingNoticeProvider)?.tone,
+          equals(FloatingNoticeTone.danger),
         );
 
         final listView = tester.widget<ListView>(find.byType(ListView));
@@ -475,19 +517,14 @@ void main() {
           presetId: 'plum_umber',
           themeMode: ThemeMode.dark,
         );
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.logs);
+        container.read(shellProvider.notifier).openView(ShellView.logs);
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
         expect(find.text('Diagnoseprotokoll'), findsOneWidget);
         await tester.tap(find.text('Zurück zu den Aufgaben'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
       },
     );
   });
@@ -552,12 +589,12 @@ void main() {
 
         expect(lastCopiedText, equals(selectableText.data));
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('TDF document copied to clipboard.'),
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.tone,
-          equals(NoticeTone.success),
+          container.read(floatingNoticeProvider)?.tone,
+          equals(FloatingNoticeTone.success),
         );
       },
     );
@@ -611,25 +648,20 @@ void main() {
           const Scaffold(body: RawTdfView()),
           surfaceSize: const Size(390, 844),
         );
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.rawTdf);
+        container.read(shellProvider.notifier).openView(ShellView.rawTdf);
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
         await tester.tap(find.text('Back to tasks'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
       },
     );
   });
 
   group('DeletionConflictView and ResolutionActionDock', () {
     testWidgets(
-      'lists conflicted tasks, labels, and locations with Keep Edit defaults, toggles choices without ID collision, and applies via SyncController',
+      'lists conflicted tasks, labels, and locations with Keep Edit defaults, toggles choices without ID collision, and applies via SyncActions',
       (tester) async {
         final board = TaskBoard(
           focus: <TaskItem>[
@@ -682,9 +714,7 @@ void main() {
           ),
         );
 
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.conflict);
+        container.read(shellProvider.notifier).openView(ShellView.conflict);
         container
             .read(syncStateProvider.notifier)
             .setConflict(
@@ -713,19 +743,25 @@ void main() {
 
         final initialDecisions = container.read(conflictDecisionsProvider);
         expect(
-          initialDecisions[resolutionDecisionKey(EntityKind.task, 'shared-1')],
-          equals(ConflictDecisionChoice.keepEdit),
-        );
-        expect(
-          initialDecisions[resolutionDecisionKey(EntityKind.label, 'shared-1')],
-          equals(ConflictDecisionChoice.keepEdit),
+          initialDecisions[resolutionDecisionKey(
+            EntityKind.task.name,
+            'shared-1',
+          )],
+          equals(TdfDeletionResolution.undelete),
         );
         expect(
           initialDecisions[resolutionDecisionKey(
-            EntityKind.location,
+            EntityKind.label.name,
+            'shared-1',
+          )],
+          equals(TdfDeletionResolution.undelete),
+        );
+        expect(
+          initialDecisions[resolutionDecisionKey(
+            EntityKind.location.name,
             'loc-office',
           )],
-          equals(ConflictDecisionChoice.keepEdit),
+          equals(TdfDeletionResolution.undelete),
         );
 
         await tester.tap(
@@ -750,20 +786,26 @@ void main() {
 
         final updatedDecisions = container.read(conflictDecisionsProvider);
         expect(
-          updatedDecisions[resolutionDecisionKey(EntityKind.task, 'shared-1')],
-          equals(ConflictDecisionChoice.confirmDelete),
+          updatedDecisions[resolutionDecisionKey(
+            EntityKind.task.name,
+            'shared-1',
+          )],
+          equals(TdfDeletionResolution.delete),
         );
         expect(
-          updatedDecisions[resolutionDecisionKey(EntityKind.label, 'shared-1')],
-          equals(ConflictDecisionChoice.keepEdit),
+          updatedDecisions[resolutionDecisionKey(
+            EntityKind.label.name,
+            'shared-1',
+          )],
+          equals(TdfDeletionResolution.undelete),
           reason: 'Label with identical raw ID must keep independent choice',
         );
         expect(
           updatedDecisions[resolutionDecisionKey(
-            EntityKind.location,
+            EntityKind.location.name,
             'loc-office',
           )],
-          equals(ConflictDecisionChoice.confirmDelete),
+          equals(TdfDeletionResolution.delete),
         );
 
         final applyFinder = find.byKey(
@@ -797,12 +839,9 @@ void main() {
             'loc-office': TdfDeletionResolution.delete,
           }),
         );
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
         expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
-        expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Deletion conflicts resolved. Synchronization resumed.'),
         );
       },
@@ -842,9 +881,7 @@ void main() {
           ),
         );
 
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.conflict);
+        container.read(shellProvider.notifier).openView(ShellView.conflict);
         container
             .read(syncStateProvider.notifier)
             .setConflict(
@@ -863,17 +900,14 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(resolveCalls, equals(1));
+        expect(container.read(shellProvider).view, equals(ShellView.conflict));
         expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.conflict),
-        );
-        expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Disk write failed.'),
         );
         expect(
-          container.read(floatingNoticeControllerProvider)?.tone,
-          equals(NoticeTone.danger),
+          container.read(floatingNoticeProvider)?.tone,
+          equals(FloatingNoticeTone.danger),
         );
 
         await tester.tap(
@@ -881,10 +915,7 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
       },
     );
   });
@@ -943,9 +974,7 @@ void main() {
           ),
         );
 
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.recovery);
+        container.read(shellProvider.notifier).openView(ShellView.recovery);
         container
             .read(syncStateProvider.notifier)
             .setConflict(
@@ -974,22 +1003,25 @@ void main() {
 
         final initialDecisions = container.read(recoveryDecisionsProvider);
         expect(
-          initialDecisions[resolutionDecisionKey(EntityKind.task, 'amb-task')],
-          equals(RecoveryDecisionChoice.recoverAsNew),
+          initialDecisions[resolutionDecisionKey(
+            EntityKind.task.name,
+            'amb-task',
+          )],
+          equals(TdfRecoveryResolution.recoverAsNew),
         );
         expect(
           initialDecisions[resolutionDecisionKey(
-            EntityKind.label,
+            EntityKind.label.name,
             'amb-label',
           )],
-          equals(RecoveryDecisionChoice.recoverAsNew),
+          equals(TdfRecoveryResolution.recoverAsNew),
         );
         expect(
           initialDecisions[resolutionDecisionKey(
-            EntityKind.location,
+            EntityKind.location.name,
             'amb-loc',
           )],
-          equals(RecoveryDecisionChoice.recoverAsNew),
+          equals(TdfRecoveryResolution.recoverAsNew),
         );
 
         await tester.tap(
@@ -1025,12 +1057,9 @@ void main() {
             'amb-loc': TdfRecoveryResolution.recoverAsNew,
           }),
         );
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
         expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
-        expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Recovery completed. Synchronization resumed.'),
         );
       },
@@ -1061,46 +1090,4 @@ void main() {
       },
     );
   });
-}
-
-class _MetaPreservingLogViewerController extends LogViewerController {
-  _MetaPreservingLogViewerController({required this.preservedMeta});
-
-  final List<DiagnosticLogLineViewModel> preservedMeta;
-
-  @override
-  DiagnosticLogViewModel build() {
-    return DiagnosticLogViewModel(
-      canSyncWebDav: false,
-      errorCount: 0,
-      filteredLines: <DiagnosticLogLineViewModel>[
-        ...preservedMeta,
-        const DiagnosticLogLineViewModel(
-          text: '2026-11-21T12:00:00Z [INFO ] [UI       ] transient entry',
-          severity: DiagnosticLogSeverity.normal,
-        ),
-      ],
-      hasEntries: true,
-      headerSummary: 'tiertask_2026-11-21_linux_work.log • v0.4.0 (linux)',
-      minimumLevel: DiagnosticLogLevel.debug,
-      selectedTag: null,
-      totalEntries: 1,
-      warningCount: 0,
-    );
-  }
-
-  @override
-  void clearLog() {
-    state = DiagnosticLogViewModel(
-      canSyncWebDav: false,
-      errorCount: 0,
-      filteredLines: preservedMeta,
-      hasEntries: preservedMeta.isNotEmpty,
-      headerSummary: state.headerSummary,
-      minimumLevel: state.minimumLevel,
-      selectedTag: state.selectedTag,
-      totalEntries: 0,
-      warningCount: 0,
-    );
-  }
 }

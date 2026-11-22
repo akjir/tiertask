@@ -20,16 +20,18 @@ import 'package:tiertask/models/app_build_profile.dart';
 import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
-import 'package:tiertask/presentation/app_shell_controller.dart';
-import 'package:tiertask/presentation/shell_models.dart';
+import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
 import 'package:tiertask/repositories/window_control_repository.dart';
+import 'package:tiertask/ui/primitives/ui_app_logo.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/tier_task_shell_screen.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
+import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
 
 import 'test_helpers.dart';
 
@@ -121,24 +123,15 @@ void main() {
         // Route via Tools sidebar to Raw TDF, Diagnostic Log, and Settings.
         await tester.tap(find.text('Raw TDF 0.8.0'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.rawTdf),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.rawTdf));
 
         await tester.tap(find.text('Diagnostic Log'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.logs),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.logs));
 
         await tester.tap(find.text('Settings'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.settings),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.settings));
         expect(find.text('Test Connection / Sync Now'), findsOneWidget);
 
         // Conflict state routes top chrome Sync button directly to Conflict view.
@@ -155,10 +148,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Conflict'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.conflict),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.conflict));
         expect(find.text('Apply Decisions & Sync'), findsOneWidget);
       },
     );
@@ -180,21 +170,15 @@ void main() {
         // Open compact drawer and filter by Work label.
         await tester.tap(find.byTooltip('Open menu'));
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).compactDrawerOpen,
-          isTrue,
-        );
+        expect(container.read(shellProvider).compactDrawerOpen, isTrue);
         await tester.tap(find.text('Work').last);
         await tester.pumpAndSettle();
 
         expect(
-          container.read(appShellControllerProvider).activeLabelId,
+          container.read(shellProvider).activeLabelId,
           equals('work000001'),
         );
-        expect(
-          container.read(appShellControllerProvider).compactDrawerOpen,
-          isFalse,
-        );
+        expect(container.read(shellProvider).compactDrawerOpen, isFalse);
         // Active filter replaces brand wordmark in compact Tasks top chrome.
         expect(
           find.byTooltip('Clear filter (All Tasks)'),
@@ -220,24 +204,24 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).activeTier,
-          equals(ShellTier.ready),
+          container.read(shellProvider).activeTier,
+          equals(TaskTier.ready),
         );
         await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
         await tester.pumpAndSettle();
         expect(
-          container.read(appShellControllerProvider).activeTier,
-          equals(ShellTier.focus),
+          container.read(shellProvider).activeTier,
+          equals(TaskTier.focus),
         );
 
         // Slash opens Global Search; Escape closes it.
         await tester.sendKeyEvent(LogicalKeyboardKey.slash);
         await tester.pumpAndSettle();
-        expect(container.read(appShellControllerProvider).searchOpen, isTrue);
+        expect(container.read(shellProvider).searchOpen, isTrue);
 
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
-        expect(container.read(appShellControllerProvider).searchOpen, isFalse);
+        expect(container.read(shellProvider).searchOpen, isFalse);
 
         // Pressing 'n' focuses Quick-Add title input.
         await tester.sendKeyEvent(LogicalKeyboardKey.keyN);
@@ -252,19 +236,19 @@ void main() {
         // Typing '/' inside the focused input must NOT hijack focus to Search.
         await tester.sendKeyEvent(LogicalKeyboardKey.slash);
         await tester.pumpAndSettle();
-        expect(container.read(appShellControllerProvider).searchOpen, isFalse);
+        expect(container.read(shellProvider).searchOpen, isFalse);
 
         // Ctrl+F opens Global Search even when focus is inside a text field.
         await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
         await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
         await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
         await tester.pumpAndSettle();
-        expect(container.read(appShellControllerProvider).searchOpen, isTrue);
+        expect(container.read(shellProvider).searchOpen, isTrue);
 
         // Escape closes Search.
         await tester.sendKeyEvent(LogicalKeyboardKey.escape);
         await tester.pumpAndSettle();
-        expect(container.read(appShellControllerProvider).searchOpen, isFalse);
+        expect(container.read(shellProvider).searchOpen, isFalse);
       },
     );
 
@@ -285,14 +269,9 @@ void main() {
         expect(find.text('Raw TDF 0.8.0'), findsOneWidget);
 
         // Open Settings and trigger system back via PopScope -> returns to Tasks.
-        container
-            .read(appShellControllerProvider.notifier)
-            .openView(ShellView.settings);
+        container.read(shellProvider.notifier).openView(ShellView.settings);
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.settings),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.settings));
 
         final popScope = tester.widget<PopScope<void>>(
           find.byType(PopScope<void>),
@@ -300,10 +279,7 @@ void main() {
         expect(popScope.canPop, isFalse);
         await tester.binding.handlePopRoute();
         await tester.pumpAndSettle();
-        expect(
-          container.read(appShellControllerProvider).view,
-          equals(ShellView.tasks),
-        );
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
       },
     );
 

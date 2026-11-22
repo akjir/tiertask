@@ -9,6 +9,9 @@ updated: 2026-11-21
 
 # TEP-017: Phase 2 Dedicated UI Component Library (`packages/tiertask_ui/`), Theme Presets, Gallery App, and Multi-Package Tooling
 
+> [!NOTE]
+> Superseded in architecture by [`TEP-020`](tep-020-unified-ui-integration-and-reactive-architecture.md): `TEP-020` dissolved the standalone `packages/tiertask_ui/` package split and retired the mandatory `lib/presentation/` adapter layer by integrating the 24 design-system modules into `lib/ui/{tokens,primitives,layout,components}/` and restoring direct reactive `lib/ui/ -> lib/providers/` state access while preserving 100% of the visual design system and UX contracts.
+
 ## Part 1: Concept & Proposal
 
 ### 1.1 Summary

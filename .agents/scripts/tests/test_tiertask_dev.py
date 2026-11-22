@@ -58,7 +58,7 @@ class TestTierTaskDev(unittest.TestCase):
     def _build_minimal_repo(self, root: Path) -> None:
         (root / "lib" / "l10n").mkdir(parents=True)
         (root / "lib" / "models").mkdir(parents=True)
-        (root / "lib" / "presentation").mkdir(parents=True)
+        (root / "lib" / "providers").mkdir(parents=True)
         (root / "lib" / "ui").mkdir(parents=True)
         (root / "test" / "models").mkdir(parents=True)
         (root / "test" / "ui").mkdir(parents=True)
@@ -72,7 +72,7 @@ class TestTierTaskDev(unittest.TestCase):
         (root / "README.md").write_text("# TierTask\n\n## Overview\n\nSummary text.\n", encoding="utf-8")
         (root / "AGENTS.md").write_text("# TierTask AI Agent Rules\n\n## 1. Core Principles\n", encoding="utf-8")
         (root / "CHANGELOG.md").write_text("# Changelog\n\n## [Unreleased]\n", encoding="utf-8")
-        (root / "spec" / "TDF_SPEC_0.6.0.md").write_text(
+        (root / "spec" / "TDF_SPEC_0.8.0.md").write_text(
             "# TierTask Data Format\n\n## 1. Introduction\nText.\n\n### 1.1 Scope\nMore text.\n",
             encoding="utf-8",
         )
@@ -105,22 +105,24 @@ class TestTierTaskDev(unittest.TestCase):
         )
         (root / "lib" / "models" / "sample_model.dart").write_text(model_code, encoding="utf-8")
 
-        pres_code = (
+        provider_code = (
             GPL_HEADER
             + "\nimport '../models/sample_model.dart';\n\n"
-            + "/// Sample presentation model.\nclass SampleViewModel {\n"
-            + "  /// Creates a sample view model.\n  const SampleViewModel(this.model);\n\n"
+            + "/// Sample state holder.\nclass SampleState {\n"
+            + "  /// Creates a sample state.\n  const SampleState(this.model);\n\n"
             + "  /// Model reference.\n  final SampleModel model;\n}\n"
         )
-        (root / "lib" / "presentation" / "sample_view_model.dart").write_text(pres_code, encoding="utf-8")
+        (root / "lib" / "providers" / "sample_provider.dart").write_text(provider_code, encoding="utf-8")
 
         ui_code = (
             GPL_HEADER
             + "\nimport '../l10n/app_localizations.dart';\n"
-            + "import '../presentation/sample_view_model.dart';\n\n"
+            + "import '../models/sample_model.dart';\n"
+            + "import '../providers/sample_provider.dart';\n\n"
             + "/// Sample screen.\nclass SampleScreen {\n"
-            + "  /// Creates a sample screen.\n  const SampleScreen(this.viewModel);\n\n"
-            + "  /// Presentation model reference.\n  final SampleViewModel viewModel;\n\n"
+            + "  /// Creates a sample screen.\n  const SampleScreen(this.state, this.model);\n\n"
+            + "  /// State reference.\n  final SampleState state;\n\n"
+            + "  /// Direct domain model reference.\n  final SampleModel model;\n\n"
             + "  /// Resolves localized title.\n  String title(AppLocalizations localizations) => localizations.appTitle;\n}\n"
         )
         (root / "lib" / "ui" / "sample_screen.dart").write_text(ui_code, encoding="utf-8")
@@ -156,14 +158,23 @@ class TestTierTaskDev(unittest.TestCase):
 
 ```text
 tiertask/
+├── AGENTS.md
+├── ARCHITECTURE.md
+├── CHANGELOG.md
+├── README.md
+├── analysis_options.yaml
+├── l10n.yaml
+├── pubspec.yaml
+├── spec/
+│   └── TDF_SPEC_0.8.0.md
 ├── lib/
 │   ├── l10n/
 │   │   ├── app_de.arb
 │   │   └── app_en.arb
 │   ├── models/
 │   │   └── sample_model.dart
-│   ├── presentation/
-│   │   └── sample_view_model.dart
+│   ├── providers/
+│   │   └── sample_provider.dart
 │   └── ui/
 │       └── sample_screen.dart
 └── test/
@@ -200,12 +211,12 @@ tiertask/
 
 | File | Function |
 | :--- | :--- |
+| `lib/providers/sample_provider.dart` | Holds `SampleState`. |
 
-## Presentation
+## Design System
 
 | File | Function |
 | :--- | :--- |
-| `lib/presentation/sample_view_model.dart` | Projects `SampleViewModel`. |
 
 ## User Interface
 
@@ -215,8 +226,107 @@ tiertask/
 """
         (root / "ARCHITECTURE.md").write_text(arch_md, encoding="utf-8")
 
+    def _build_minimal_design_system(self, root: Path) -> None:
+        for sub in (
+            "lib/ui/tokens",
+            "lib/ui/primitives",
+            "lib/ui/layout",
+            "lib/ui/components",
+            "test/ui/tokens",
+            "test/ui/primitives",
+        ):
+            (root / sub).mkdir(parents=True, exist_ok=True)
+
+        (root / "lib" / "ui" / "tokens" / "ui_focus_tokens.dart").write_text(
+            GPL_HEADER + "\n/// Focus tokens.\nclass UiFocusTokens {}\n",
+            encoding="utf-8",
+        )
+        (root / "lib" / "ui" / "tokens" / "custom_token.dart").write_text(
+            GPL_HEADER + "\n/// Custom token helper.\nclass CustomToken {}\n",
+            encoding="utf-8",
+        )
+        (root / "lib" / "ui" / "tokens" / "ui_theme_tokens.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'custom_token.dart';\n"
+            + "import 'ui_focus_tokens.dart';\n\n"
+            + "/// Theme tokens.\nclass UiThemeTokens {\n"
+            + "  /// Creates theme tokens.\n  const UiThemeTokens(this.focus, this.custom);\n"
+            + "  /// Focus tokens.\n  final UiFocusTokens focus;\n"
+            + "  /// Custom token.\n  final CustomToken custom;\n}\n",
+            encoding="utf-8",
+        )
+        (root / "lib" / "ui" / "primitives" / "ui_button.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../tokens/ui_theme_tokens.dart';\n\n"
+            + "/// Button primitive.\nclass UiButton {\n"
+            + "  /// Creates a button.\n  const UiButton(this.tokens);\n"
+            + "  /// Theme tokens.\n  final UiThemeTokens tokens;\n}\n",
+            encoding="utf-8",
+        )
+        (root / "lib" / "ui" / "layout" / "ui_page_header.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../primitives/ui_button.dart';\n"
+            + "import '../tokens/ui_theme_tokens.dart';\n\n"
+            + "/// Page header layout.\nclass UiPageHeader {\n"
+            + "  /// Creates a page header.\n  const UiPageHeader(this.button, this.tokens);\n"
+            + "  /// Action button.\n  final UiButton button;\n"
+            + "  /// Theme tokens.\n  final UiThemeTokens tokens;\n}\n",
+            encoding="utf-8",
+        )
+        (root / "lib" / "ui" / "components" / "ui_dialog_frame.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../layout/ui_page_header.dart';\n"
+            + "import '../primitives/ui_button.dart';\n"
+            + "import '../tokens/ui_theme_tokens.dart';\n\n"
+            + "/// Dialog frame composite.\nclass UiDialogFrame {\n"
+            + "  /// Creates a dialog frame.\n  const UiDialogFrame(this.header, this.button, this.tokens);\n"
+            + "  /// Header layout.\n  final UiPageHeader header;\n"
+            + "  /// Primary button.\n  final UiButton button;\n"
+            + "  /// Theme tokens.\n  final UiThemeTokens tokens;\n}\n",
+            encoding="utf-8",
+        )
+        (root / "test" / "ui" / "tokens" / "ui_theme_tokens_test.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'package:flutter_test/flutter_test.dart';\n"
+            + "import 'package:tiertask/ui/tokens/custom_token.dart';\n"
+            + "import 'package:tiertask/ui/tokens/ui_focus_tokens.dart';\n"
+            + "import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';\n\n"
+            + "void main() {\n"
+            + "  test('checks UiThemeTokens, UiFocusTokens, and CustomToken', () {\n"
+            + "    const tokens = UiThemeTokens(UiFocusTokens(), CustomToken());\n"
+            + "    expect(tokens.focus, isA<UiFocusTokens>());\n"
+            + "  });\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+        (root / "test" / "ui" / "primitives" / "ui_button_test.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'package:flutter_test/flutter_test.dart';\n"
+            + "import 'package:tiertask/ui/primitives/ui_button.dart';\n"
+            + "import 'package:tiertask/ui/tokens/custom_token.dart';\n"
+            + "import 'package:tiertask/ui/tokens/ui_focus_tokens.dart';\n"
+            + "import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';\n\n"
+            + "void main() {\n"
+            + "  testWidgets('renders UiButton', (tester) async {\n"
+            + "    expect(const UiButton(UiThemeTokens(UiFocusTokens(), CustomToken())), isNotNull);\n"
+            + "  });\n"
+            + "}\n",
+            encoding="utf-8",
+        )
+
+        for rel_path, desc in (
+            ("lib/ui/tokens/custom_token.dart", "Custom token helper."),
+            ("lib/ui/tokens/ui_focus_tokens.dart", "Focus tokens."),
+            ("lib/ui/tokens/ui_theme_tokens.dart", "Theme tokens."),
+            ("lib/ui/primitives/ui_button.dart", "Button primitive."),
+            ("lib/ui/layout/ui_page_header.dart", "Page header layout."),
+            ("lib/ui/components/ui_dialog_frame.dart", "Dialog frame composite."),
+        ):
+            tiertask_dev.set_architecture_row(root, rel_path, desc)
+        tiertask_dev.sync_architecture_tree(root)
+
     def test_outline_markdown_and_dart_signatures(self) -> None:
-        md_out = tiertask_dev.outline_file(self.root, self.root / "spec" / "TDF_SPEC_0.6.0.md")
+        md_out = tiertask_dev.outline_file(self.root, self.root / "spec" / "TDF_SPEC_0.8.0.md")
         self.assertIn("1-7: # TierTask Data Format", md_out)
         self.assertIn("3-7: ## 1. Introduction", md_out)
         self.assertIn("6-7: ### 1.1 Scope", md_out)
@@ -238,12 +348,15 @@ tiertask/
         self.assertTrue(any("lib/l10n/app_en.arb" in m for m in arb_matches))
 
         spec_matches = tiertask_dev.find_in_repo(self.root, "Scope")
-        self.assertTrue(any("spec/TDF_SPEC_0.6.0.md" in m for m in spec_matches))
+        self.assertTrue(any("spec/TDF_SPEC_0.8.0.md" in m for m in spec_matches))
 
         ui_spec = self.root / "spec" / "UI_DESIGN_SYSTEM.md"
         ui_spec.write_text("# UI Design System\n\n## 2. Surface Hierarchy\n", encoding="utf-8")
         ui_spec_matches = tiertask_dev.find_in_repo(self.root, "Surface Hierarchy", layer="spec")
         self.assertTrue(any("spec/UI_DESIGN_SYSTEM.md" in m for m in ui_spec_matches))
+
+        provider_matches = tiertask_dev.find_in_repo(self.root, "SampleState", layer="providers")
+        self.assertTrue(any("lib/providers/sample_provider.dart" in m for m in provider_matches))
 
     def test_deps_computes_transitive_reverse_dependencies(self) -> None:
         info = tiertask_dev.compute_dependencies(self.root, "lib/models/sample_model.dart")
@@ -255,13 +368,13 @@ tiertask/
             GPL_HEADER + "\nclass UnmirroredHelper {}\n",
             encoding="utf-8",
         )
-        pres_vm = self.root / "lib" / "presentation" / "sample_view_model.dart"
-        pres_vm.write_text(
+        provider_file = self.root / "lib" / "providers" / "sample_provider.dart"
+        provider_file.write_text(
             GPL_HEADER
             + "\nimport '../models/sample_model.dart';\n"
             + "import '../models/unmirrored_helper.dart';\n\n"
-            + "class SampleViewModel {\n"
-            + "  const SampleViewModel(this.model, this.helper);\n"
+            + "class SampleState {\n"
+            + "  const SampleState(this.model, this.helper);\n"
             + "  final SampleModel model;\n"
             + "  final UnmirroredHelper helper;\n"
             + "}\n",
@@ -288,7 +401,6 @@ tiertask/
         self.assertIn("@greetUser", en_data)
         self.assertIn("userName", en_data["@greetUser"]["placeholders"])
         self.assertIn("count", en_data["@greetUser"]["placeholders"])
-        # Wire caller in lib/ui/sample_screen.dart so live-usage audit passes cleanly.
         ui_file = self.root / "lib" / "ui" / "sample_screen.dart"
         ui_file.write_text(
             ui_file.read_text(encoding="utf-8") + "\nString greet(dynamic l10n) => l10n.greetUser('a', '1');\n",
@@ -322,6 +434,18 @@ tiertask/
         created = self.root / "lib" / "services" / "sample_service.dart"
         self.assertTrue(created.exists())
         self.assertTrue(created.read_text(encoding="utf-8").startswith("// TierTask"))
+        self.assertEqual(tiertask_dev.audit_architecture(self.root), [])
+
+        tiertask_dev.scaffold_file(
+            self.root,
+            "lib/ui/primitives/ui_pill.dart",
+            description="Defines `UiPill` badge and chip primitive.",
+        )
+        pill_file = self.root / "lib" / "ui" / "primitives" / "ui_pill.dart"
+        self.assertTrue(pill_file.exists())
+        arch_text = (self.root / "ARCHITECTURE.md").read_text(encoding="utf-8")
+        ds_section = arch_text.split("## Design System", 1)[1].split("## User Interface", 1)[0]
+        self.assertIn("`lib/ui/primitives/ui_pill.dart`", ds_section)
         self.assertEqual(tiertask_dev.audit_architecture(self.root), [])
 
     def test_static_checks_detect_license_ignore_io_and_markdown_hr(self) -> None:
@@ -407,7 +531,7 @@ tiertask/
                 run_codegen=False,
             )
 
-    def test_layer_ranks_and_presentation_dag_boundaries(self) -> None:
+    def test_eight_rank_dag_and_ui_repository_boundary(self) -> None:
         expected_ranks = [
             ("lib/services/app_logger.dart", 0),
             ("lib/models/sample_model.dart", 1),
@@ -415,9 +539,9 @@ tiertask/
             ("lib/services/tdf_service.dart", 3),
             ("lib/repositories/local_file_repository.dart", 4),
             ("lib/providers/task_providers.dart", 5),
-            ("lib/presentation/settings_controller.dart", 6),
-            ("lib/ui/tier_task_shell_screen.dart", 7),
-            ("lib/main.dart", 8),
+            ("lib/ui/tier_task_shell_screen.dart", 6),
+            ("lib/ui/tokens/ui_theme_tokens.dart", 6),
+            ("lib/main.dart", 7),
         ]
         for rel_path, expected in expected_ranks:
             self.assertEqual(
@@ -425,12 +549,11 @@ tiertask/
                 expected,
                 f"Unexpected rank for {rel_path}",
             )
+        self.assertIsNone(tiertask_dev._lib_layer_rank("lib/presentation/settings_controller.dart"))
         self.assertIsNone(tiertask_dev._lib_layer_rank("lib/ui_v2/tier_task_shell_screen.dart"))
 
         (self.root / "lib" / "services").mkdir(parents=True, exist_ok=True)
         (self.root / "lib" / "repositories").mkdir(parents=True, exist_ok=True)
-        (self.root / "lib" / "providers").mkdir(parents=True, exist_ok=True)
-        (self.root / "lib" / "presentation").mkdir(parents=True, exist_ok=True)
 
         (self.root / "lib" / "services" / "app_logger.dart").write_text(
             GPL_HEADER + "\nclass AppLogger {}\n",
@@ -444,535 +567,365 @@ tiertask/
             GPL_HEADER + "\nimport 'dart:ffi';\nimport 'dart:io';\nclass LocalRepo {}\n",
             encoding="utf-8",
         )
-        (self.root / "lib" / "presentation" / "sample_controller.dart").write_text(
-            GPL_HEADER + "\nimport '../ui/sample_screen.dart';\nclass SampleController {}\n",
-            encoding="utf-8",
-        )
-        (self.root / "lib" / "providers" / "sample_provider.dart").write_text(
-            GPL_HEADER
-            + "\nimport '../presentation/sample_controller.dart';\n"
-            + "class SampleProvider {}\n",
-            encoding="utf-8",
-        )
         (self.root / "lib" / "l10n" / "tier_localization_extension.dart").write_text(
             GPL_HEADER + "\nclass TierExt {}\n",
             encoding="utf-8",
         )
-        (self.root / "lib" / "ui" / "bad_ui.dart").write_text(
+        (self.root / "lib" / "main.dart").write_text(
+            GPL_HEADER + "\nimport 'ui/sample_screen.dart';\nclass TierTaskApp {}\n",
+            encoding="utf-8",
+        )
+        # Valid app UI file freely importing models, l10n, services, providers, and flutter_riverpod.
+        (self.root / "lib" / "ui" / "good_ui.dart").write_text(
             GPL_HEADER
-            + "\nimport '../l10n/tier_localization_extension.dart';\n"
+            + "\nimport 'package:flutter_riverpod/flutter_riverpod.dart';\n\n"
+            + "import '../l10n/app_localizations.dart';\n"
+            + "import '../l10n/tier_localization_extension.dart';\n"
             + "import '../models/sample_model.dart';\n"
             + "import '../providers/sample_provider.dart';\n"
-            + "import '../repositories/local_repo.dart';\n"
             + "import '../services/app_logger.dart';\n"
-            + "import '../services/tdf_service.dart';\n"
+            + "import '../services/tdf_service.dart';\n\n"
+            + "class GoodUi {}\n",
+            encoding="utf-8",
+        )
+        # Invalid UI file directly importing lib/repositories/ (existing and non-existent) and upward lib/main.dart.
+        (self.root / "lib" / "ui" / "bad_ui.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../main.dart';\n"
+            + "import '../repositories/local_repo.dart';\n"
+            + "import '../repositories/missing_repo.dart';\n\n"
             + "class BadUi {}\n",
+            encoding="utf-8",
+        )
+        # Invalid upward provider -> ui import.
+        (self.root / "lib" / "providers" / "bad_provider.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../ui/sample_screen.dart';\n\n"
+            + "class BadProvider {}\n",
             encoding="utf-8",
         )
 
         dag_issues = tiertask_dev._check_acyclic_dag(self.root)
         joined = "\n".join(dag_issues)
-        self.assertIn("lib/presentation/sample_controller.dart -> lib/ui/sample_screen.dart", joined)
-        self.assertIn("lib/providers/sample_provider.dart -> lib/presentation/sample_controller.dart", joined)
+        self.assertNotIn("lib/ui/good_ui.dart", joined)
         self.assertIn("P-UDF-ARCHITECTURE", joined)
-        self.assertIn("lib/ui/bad_ui.dart -> lib/l10n/tier_localization_extension.dart", joined)
-        self.assertIn("lib/ui/bad_ui.dart -> lib/models/sample_model.dart", joined)
-        self.assertIn("lib/ui/bad_ui.dart -> lib/providers/sample_provider.dart", joined)
         self.assertIn("lib/ui/bad_ui.dart -> lib/repositories/local_repo.dart", joined)
-        self.assertIn("lib/ui/bad_ui.dart -> lib/services/app_logger.dart", joined)
-        self.assertIn("lib/ui/bad_ui.dart -> lib/services/tdf_service.dart", joined)
+        self.assertIn("lib/ui/bad_ui.dart -> lib/main.dart", joined)
+        self.assertIn("(rank 6 -> 7)", joined)
+        self.assertIn("lib/providers/bad_provider.dart -> lib/ui/sample_screen.dart", joined)
+        self.assertIn("(rank 5 -> 6)", joined)
 
-    def test_static_checks_enforce_extended_io_isolation_and_ui_provider_ban(self) -> None:
-        (self.root / "lib" / "presentation").mkdir(parents=True, exist_ok=True)
-        (self.root / "lib" / "providers").mkdir(parents=True, exist_ok=True)
-        (self.root / "lib" / "repositories").mkdir(parents=True, exist_ok=True)
+        static_joined = "\n".join(tiertask_dev.run_static_checks(self.root, fix=False))
+        self.assertIn("lib/ui/bad_ui.dart -> lib/repositories/missing_repo.dart", static_joined)
 
-        (self.root / "lib" / "presentation" / "bad_pres.dart").write_text(
-            GPL_HEADER + "\nimport 'dart:io';\nimport 'dart:ffi';\nclass BadPres {}\n",
-            encoding="utf-8",
-        )
-        (self.root / "lib" / "providers" / "bad_prov.dart").write_text(
-            GPL_HEADER + "\nimport 'dart:io';\nimport 'dart:ffi';\nclass BadProv {}\n",
-            encoding="utf-8",
-        )
-        (self.root / "lib" / "repositories" / "good_repo.dart").write_text(
-            GPL_HEADER + "\nimport 'dart:io';\nimport 'dart:ffi';\nclass GoodRepo {}\n",
-            encoding="utf-8",
-        )
-        (self.root / "lib" / "ui" / "bad_providers_ui.dart").write_text(
-            GPL_HEADER
-            + "\n// Comment mentioning localFileRepositoryProvider is allowed.\n"
-            + "void bad(dynamic ref) {\n"
-            + "  ref.read(appVersionRepositoryProvider);\n"
-            + "  ref.read(directoryPickerProvider);\n"
-            + "  ref.read(filePickerProvider);\n"
-            + "  ref.read(linkLauncherRepositoryProvider);\n"
-            + "  ref.read(localFileRepositoryProvider);\n"
-            + "  ref.read(locationRepositoryProvider);\n"
-            + "  ref.read(settingsRepositoryProvider);\n"
-            + "  ref.read(supportsDesktopWindowControlsProvider);\n"
-            + "  ref.read(supportsDirectoryPickerProvider);\n"
-            + "  ref.read(tdfServiceProvider);\n"
-            + "  ref.read(webDavRepositoryProvider);\n"
-            + "  ref.read(windowControlRepositoryProvider);\n"
-            + "}\n",
-            encoding="utf-8",
-        )
-
-        issues = tiertask_dev.run_static_checks(self.root, fix=False)
-        joined = "\n".join(issues)
-        io_issues = [i for i in issues if i.startswith("P-IO-ISOLATION:")]
-        self.assertIn("P-IO-ISOLATION: Forbidden `dart:io` import in `lib/presentation/bad_pres.dart", joined)
-        self.assertIn("P-IO-ISOLATION: Forbidden `dart:ffi` import in `lib/presentation/bad_pres.dart", joined)
-        self.assertIn("P-IO-ISOLATION: Forbidden `dart:io` import in `lib/providers/bad_prov.dart", joined)
-        self.assertIn("P-IO-ISOLATION: Forbidden `dart:ffi` import in `lib/providers/bad_prov.dart", joined)
-        self.assertFalse(any("lib/repositories/good_repo.dart" in i for i in io_issues))
-
-        for provider_name in (
-            "appVersionRepositoryProvider",
-            "directoryPickerProvider",
-            "filePickerProvider",
-            "linkLauncherRepositoryProvider",
-            "localFileRepositoryProvider",
-            "locationRepositoryProvider",
-            "settingsRepositoryProvider",
-            "supportsDesktopWindowControlsProvider",
-            "supportsDirectoryPickerProvider",
-            "tdfServiceProvider",
-            "webDavRepositoryProvider",
-            "windowControlRepositoryProvider",
-        ):
-            self.assertIn(
-                f"P-UDF-ARCHITECTURE: Forbidden `{provider_name}` reference in `lib/ui/bad_providers_ui.dart",
-                joined,
+    def test_design_system_layer_ranks_acyclic_dag_and_independence(self) -> None:
+        expected_ds_ranks = [
+            ("lib/ui/tokens/ui_color_tokens.dart", 0),
+            ("lib/ui/primitives/ui_button.dart", 1),
+            ("lib/ui/layout/ui_page_header.dart", 2),
+            ("lib/ui/components/ui_dialog_frame.dart", 3),
+            ("lib/ui/widgets/entity_note_section.dart", None),
+            ("lib/ui/dialogs/workspaces_modal.dart", None),
+            ("lib/ui/views/tasks_view.dart", None),
+            ("lib/ui/tier_task_shell_screen.dart", None),
+            ("lib/ui/ui_domain_mappers.dart", None),
+            ("lib/models/sample_model.dart", None),
+        ]
+        for rel_path, expected in expected_ds_ranks:
+            self.assertEqual(
+                tiertask_dev._design_system_layer_rank(rel_path),
+                expected,
+                f"Unexpected design-system rank for {rel_path}",
             )
-        # Comment line (line 16) must not be flagged.
-        self.assertNotIn("lib/ui/bad_providers_ui.dart:16", joined)
 
-    def test_presentation_arch_section_and_find_layer(self) -> None:
-        self.assertEqual(
-            tiertask_dev._layer_section_for_path("lib/presentation/ui_telemetry.dart"),
-            "## Presentation",
-        )
-        tiertask_dev.scaffold_file(
-            self.root,
-            "lib/presentation/sample_controller.dart",
-            description="Presentation `SampleController`.",
-        )
-        (self.root / "lib" / "presentation" / "sample_controller.dart").write_text(
-            GPL_HEADER + "\nclass SampleController {}\n",
-            encoding="utf-8",
-        )
-        self.assertEqual(tiertask_dev.audit_architecture(self.root), [])
-        matches = tiertask_dev.find_in_repo(
-            self.root,
-            "SampleController",
-            layer="presentation",
-        )
-        self.assertTrue(
-            any("lib/presentation/sample_controller.dart" in m for m in matches)
-        )
-
-    def _build_minimal_ui_package(self, root: Path) -> None:
-        ui_root = root / "packages" / "tiertask_ui"
-        for sub in (
-            "lib/src/tokens",
-            "lib/src/primitives",
-            "lib/src/layout",
-            "lib/src/components",
-            "test/tokens",
-            "test/primitives",
-            "example/lib",
-            "example/test",
-            "example/linux/runner",
-            "build/cache",
-            "example/build/linux",
-            "example/linux/flutter/ephemeral",
-        ):
-            (ui_root / sub).mkdir(parents=True, exist_ok=True)
-
-        (ui_root / "pubspec.yaml").write_text(
-            "name: tiertask_ui\npublish_to: none\ndependencies:\n  flutter:\n    sdk: flutter\n  material_ui: ^1.11.1\n",
-            encoding="utf-8",
-        )
-        (ui_root / "analysis_options.yaml").write_text(
-            "include: package:flutter_lints/flutter.yaml\n",
-            encoding="utf-8",
-        )
-        (ui_root / "pubspec.lock").write_text("# lockfile\n", encoding="utf-8")
-        (ui_root / "build" / "cache" / "artifact.dart").write_text("// ignore\n", encoding="utf-8")
-        (ui_root / "example" / "pubspec.yaml").write_text(
-            "name: tiertask_ui_example\npublish_to: none\ndependencies:\n  flutter:\n    sdk: flutter\n  tiertask_ui:\n    path: ..\n",
-            encoding="utf-8",
-        )
-        (ui_root / "example" / "analysis_options.yaml").write_text(
-            "include: package:flutter_lints/flutter.yaml\n",
-            encoding="utf-8",
-        )
-        (ui_root / "example" / "pubspec.lock").write_text("# lockfile\n", encoding="utf-8")
-        (ui_root / "example" / "linux" / "CMakeLists.txt").write_text("# cmake\n", encoding="utf-8")
-        (ui_root / "example" / "linux" / "runner" / "main.cc").write_text("// cc\n", encoding="utf-8")
-
-        (ui_root / "lib" / "src" / "tokens" / "ui_focus_tokens.dart").write_text(
-            GPL_HEADER + "\n/// Focus tokens.\nclass UiFocusTokens {}\n",
-            encoding="utf-8",
-        )
-        (ui_root / "lib" / "src" / "tokens" / "ui_theme_tokens.dart").write_text(
-            GPL_HEADER
-            + "\nimport 'ui_focus_tokens.dart';\n\n"
-            + "/// Theme tokens.\nclass UiThemeTokens {\n"
-            + "  /// Creates theme tokens.\n  const UiThemeTokens(this.focus);\n"
-            + "  /// Focus tokens.\n  final UiFocusTokens focus;\n}\n",
-            encoding="utf-8",
-        )
-        (ui_root / "lib" / "src" / "primitives" / "ui_button.dart").write_text(
-            GPL_HEADER
-            + "\nimport '../tokens/ui_theme_tokens.dart';\n\n"
-            + "/// Button primitive.\nclass UiButton {\n"
-            + "  /// Creates a button.\n  const UiButton(this.tokens);\n"
-            + "  /// Theme tokens.\n  final UiThemeTokens tokens;\n}\n",
-            encoding="utf-8",
-        )
-        (ui_root / "lib" / "tiertask_ui.dart").write_text(
-            GPL_HEADER
-            + "\nexport 'src/primitives/ui_button.dart';\n"
-            + "export 'src/tokens/ui_focus_tokens.dart';\n"
-            + "export 'src/tokens/ui_theme_tokens.dart';\n",
-            encoding="utf-8",
-        )
-        (ui_root / "test" / "test_helpers.dart").write_text(
-            GPL_HEADER
-            + "\nimport 'package:tiertask_ui/tiertask_ui.dart';\n\n"
-            + "UiThemeTokens defaultTokens() => const UiThemeTokens(UiFocusTokens());\n",
-            encoding="utf-8",
-        )
-        (ui_root / "test" / "tokens" / "ui_theme_tokens_test.dart").write_text(
-            GPL_HEADER
-            + "\nimport 'package:flutter_test/flutter_test.dart';\n"
-            + "import 'package:tiertask_ui/tiertask_ui.dart';\n"
-            + "import '../test_helpers.dart';\n\n"
-            + "void main() {\n"
-            + "  test('checks UiThemeTokens and UiFocusTokens', () {\n"
-            + "    expect(defaultTokens().focus, isA<UiFocusTokens>());\n"
-            + "  });\n"
-            + "}\n",
-            encoding="utf-8",
-        )
-        (ui_root / "test" / "primitives" / "ui_button_test.dart").write_text(
-            GPL_HEADER
-            + "\nimport 'package:flutter_test/flutter_test.dart';\n"
-            + "import 'package:tiertask_ui/tiertask_ui.dart';\n"
-            + "import '../test_helpers.dart';\n\n"
-            + "void main() {\n"
-            + "  testWidgets('renders UiButton', (tester) async {\n"
-            + "    expect(UiButton(defaultTokens()), isNotNull);\n"
-            + "  });\n"
-            + "}\n",
-            encoding="utf-8",
-        )
-        (ui_root / "example" / "lib" / "main.dart").write_text(
-            GPL_HEADER
-            + "\nimport 'package:tiertask_ui/tiertask_ui.dart';\n\n"
-            + "void main() {\n"
-            + "  const UiButton(UiThemeTokens(UiFocusTokens()));\n"
-            + "}\n",
-            encoding="utf-8",
-        )
-        (ui_root / "example" / "test" / "gallery_smoke_test.dart").write_text(
-            GPL_HEADER
-            + "\nimport 'package:flutter_test/flutter_test.dart';\n"
-            + "import 'package:tiertask_ui/tiertask_ui.dart';\n\n"
-            + "void main() {\n"
-            + "  testWidgets('gallery renders', (tester) async {\n"
-            + "    expect(const UiFocusTokens(), isNotNull);\n"
-            + "  });\n"
-            + "}\n",
-            encoding="utf-8",
-        )
-
-        arch_path = root / "ARCHITECTURE.md"
-        arch_text = arch_path.read_text(encoding="utf-8")
-        arch_text += (
-            "\n## UI Component Library\n\n"
-            "| File | Function |\n"
-            "| :--- | :--- |\n"
-            "| `packages/tiertask_ui/lib/tiertask_ui.dart` | Public UI library barrel. |\n"
-            "| `packages/tiertask_ui/lib/src/tokens/ui_focus_tokens.dart` | Focus tokens. |\n"
-            "| `packages/tiertask_ui/lib/src/tokens/ui_theme_tokens.dart` | Theme tokens. |\n"
-            "| `packages/tiertask_ui/lib/src/primitives/ui_button.dart` | Button primitive. |\n"
-        )
-        arch_path.write_text(arch_text, encoding="utf-8")
-        tiertask_dev.sync_architecture_tree(root)
-
-    def test_ui_package_barrel_carveout_and_isolation_checks(self) -> None:
-        self._build_minimal_ui_package(self.root)
+        self._build_minimal_design_system(self.root)
         self.assertEqual(tiertask_dev.run_static_checks(self.root, fix=False), [])
 
-        ui_root = self.root / "packages" / "tiertask_ui"
-        # Nested export inside lib/src/ must be rejected.
-        (ui_root / "lib" / "src" / "primitives" / "bad_export.dart").write_text(
-            GPL_HEADER + "\nexport '../tokens/ui_focus_tokens.dart';\n",
-            encoding="utf-8",
-        )
-        # Forbidden domain, riverpod, io, ffi, and HttpClient references.
-        (ui_root / "lib" / "src" / "primitives" / "bad_isolation.dart").write_text(
+        # Upward design-system imports across all 3 rank boundaries: 0->1, 1->2, 2->3.
+        (self.root / "lib" / "ui" / "tokens" / "ui_focus_tokens.dart").write_text(
             GPL_HEADER
-            + "\nimport 'dart:ffi';\n"
-            + "import 'dart:io';\n"
-            + "import 'package:flutter_riverpod/flutter_riverpod.dart';\n"
-            + "import 'package:tiertask/models/sample_model.dart';\n"
-            + "void bad() { HttpClient(); }\n",
-            encoding="utf-8",
-        )
-        # Forbidden package:tiertask_ui/src/ import in test/ and example/.
-        (ui_root / "test" / "primitives" / "ui_button_test.dart").write_text(
-            GPL_HEADER
-            + "\nimport 'package:tiertask_ui/src/tokens/ui_focus_tokens.dart';\n"
-            + "void main() {}\n",
-            encoding="utf-8",
-        )
-        (ui_root / "example" / "lib" / "main.dart").write_text(
-            GPL_HEADER
-            + "\nimport 'package:tiertask_ui/src/primitives/ui_button.dart';\n"
-            + "void main() {}\n",
-            encoding="utf-8",
-        )
-        # Forbidden pubspec dependency in packages/tiertask_ui/pubspec.yaml.
-        (ui_root / "pubspec.yaml").write_text(
-            "name: tiertask_ui\ndependencies:\n  tiertask:\n    path: ../..\n  flutter_riverpod: ^3.5.0\n",
-            encoding="utf-8",
-        )
-
-        issues = tiertask_dev.run_static_checks(self.root, fix=False)
-        joined = "\n".join(issues)
-        self.assertIn("packages/tiertask_ui/lib/src/primitives/bad_export.dart", joined)
-        self.assertIn("P-FILE-SIZE", joined)
-        self.assertIn("packages/tiertask_ui/lib/src/primitives/bad_isolation.dart", joined)
-        self.assertIn("dart:io", joined)
-        self.assertIn("dart:ffi", joined)
-        self.assertIn("package:tiertask/", joined)
-        self.assertIn("package:flutter_riverpod/", joined)
-        self.assertIn("HttpClient", joined)
-        self.assertIn("packages/tiertask_ui/test/primitives/ui_button_test.dart", joined)
-        self.assertIn("packages/tiertask_ui/example/lib/main.dart", joined)
-        self.assertIn("packages/tiertask_ui/pubspec.yaml", joined)
-
-    def test_ui_package_internal_acyclic_dag(self) -> None:
-        self._build_minimal_ui_package(self.root)
-        ui_root = self.root / "packages" / "tiertask_ui"
-        # Upward import: tokens -> primitives and src -> tiertask_ui.dart.
-        (ui_root / "lib" / "src" / "tokens" / "ui_focus_tokens.dart").write_text(
-            GPL_HEADER
-            + "\nimport '../primitives/ui_button.dart';\n"
-            + "import '../../tiertask_ui.dart';\n"
+            + "\nimport '../primitives/ui_button.dart';\n\n"
             + "class UiFocusTokens {}\n",
             encoding="utf-8",
         )
-        # Cycle inside layout.
-        (ui_root / "lib" / "src" / "layout" / "a_layout.dart").write_text(
+        (self.root / "lib" / "ui" / "primitives" / "bad_prim.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../layout/ui_page_header.dart';\n\n"
+            + "class BadPrim {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "ui" / "layout" / "bad_layout.dart").write_text(
+            GPL_HEADER
+            + "\nimport '../components/ui_dialog_frame.dart';\n\n"
+            + "class BadLayout {}\n",
+            encoding="utf-8",
+        )
+        # Circular cycle inside layout.
+        (self.root / "lib" / "ui" / "layout" / "a_layout.dart").write_text(
             GPL_HEADER + "\nimport 'b_layout.dart';\nclass ALayout {}\n",
             encoding="utf-8",
         )
-        (ui_root / "lib" / "src" / "layout" / "b_layout.dart").write_text(
+        (self.root / "lib" / "ui" / "layout" / "b_layout.dart").write_text(
             GPL_HEADER + "\nimport 'a_layout.dart';\nclass BLayout {}\n",
             encoding="utf-8",
         )
 
-        dag_issues = tiertask_dev._check_acyclic_dag(self.root)
-        joined = "\n".join(dag_issues)
-        self.assertIn("ui_focus_tokens.dart -> packages/tiertask_ui/lib/src/primitives/ui_button.dart", joined)
-        self.assertIn("ui_focus_tokens.dart -> packages/tiertask_ui/lib/tiertask_ui.dart", joined)
-        self.assertIn("a_layout.dart", joined)
-        self.assertIn("b_layout.dart", joined)
+        # Create app UI and lower-layer targets to test P-DESIGN-SYSTEM-INDEPENDENCE.
+        for sub in ("lib/ui/widgets", "lib/ui/dialogs", "lib/ui/views", "lib/services", "lib/repositories"):
+            (self.root / sub).mkdir(parents=True, exist_ok=True)
+        for target_rel in (
+            "lib/ui/widgets/sample_widget.dart",
+            "lib/ui/dialogs/sample_dialog.dart",
+            "lib/ui/views/sample_view.dart",
+            "lib/ui/tier_task_shell_screen.dart",
+            "lib/ui/ui_domain_mappers.dart",
+            "lib/l10n/app_localizations.dart",
+            "lib/l10n/tier_localization_extension.dart",
+            "lib/services/app_logger.dart",
+            "lib/repositories/local_repo.dart",
+            "lib/main.dart",
+        ):
+            (self.root / target_rel).write_text(GPL_HEADER + "\nclass Stub {}\n", encoding="utf-8")
 
-    def test_ui_package_impacted_tests_partitioning_and_digest(self) -> None:
-        self._build_minimal_ui_package(self.root)
-        ui_root = self.root / "packages" / "tiertask_ui"
-
-        digest_before = tiertask_dev.compute_code_digest(self.root)
-        (ui_root / "pubspec.yaml").write_text(
-            (ui_root / "pubspec.yaml").read_text(encoding="utf-8") + "# tweak\n",
-            encoding="utf-8",
-        )
-        digest_after_pubspec = tiertask_dev.compute_code_digest(self.root)
-        self.assertNotEqual(digest_before, digest_after_pubspec)
-
-        (ui_root / "example" / "analysis_options.yaml").write_text(
-            "include: package:flutter_lints/flutter.yaml\n# tweak\n",
-            encoding="utf-8",
-        )
-        digest_after_example = tiertask_dev.compute_code_digest(self.root)
-        self.assertNotEqual(digest_after_pubspec, digest_after_example)
-
-        # Direct mirror resolution for UI primitive.
-        button_tests = tiertask_dev.resolve_impacted_tests(
-            self.root,
-            ["packages/tiertask_ui/lib/src/primitives/ui_button.dart"],
-        )
-        self.assertEqual(button_tests, ["packages/tiertask_ui/test/primitives/ui_button_test.dart"])
-
-        # Fallback resolution for unmirrored token sub-file.
-        focus_tests = tiertask_dev.resolve_impacted_tests(
-            self.root,
-            ["packages/tiertask_ui/lib/src/tokens/ui_focus_tokens.dart"],
-        )
-        self.assertIn("packages/tiertask_ui/test/tokens/ui_theme_tokens_test.dart", focus_tests)
-
-        # Barrel and test_helpers resolve dependent suites.
-        barrel_tests = tiertask_dev.resolve_impacted_tests(
-            self.root,
-            ["packages/tiertask_ui/lib/tiertask_ui.dart"],
-        )
-        self.assertIn("packages/tiertask_ui/test/primitives/ui_button_test.dart", barrel_tests)
-        self.assertIn("packages/tiertask_ui/test/tokens/ui_theme_tokens_test.dart", barrel_tests)
-
-        helper_tests = tiertask_dev.resolve_impacted_tests(
-            self.root,
-            ["packages/tiertask_ui/test/test_helpers.dart"],
-        )
-        self.assertIn("packages/tiertask_ui/test/primitives/ui_button_test.dart", helper_tests)
-
-        # Example changes resolve example/test suites.
-        example_tests = tiertask_dev.resolve_impacted_tests(
-            self.root,
-            ["packages/tiertask_ui/example/lib/main.dart"],
-        )
-        self.assertEqual(example_tests, ["packages/tiertask_ui/example/test/gallery_smoke_test.dart"])
-
-        # Partitioning produces package-relative paths per package root.
-        partitioned = tiertask_dev.partition_tests_by_package(
-            [
-                "test/models/sample_model_test.dart",
-                "packages/tiertask_ui/test/primitives/ui_button_test.dart",
-                "packages/tiertask_ui/example/test/gallery_smoke_test.dart",
-            ],
-        )
-        self.assertEqual(partitioned[Path(".")], ["test/models/sample_model_test.dart"])
-        self.assertEqual(
-            partitioned[Path("packages/tiertask_ui")],
-            ["test/primitives/ui_button_test.dart"],
-        )
-        self.assertEqual(
-            partitioned[Path("packages/tiertask_ui/example")],
-            ["test/gallery_smoke_test.dart"],
-        )
-        self.assertTrue(
-            tiertask_dev._is_code_relevant_change("packages/tiertask_ui/lib/src/primitives/ui_button.dart")
-        )
-
-    def test_ui_package_arch_outline_find_and_scaffold(self) -> None:
-        self._build_minimal_ui_package(self.root)
-        tree = tiertask_dev.generate_architecture_tree(self.root)
-        self.assertIn("packages/", tree)
-        self.assertIn("tiertask_ui/", tree)
-        self.assertIn("linux/", tree)
-        self.assertNotIn("CMakeLists.txt", tree)
-        self.assertNotIn("build/", tree)
-        self.assertNotIn("ephemeral/", tree)
-        self.assertNotIn("pubspec.lock", tree)
-
-        self.assertEqual(tiertask_dev.audit_architecture(self.root), [])
-
-        tiertask_dev.scaffold_file(
-            self.root,
-            "packages/tiertask_ui/lib/src/primitives/ui_pill.dart",
-            description="Defines `UiPill` badge and chip widget.",
-        )
-        self.assertTrue((self.root / "packages" / "tiertask_ui" / "lib" / "src" / "primitives" / "ui_pill.dart").exists())
-        self.assertEqual(tiertask_dev.audit_architecture(self.root), [])
-
-        # Outline classifies package tests as test files.
-        pkg_test_out = tiertask_dev.outline_file(
-            self.root,
-            self.root / "packages" / "tiertask_ui" / "test" / "primitives" / "ui_button_test.dart",
-        )
-        self.assertIn("testWidgets('renders UiButton')", pkg_test_out)
-        ex_test_out = tiertask_dev.outline_file(
-            self.root,
-            self.root / "packages" / "tiertask_ui" / "example" / "test" / "gallery_smoke_test.dart",
-        )
-        self.assertIn("testWidgets('gallery renders')", ex_test_out)
-
-        # Find includes packages/tiertask_ui/ when layer is None or ui_pkg.
-        all_matches = tiertask_dev.find_in_repo(self.root, "UiButton")
-        self.assertTrue(any("packages/tiertask_ui/lib/src/primitives/ui_button.dart" in m for m in all_matches))
-        pkg_matches = tiertask_dev.find_in_repo(self.root, "UiButton", layer="ui_pkg")
-        self.assertTrue(any("packages/tiertask_ui/lib/src/primitives/ui_button.dart" in m for m in pkg_matches))
-        other_matches = tiertask_dev.find_in_repo(self.root, "UiButton", layer="models")
-        self.assertEqual(other_matches, [])
-
-    def test_global_strict_rank7_ui_whitelist_transitional_dir_and_provider_decl_bans(self) -> None:
-        ui_file = self.root / "lib" / "ui" / "views" / "strict_view.dart"
-        ui_file.parent.mkdir(parents=True, exist_ok=True)
-        # Verify allowed vs rejected imports via _is_allowed_ui_import.
-        allowed_uris = (
-            "package:tiertask_ui/tiertask_ui.dart",
-            "package:flutter_riverpod/flutter_riverpod.dart",
-            "package:flutter/services.dart",
-            "package:material_ui/material_ui.dart",
-            "dart:async",
-            "dart:math",
-            "dart:ui",
-            "dart:collection",
-            "../../presentation/sample_view_model.dart",
-            "../sample_screen.dart",
-            "../../l10n/app_localizations.dart",
-        )
-        for uri in allowed_uris:
-            self.assertTrue(
-                tiertask_dev._is_allowed_ui_import(self.root, ui_file, uri),
-                f"Expected allowed Rank 7 UI import: {uri}",
-            )
-
-        forbidden_uris = (
-            "package:tiertask/presentation/sample_view_model.dart",
-            "package:tiertask_ui/src/primitives/ui_button.dart",
-            "package:http/http.dart",
-            "dart:io",
-            "dart:ffi",
-            "dart:isolate",
-            "../../models/sample_model.dart",
-            "../../services/app_logger.dart",
-            "../../repositories/local_file_repository.dart",
-            "../../providers/task_providers.dart",
-            "../../main.dart",
-            "../../l10n/app_localizations_en.dart",
-            "../../l10n/app_localizations_de.dart",
-            "../../l10n/tier_localization_extension.dart",
-            "../../l10n/storage_file_read_localization_extension.dart",
-        )
-        for uri in forbidden_uris:
-            self.assertFalse(
-                tiertask_dev._is_allowed_ui_import(self.root, ui_file, uri),
-                f"Expected forbidden Rank 7 UI import: {uri}",
-            )
-
-        # Write a UI file with forbidden imports and Riverpod provider/notifier declarations.
-        ui_file.write_text(
+        (self.root / "lib" / "ui" / "components" / "bad_independence.dart").write_text(
             GPL_HEADER
-            + "\nimport '../../models/sample_model.dart';\n"
-            + "import 'package:flutter_riverpod/flutter_riverpod.dart';\n\n"
-            + "// Comment mentioning Provider() or extends Notifier must not trigger.\n"
-            + "final leakedProvider = Provider<int>((ref) => 1);\n"
-            + "final leakedNotifier = NotifierProvider<_BadNotifier, int>(_BadNotifier.new);\n"
-            + "class _BadNotifier extends Notifier<int> {\n"
-            + "  @override int build() => 0;\n"
-            + "}\n",
+            + "\nimport 'dart:ffi';\n"
+            + "import 'dart:io';\n"
+            + "import 'package:flutter_riverpod/flutter_riverpod.dart';\n"
+            + "import 'package:tiertask/models/missing_model.dart';\n\n"
+            + "import '../dialogs/sample_dialog.dart';\n"
+            + "import '../tier_task_shell_screen.dart';\n"
+            + "import '../ui_domain_mappers.dart';\n"
+            + "import '../views/sample_view.dart';\n"
+            + "import '../widgets/sample_widget.dart';\n"
+            + "import '../../l10n/app_localizations.dart';\n"
+            + "import '../../l10n/tier_localization_extension.dart';\n"
+            + "import '../../main.dart';\n"
+            + "import '../../models/sample_model.dart';\n"
+            + "import '../../providers/sample_provider.dart';\n"
+            + "import '../../repositories/local_repo.dart';\n"
+            + "import '../../services/app_logger.dart';\n\n"
+            + "class BadIndependence {}\n",
             encoding="utf-8",
         )
-        # Empty transitional directories must also be rejected.
-        (self.root / "lib" / "ui_v2").mkdir(parents=True, exist_ok=True)
-        (self.root / "test" / "ui_v2").mkdir(parents=True, exist_ok=True)
+
+        dag_issues = tiertask_dev._check_acyclic_dag(self.root)
+        dag_joined = "\n".join(dag_issues)
+        self.assertIn(
+            "lib/ui/tokens/ui_focus_tokens.dart -> lib/ui/primitives/ui_button.dart",
+            dag_joined,
+        )
+        self.assertIn("(rank 0 -> 1)", dag_joined)
+        self.assertIn(
+            "lib/ui/primitives/bad_prim.dart -> lib/ui/layout/ui_page_header.dart",
+            dag_joined,
+        )
+        self.assertIn("(rank 1 -> 2)", dag_joined)
+        self.assertIn(
+            "lib/ui/layout/bad_layout.dart -> lib/ui/components/ui_dialog_frame.dart",
+            dag_joined,
+        )
+        self.assertIn("(rank 2 -> 3)", dag_joined)
+        cycle_lines = [i for i in dag_issues if "a_layout.dart" in i and "b_layout.dart" in i]
+        self.assertEqual(len(cycle_lines), 1)
+
+        static_issues = tiertask_dev.run_static_checks(self.root, fix=False)
+        joined = "\n".join(static_issues)
+        for forbidden_target in (
+            "lib/ui/widgets/sample_widget.dart",
+            "lib/ui/dialogs/sample_dialog.dart",
+            "lib/ui/views/sample_view.dart",
+            "lib/ui/tier_task_shell_screen.dart",
+            "lib/ui/ui_domain_mappers.dart",
+            "lib/models/sample_model.dart",
+            "lib/models/missing_model.dart",
+            "lib/l10n/app_localizations.dart",
+            "lib/l10n/tier_localization_extension.dart",
+            "lib/services/app_logger.dart",
+            "lib/repositories/local_repo.dart",
+            "lib/providers/sample_provider.dart",
+            "lib/main.dart",
+        ):
+            self.assertIn(
+                f"P-DESIGN-SYSTEM-INDEPENDENCE: Forbidden non-design-system import "
+                f"`lib/ui/components/bad_independence.dart -> {forbidden_target}`",
+                joined,
+            )
+        self.assertIn(
+            "P-DESIGN-SYSTEM-INDEPENDENCE: Forbidden `package:flutter_riverpod/flutter_riverpod.dart` import",
+            joined,
+        )
+        self.assertIn("P-DESIGN-SYSTEM-INDEPENDENCE: Forbidden `dart:io` import", joined)
+        self.assertIn("P-DESIGN-SYSTEM-INDEPENDENCE: Forbidden `dart:ffi` import", joined)
+        self.assertIn("P-IO-ISOLATION: Forbidden `dart:io` import", joined)
+        self.assertIn("P-IO-ISOLATION: Forbidden `dart:ffi` import", joined)
+
+    def test_static_checks_enforce_io_isolation_export_part_ban_and_retired_dirs(self) -> None:
+        for obsolete_name in (
+            "UI_PACKAGE_REL",
+            "UI_EXAMPLE_REL",
+            "UI_BARREL_REL",
+            "_PUBSPEC_FORBIDDEN_DEP_RE",
+            "_check_ui_package_pubspecs",
+            "_ui_pkg_layer_rank",
+            "partition_tests_by_package",
+            "_is_allowed_ui_import",
+            "_FORBIDDEN_UI_PROVIDERS",
+            "_FORBIDDEN_UI_PROVIDER_RE",
+            "_UI_FORBIDDEN_PROVIDER_DECL_RE",
+        ):
+            self.assertFalse(
+                hasattr(tiertask_dev, obsolete_name),
+                f"Obsolete symbol {obsolete_name} must be removed",
+            )
+
+        (self.root / "lib" / "repositories").mkdir(parents=True, exist_ok=True)
+        (self.root / "lib" / "services").mkdir(parents=True, exist_ok=True)
+
+        (self.root / "lib" / "providers" / "bad_prov.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'dart:io';\nimport 'dart:ffi';\n"
+            + "void bad() { HttpClient(); }\n",
+            encoding="utf-8",
+        )
+        (self.root / "lib" / "repositories" / "good_repo.dart").write_text(
+            GPL_HEADER
+            + "\nimport 'dart:io';\nimport 'dart:ffi';\n"
+            + "class GoodRepo { void open() { HttpClient(); } }\n",
+            encoding="utf-8",
+        )
+        # Unconditional export, part, and part of bans across lib/ and test/.
+        (self.root / "lib" / "services" / "bad_directives.dart").write_text(
+            GPL_HEADER
+            + "\nexport '../models/sample_model.dart';\n"
+            + "part 'other.dart';\n"
+            + "part of 'parent.dart';\n",
+            encoding="utf-8",
+        )
+        (self.root / "test" / "ui" / "bad_test_export.dart").write_text(
+            GPL_HEADER + "\nexport 'sample_screen_test.dart';\n",
+            encoding="utf-8",
+        )
+
+        retired_dirs = (
+            "packages/tiertask_ui",
+            "lib/presentation",
+            "test/presentation",
+            "lib/ui_v2",
+            "test/ui_v2",
+        )
+        for retired in retired_dirs:
+            (self.root / retired).mkdir(parents=True, exist_ok=True)
 
         issues = tiertask_dev.run_static_checks(self.root, fix=False)
         joined = "\n".join(issues)
-        self.assertIn("P-UDF-ARCHITECTURE: Forbidden transitional directory 'lib/ui_v2/'", joined)
-        self.assertIn("P-UDF-ARCHITECTURE: Forbidden transitional directory 'test/ui_v2/'", joined)
-        self.assertIn("Forbidden import `../../models/sample_model.dart` in `lib/ui/views/strict_view.dart", joined)
-        self.assertIn("Forbidden Riverpod provider/notifier declaration in `lib/ui/views/strict_view.dart:20`", joined)
-        self.assertIn("Forbidden Riverpod provider/notifier declaration in `lib/ui/views/strict_view.dart:21`", joined)
-        self.assertIn("Forbidden Riverpod provider/notifier declaration in `lib/ui/views/strict_view.dart:22`", joined)
-        self.assertNotIn("strict_view.dart:19`", joined)
+        io_issues = [i for i in issues if i.startswith("P-IO-ISOLATION:")]
+        webdav_issues = [i for i in issues if i.startswith("P-WEBDAV-API:")]
+
+        self.assertIn("P-IO-ISOLATION: Forbidden `dart:io` import in `lib/providers/bad_prov.dart", joined)
+        self.assertIn("P-IO-ISOLATION: Forbidden `dart:ffi` import in `lib/providers/bad_prov.dart", joined)
+        self.assertIn("P-WEBDAV-API: Forbidden `HttpClient` usage outside repositories in `lib/providers/bad_prov.dart", joined)
+        self.assertFalse(any("lib/repositories/good_repo.dart" in i for i in io_issues))
+        self.assertFalse(any("lib/repositories/good_repo.dart" in i for i in webdav_issues))
+
+        self.assertIn("P-FILE-SIZE: Forbidden `export`/`part` directive in `lib/services/bad_directives.dart:16`", joined)
+        self.assertIn("P-FILE-SIZE: Forbidden `export`/`part` directive in `lib/services/bad_directives.dart:17`", joined)
+        self.assertIn("P-FILE-SIZE: Forbidden `export`/`part` directive in `lib/services/bad_directives.dart:18`", joined)
+        self.assertIn("P-FILE-SIZE: Forbidden `export`/`part` directive in `test/ui/bad_test_export.dart:16`", joined)
+
+        for retired in retired_dirs:
+            self.assertIn(f"P-UDF-ARCHITECTURE: Forbidden retired directory '{retired}/'", joined)
+
+    def test_single_package_arch_sections_deps_impacted_tests_and_digest(self) -> None:
+        self._build_minimal_design_system(self.root)
+
+        expected_sections = [
+            ("lib/ui/tokens/ui_theme_tokens.dart", "## Design System"),
+            ("lib/ui/primitives/ui_button.dart", "## Design System"),
+            ("lib/ui/layout/ui_page_header.dart", "## Design System"),
+            ("lib/ui/components/ui_dialog_frame.dart", "## Design System"),
+            ("lib/ui/views/tasks_view.dart", "## User Interface"),
+            ("lib/ui/widgets/entity_note_section.dart", "## User Interface"),
+            ("lib/ui/dialogs/workspaces_modal.dart", "## User Interface"),
+            ("lib/ui/tier_task_shell_screen.dart", "## User Interface"),
+            ("lib/ui/ui_domain_mappers.dart", "## User Interface"),
+            ("lib/main.dart", "## User Interface"),
+            ("lib/providers/ui_telemetry.dart", "## State Providers"),
+        ]
+        for rel_path, expected_section in expected_sections:
+            self.assertEqual(
+                tiertask_dev._layer_section_for_path(rel_path),
+                expected_section,
+                f"Unexpected ARCHITECTURE section for {rel_path}",
+            )
+
+        self.assertEqual(tiertask_dev._dart_roots(self.root), ["lib", "test"])
+        self.assertTrue(tiertask_dev._is_test_dart("test/ui/primitives/ui_button_test.dart"))
+        self.assertFalse(tiertask_dev._is_test_dart("packages/tiertask_ui/test/primitives/ui_button_test.dart"))
+        self.assertFalse(tiertask_dev._is_code_relevant_change("packages/tiertask_ui/lib/src/primitives/ui_button.dart"))
+        self.assertTrue(tiertask_dev._is_code_relevant_change("lib/ui/primitives/ui_button.dart"))
+        self.assertTrue(tiertask_dev._is_code_relevant_change("pubspec.yaml"))
+
+        # Tree stays root-package only (never expands packages/).
+        tree = tiertask_dev.generate_architecture_tree(self.root)
+        self.assertNotIn("packages/", tree)
+        self.assertIn("tokens/", tree)
+        self.assertIn("primitives/", tree)
+
+        # Digest tracks root config and Dart files.
+        digest_before = tiertask_dev.compute_code_digest(self.root)
+        (self.root / "pubspec.yaml").write_text("name: tiertask\nversion: 0.2.0+2\n", encoding="utf-8")
+        digest_after = tiertask_dev.compute_code_digest(self.root)
+        self.assertNotEqual(digest_before, digest_after)
+
+        # Direct mirror resolution for design-system primitive.
+        button_tests = tiertask_dev.resolve_impacted_tests(
+            self.root,
+            ["lib/ui/primitives/ui_button.dart"],
+        )
+        self.assertEqual(button_tests, ["test/ui/primitives/ui_button_test.dart"])
+
+        # Subsystem-mapped token leaf resolves to ui_theme_tokens_test.dart.
+        focus_tests = tiertask_dev.resolve_impacted_tests(
+            self.root,
+            ["lib/ui/tokens/ui_focus_tokens.dart"],
+        )
+        self.assertEqual(focus_tests, ["test/ui/tokens/ui_theme_tokens_test.dart"])
+
+        # Unmirrored token helper resolves through dependency graph.
+        custom_tests = tiertask_dev.resolve_impacted_tests(
+            self.root,
+            ["lib/ui/tokens/custom_token.dart"],
+        )
+        self.assertIn("test/ui/tokens/ui_theme_tokens_test.dart", custom_tests)
+
+        # Direct mirror for ui_domain_mappers.dart.
+        (self.root / "lib" / "ui" / "ui_domain_mappers.dart").write_text(
+            GPL_HEADER + "\nclass UiDomainMappers {}\n",
+            encoding="utf-8",
+        )
+        (self.root / "test" / "ui" / "ui_domain_mappers_test.dart").write_text(
+            GPL_HEADER + "\nimport 'package:tiertask/ui/ui_domain_mappers.dart';\nvoid main() {}\n",
+            encoding="utf-8",
+        )
+        mapper_tests = tiertask_dev.resolve_impacted_tests(
+            self.root,
+            ["lib/ui/ui_domain_mappers.dart"],
+        )
+        self.assertEqual(mapper_tests, ["test/ui/ui_domain_mappers_test.dart"])
+
+        # Find with layer="ui" locates integrated design-system symbols.
+        ui_matches = tiertask_dev.find_in_repo(self.root, "UiButton", layer="ui")
+        self.assertTrue(any("lib/ui/primitives/ui_button.dart" in m for m in ui_matches))
+        self.assertEqual(tiertask_dev.find_in_repo(self.root, "UiButton", layer="models"), [])
+
+        # CLI help reflects single-package layers only.
+        parser = tiertask_dev._build_parser()
+        find_parser = parser._subparsers._group_actions[0].choices["find"]
+        find_help = " ".join(find_parser.format_help().split())
+        self.assertIn("models, services, repositories, providers, ui, l10n, spec", find_help)
+        self.assertNotIn("ui_pkg", find_help)
+        self.assertNotIn("presentation", find_help)
 
     def test_audit_l10n_detects_orphan_metadata_and_comment_or_collision_unused_keys(self) -> None:
         en_arb = {
@@ -999,17 +952,14 @@ tiertask/
         }
         (self.root / "lib" / "l10n" / "app_en.arb").write_text(json.dumps(en_arb, indent=2) + "\n", encoding="utf-8")
         (self.root / "lib" / "l10n" / "app_de.arb").write_text(json.dumps(de_arb, indent=2) + "\n", encoding="utf-8")
-        # Generated file mentioning every key must NOT count as real usage.
         (self.root / "lib" / "l10n" / "app_localizations.dart").write_text(
             "String get commentOnlyKey; String get activeFilterLabel;\n",
             encoding="utf-8",
         )
-        # Hand-written l10n extension using extOnlyKey bare (on `this`) must count as used.
         (self.root / "lib" / "l10n" / "tier_localization_extension.dart").write_text(
             GPL_HEADER + "\nextension Ext on Object { String f() => extOnlyKey; }\n",
             encoding="utf-8",
         )
-        # UI file with: real member access, URL literal + interpolation on same line, comment-only key, and bare param collision.
         (self.root / "lib" / "ui" / "sample_screen.dart").write_text(
             GPL_HEADER
             + "\nString render(dynamic localizations, {String? activeFilterLabel}) {\n"

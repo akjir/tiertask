@@ -18,17 +18,27 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/entity_controller.dart';
-import '../../presentation/entity_view_models.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/task_controller.dart';
-import '../../presentation/ui_telemetry.dart';
-import '../../presentation/view_model_primitives.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_location.dart';
+import '../../models/tdf_metadata.dart';
+import '../../providers/entity_actions_provider.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/task_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../../providers/ui_telemetry.dart';
+import '../components/ui_color_wheel.dart';
+import '../components/ui_ordered_item_list.dart';
+import '../layout/ui_responsive_grid.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_pill.dart';
+import '../primitives/ui_segmented_control.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
 import '../widgets/entity_conditions_section.dart';
 import '../widgets/entity_date_time_fields.dart';
@@ -38,15 +48,6 @@ import '../widgets/entity_note_section.dart';
 /// Leading rounded-square color dot size inside expanded and collapsed Label card headers (`U-CARD-001`).
 const double _labelColorDotSize = 12.0;
 
-/// Maximum reference links permitted per label (`TDF 0.8.0`).
-const int _maxLinksPerLabel = 20;
-
-/// Maximum note character length (`maxTdfNoteLength`).
-const int _maxNoteLength = 2000;
-
-/// Maximum single-line text length (`maxTdfTextLength`).
-const int _maxSingleLineLength = 500;
-
 /// Unified expandable Label entity card sharing single-expand coordination (`U-CARD-001`..`005`).
 class LabelCard extends ConsumerWidget {
   /// Creates a [LabelCard].
@@ -54,45 +55,43 @@ class LabelCard extends ConsumerWidget {
     super.key,
     required this.cardScrollKey,
     required this.label,
-    required this.allLocations,
   });
-
-  /// Workspace locations passed into the Activation Conditions editor.
-  final List<LocationOptionViewModel> allLocations;
 
   /// [GlobalKey] attached around the card for smooth reveal scrolling.
   final GlobalKey cardScrollKey;
 
-  /// Immutable label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label rendered by this card.
+  final TdfLabel label;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final entityRef = EntityRef(kind: EntityKind.label, id: label.id);
-    final isExpanded = ref.watch(
-      appShellControllerProvider.select(
-        (shell) => shell.expandedEntity == entityRef,
+    final openCount = ref.watch(
+      taskNotifierProvider.select(
+        (boardAsync) =>
+            boardAsync.asData?.value.openTaskCountsByLabel[label.id] ?? 0,
       ),
     );
+    final isExpanded = ref.watch(
+      shellProvider.select((shell) => shell.expandedEntity == entityRef),
+    );
     final editingSection = ref.watch(
-      appShellControllerProvider.select(
+      shellProvider.select(
         (shell) => _parseInlineEditSection(shell.activeInlineEdit, label.id),
       ),
     );
     final isConfirmingDelete = ref.watch(
-      appShellControllerProvider.select(
-        (shell) => shell.activeDeleteConfirm == entityRef,
-      ),
+      shellProvider.select((shell) => shell.activeDeleteConfirm == entityRef),
     );
     final isBusy = ref.watch(
-      entityControllerProvider.select((state) => state.isBusy),
+      entityActionsProvider.select((state) => state.isBusy),
     );
 
     return KeyedSubtree(
       key: cardScrollKey,
       child: _LabelExpandableCardView(
         label: label,
-        allLocations: allLocations,
+        openCount: openCount,
         isExpanded: isExpanded,
         editingSection: editingSection,
         isConfirmingDelete: isConfirmingDelete,
@@ -109,12 +108,8 @@ class LabelDraftCard extends ConsumerStatefulWidget {
     super.key,
     required this.seedTitle,
     required this.initialColorHex,
-    required this.allLocations,
     required this.onCancel,
   });
-
-  /// Saved workspace locations selectable in draft GPS conditions.
-  final List<LocationOptionViewModel> allLocations;
 
   /// Rotating preset `#RRGGBB` color seeding [UiColorWheel].
   final String initialColorHex;
@@ -134,19 +129,23 @@ class _LabelCardMetaBar extends ConsumerWidget {
   /// Creates a [_LabelCardMetaBar].
   const _LabelCardMetaBar({
     required this.label,
+    required this.openCount,
     required this.isConfirmingDelete,
   });
 
   /// Whether inline delete confirmation is open.
   final bool isConfirmingDelete;
 
-  /// Label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label rendered by this card.
+  final TdfLabel label;
+
+  /// Count of open tasks referencing [label].
+  final int openCount;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
+    final shellNotifier = ref.read(shellProvider.notifier);
     final entityRef = EntityRef(kind: EntityKind.label, id: label.id);
 
     return EntityCardMetaBar(
@@ -160,7 +159,7 @@ class _LabelCardMetaBar extends ConsumerWidget {
           copiedNotice: localizations.labelIdCopiedNotice,
         ),
       ),
-      statusPillLabel: localizations.openTasksCountPill('${label.openCount}'),
+      statusPillLabel: localizations.openTasksCountPill('$openCount'),
       statusPillTone: UiPillTone.soft,
       deleteTooltip: localizations.tooltipDeleteLabel,
       deleteConfirmMessage: localizations.inlineDeleteLabelConfirm,
@@ -176,10 +175,16 @@ class _LabelCardMetaBar extends ConsumerWidget {
 /// Static uncapped [Wrap] of collapsed label metadata badges inside [_LabelCollapsedMetadataStrip].
 class _LabelCollapsedMetadataBadges extends StatelessWidget {
   /// Creates a [_LabelCollapsedMetadataBadges].
-  const _LabelCollapsedMetadataBadges({required this.label});
+  const _LabelCollapsedMetadataBadges({
+    required this.label,
+    required this.openCount,
+  });
 
-  /// Label card projection.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
+
+  /// Count of open tasks referencing [label].
+  final int openCount;
 
   @override
   Widget build(BuildContext context) {
@@ -191,7 +196,7 @@ class _LabelCollapsedMetadataBadges extends StatelessWidget {
       children: <Widget>[
         _LabelScopeBadge(isScoped: label.isScoped),
         UiPill(
-          label: localizations.openTasksCountPill('${label.openCount}'),
+          label: localizations.openTasksCountPill('$openCount'),
           variant: UiPillVariant.meta,
         ),
         if (_hasNonEmptyNote(label.note))
@@ -202,7 +207,7 @@ class _LabelCollapsedMetadataBadges extends StatelessWidget {
           ),
         if (label.links.isNotEmpty)
           _LabelLinksBadge(linkCount: label.links.length),
-        if (label.hasConditions)
+        if (label.conditions.isNotEmpty)
           UiPill(
             label: localizations.tooltipIndicatorConditions,
             variant: UiPillVariant.meta,
@@ -218,14 +223,18 @@ class _LabelCollapsedMetadataStrip extends StatelessWidget {
   /// Creates a [_LabelCollapsedMetadataStrip].
   const _LabelCollapsedMetadataStrip({
     required this.label,
+    required this.openCount,
     required this.onToggleExpand,
   });
 
-  /// Label card projection.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
 
   /// Callback toggling expansion of the owning label card.
   final VoidCallback onToggleExpand;
+
+  /// Count of open tasks referencing [label].
+  final int openCount;
 
   @override
   Widget build(BuildContext context) {
@@ -234,7 +243,10 @@ class _LabelCollapsedMetadataStrip extends StatelessWidget {
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: onToggleExpand,
-        child: _LabelCollapsedMetadataBadges(label: label),
+        child: _LabelCollapsedMetadataBadges(
+          label: label,
+          openCount: openCount,
+        ),
       ),
     );
   }
@@ -396,7 +408,7 @@ class _LabelColorSection extends StatefulWidget {
   State<_LabelColorSection> createState() => _LabelColorSectionState();
 }
 
-/// Wires always-visible [_LabelColorSection] to `EntityController` for one label card.
+/// Wires always-visible [_LabelColorSection] to [entityActionsProvider] for one label card.
 class _LabelColorSectionCard extends ConsumerWidget {
   /// Creates a [_LabelColorSectionCard].
   const _LabelColorSectionCard({
@@ -411,19 +423,19 @@ class _LabelColorSectionCard extends ConsumerWidget {
   /// Whether inline [UiColorWheel] editing is active.
   final bool isEditing;
 
-  /// Label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final locale = Localizations.localeOf(context);
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
-    final entityNotifier = ref.read(entityControllerProvider.notifier);
+    final shellNotifier = ref.read(shellProvider.notifier);
+    final entityNotifier = ref.read(entityActionsProvider.notifier);
 
     return _LabelColorSection(
       labelId: label.id,
-      colorHex: label.colorHex,
-      colorValue: label.colorValue,
+      colorHex: label.color ?? '',
+      colorValue: TaskScheduleHelper.parseLabelColorValue(label.color),
       isEditing: isEditing,
       isBusy: isBusy,
       onStartEdit: () => shellNotifier.openInlineEdit(
@@ -638,18 +650,22 @@ class _LabelColorWheelField extends StatelessWidget {
   }
 }
 
-/// Wires [EntityConditionsSection] (`isTask: false`) to `EntityController` and Locations navigation.
-class _LabelConditionsSectionCard extends ConsumerWidget {
-  /// Creates a [_LabelConditionsSectionCard].
-  const _LabelConditionsSectionCard({
+/// Renders [EntityConditionsSection] with lazily computed summary chips and draft for an expanded label card.
+class _LabelConditionsSectionBody extends ConsumerWidget {
+  /// Creates a [_LabelConditionsSectionBody].
+  const _LabelConditionsSectionBody({
     required this.label,
     required this.allLocations,
+    required this.hasConditions,
     required this.isEditing,
     required this.isBusy,
   });
 
   /// Saved workspace locations selectable inside GPS conditions.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
+
+  /// Whether [label] currently declares activation conditions.
+  final bool hasConditions;
 
   /// Disables controls while a mutation is in flight.
   final bool isBusy;
@@ -657,41 +673,86 @@ class _LabelConditionsSectionCard extends ConsumerWidget {
   /// Whether inline Activation Conditions editing is active.
   final bool isEditing;
 
-  /// Label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (!label.hasConditions && !isEditing) {
+    final localizations = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final shellNotifier = ref.read(shellProvider.notifier);
+    final entityNotifier = ref.read(entityActionsProvider.notifier);
+
+    return EntityConditionsSection(
+      isTask: false,
+      hasConditions: hasConditions,
+      conditionsSummary: _buildLabelConditionsSummary(
+        label,
+        allLocations,
+        localizations,
+      ),
+      conditionDraft: TaskScheduleHelper.buildConditionDraft(
+        label.conditions,
+        isTask: false,
+      ),
+      allLocations: allLocations,
+      isEditing: isEditing,
+      canEdit: true,
+      isBusy: isBusy,
+      onStartEdit: () => shellNotifier.openInlineEdit(
+        InlineEditTarget.label(label.id, LabelSectionKind.conditions),
+      ),
+      onCancelEdit: shellNotifier.closeInlineEdit,
+      onSave: (draft) =>
+          entityNotifier.saveLabelConditions(label.id, draft, locale: locale),
+      onClear: () => _clearLabelConditions(context, ref, label.id),
+      onOpenLocation: (locationId) => shellNotifier.openEntityInManager(
+        EntityRef(kind: EntityKind.location, id: locationId),
+        preserveReturnContext: false,
+      ),
+    );
+  }
+}
+
+/// Lazily subscribes to workspace locations when an expanded label has or edits activation conditions.
+class _LabelConditionsSectionCard extends ConsumerWidget {
+  /// Creates a [_LabelConditionsSectionCard].
+  const _LabelConditionsSectionCard({
+    required this.label,
+    required this.isEditing,
+    required this.isBusy,
+  });
+
+  /// Disables controls while a mutation is in flight.
+  final bool isBusy;
+
+  /// Whether inline Activation Conditions editing is active.
+  final bool isEditing;
+
+  /// Persisted domain label.
+  final TdfLabel label;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final hasConditions = label.conditions.isNotEmpty;
+    if (!hasConditions && !isEditing) {
       return const SizedBox.shrink();
     }
-    final locale = Localizations.localeOf(context);
-    final tokens = UiThemeTokens.of(context);
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
-    final entityNotifier = ref.read(entityControllerProvider.notifier);
+    final allLocations = ref.watch(
+      taskNotifierProvider.select(
+        (boardAsync) =>
+            boardAsync.asData?.value.sortedLocations ?? const <TdfLocation>[],
+      ),
+    );
 
     return Padding(
-      padding: EdgeInsets.only(top: tokens.spacing.space2),
-      child: EntityConditionsSection(
-        isTask: false,
-        hasConditions: label.hasConditions,
-        conditionsSummary: label.conditionsSummary,
-        conditionDraft: label.conditionDraft,
+      padding: EdgeInsets.only(top: UiThemeTokens.of(context).spacing.space2),
+      child: _LabelConditionsSectionBody(
+        label: label,
         allLocations: allLocations,
+        hasConditions: hasConditions,
         isEditing: isEditing,
-        canEdit: true,
         isBusy: isBusy,
-        onStartEdit: () => shellNotifier.openInlineEdit(
-          InlineEditTarget.label(label.id, LabelSectionKind.conditions),
-        ),
-        onCancelEdit: shellNotifier.closeInlineEdit,
-        onSave: (draft) =>
-            entityNotifier.saveLabelConditions(label.id, draft, locale: locale),
-        onClear: () => _clearLabelConditions(context, ref, label.id),
-        onOpenLocation: (locationId) => shellNotifier.openEntityInManager(
-          EntityRef(kind: EntityKind.location, id: locationId),
-          preserveReturnContext: false,
-        ),
       ),
     );
   }
@@ -868,8 +929,8 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
   late final TextEditingController _timeEndController;
   late final TextEditingController _timeStartController;
 
-  ConditionDraftViewModel _conditionDraft = ConditionDraftViewModel();
-  List<EntityLinkViewModel> _draftLinks = const <EntityLinkViewModel>[];
+  ConditionDraft _conditionDraft = ConditionDraft();
+  List<TaskLink> _draftLinks = const <TaskLink>[];
   int? _editingLinkIndex;
   Map<String, String> _fieldErrors = const <String, String>{};
   String? _generalError;
@@ -885,7 +946,6 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
   /// Bundled draft activation conditions state and callbacks.
   _LabelDraftConditionsData get _conditionsData => _LabelDraftConditionsData(
     draft: _conditionDraft,
-    allLocations: widget.allLocations,
     timeStartController: _timeStartController,
     timeEndController: _timeEndController,
     timeInputError: _timeInputError,
@@ -952,7 +1012,7 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
     final localizations = AppLocalizations.of(context);
     final isBusy =
         _isSubmitting ||
-        ref.watch(entityControllerProvider.select((state) => state.isBusy));
+        ref.watch(entityActionsProvider.select((state) => state.isBusy));
 
     return UiCard.draft(
       key: const ValueKey<String>('label_draft_card'),
@@ -1012,16 +1072,16 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
   LabelDraftInput _buildDraftInput() {
     final hasDraftConditions =
         _showConditions &&
-        (_conditionDraft.selectedWeekdays.isNotEmpty ||
+        (_conditionDraft.weekdays.isNotEmpty ||
             _conditionDraft.timeWindows.isNotEmpty ||
-            _conditionDraft.selectedLocationIds.isNotEmpty);
+            _conditionDraft.locationIds.isNotEmpty);
     return LabelDraftInput(
       name: _nameController.text,
       colorHex: UiColorWheel.formatHex(_selectedColor),
       isScoped: _isScoped,
       note: _showNote ? _noteController.text : '',
-      links: _showLinks ? _draftLinks : const <EntityLinkViewModel>[],
-      conditionDraft: hasDraftConditions ? _conditionDraft : null,
+      links: _showLinks ? _draftLinks : const <TaskLink>[],
+      conditions: hasDraftConditions ? _conditionDraft : null,
     );
   }
 
@@ -1061,17 +1121,13 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
     final localizations = AppLocalizations.of(context);
     final startToken = _timeStartController.text.trim();
     final endToken = _timeEndController.text.trim();
-    final startMinutes = _parseDraftTimeMinutes(startToken);
-    final endMinutes = _parseDraftTimeMinutes(endToken);
-    if (startMinutes == null ||
-        endMinutes == null ||
-        startMinutes == endMinutes) {
+    if (TimeWindowTaskCondition.tryParse(startToken, endToken) == null) {
       setState(() => _timeInputError = localizations.conditionTimeErrorInvalid);
       return false;
     }
-    final nextWindows = <TimeWindowDraftViewModel>[
+    final nextWindows = <TimeWindowDraft>[
       ..._conditionDraft.timeWindows,
-      TimeWindowDraftViewModel(start: startToken, end: endToken),
+      TimeWindowDraft(start: startToken, end: endToken),
     ];
     setState(() {
       _conditionDraft = _conditionDraft.copyWith(timeWindows: nextWindows);
@@ -1105,23 +1161,23 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
   /// Validates and inserts or updates the typed draft link row.
   bool _handleCommitLinkInput() {
     final editingIndex = _editingLinkIndex;
-    final error = TaskController.validateLinkInput(
+    final error = TaskScheduleHelper.validateLinkInput(
       rawTitle: _linkTitleController.text,
       rawUri: _linkUriController.text,
       currentCount: _draftLinks.length,
+      localizations: AppLocalizations.of(context),
       isEditingExisting: editingIndex != null,
       isLabel: true,
-      locale: Localizations.localeOf(context),
     );
     if (error != null) {
       setState(() => _linkInputError = error);
       return false;
     }
-    final entry = EntityLinkViewModel(
+    final entry = TaskLink(
       title: _linkTitleController.text.trim(),
       uri: _linkUriController.text.trim(),
     );
-    final nextLinks = List<EntityLinkViewModel>.of(_draftLinks);
+    final nextLinks = List<TaskLink>.of(_draftLinks);
     if (editingIndex != null &&
         editingIndex >= 0 &&
         editingIndex < nextLinks.length) {
@@ -1141,12 +1197,11 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
   }
 
   /// Deletes the draft link row at [index].
-  void _handleDeleteLink(EntityLinkViewModel link, int index) {
+  void _handleDeleteLink(TaskLink link, int index) {
     if (index < 0 || index >= _draftLinks.length) {
       return;
     }
-    final nextLinks = List<EntityLinkViewModel>.of(_draftLinks)
-      ..removeAt(index);
+    final nextLinks = List<TaskLink>.of(_draftLinks)..removeAt(index);
     int? nextEditing = _editingLinkIndex;
     if (nextEditing == index) {
       nextEditing = null;
@@ -1170,13 +1225,12 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
   }
 
   /// Removes the draft time window at [index].
-  void _handleRemoveTimeWindow(TimeWindowDraftViewModel window, int index) {
+  void _handleRemoveTimeWindow(TimeWindowDraft window, int index) {
     if (index < 0 || index >= _conditionDraft.timeWindows.length) {
       return;
     }
-    final nextWindows = List<TimeWindowDraftViewModel>.of(
-      _conditionDraft.timeWindows,
-    )..removeAt(index);
+    final nextWindows = List<TimeWindowDraft>.of(_conditionDraft.timeWindows)
+      ..removeAt(index);
     setState(() {
       _conditionDraft = _conditionDraft.copyWith(timeWindows: nextWindows);
       _generalError = null;
@@ -1192,7 +1246,7 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
         oldIndex == newIndex) {
       return;
     }
-    final nextLinks = List<EntityLinkViewModel>.of(_draftLinks);
+    final nextLinks = List<TaskLink>.of(_draftLinks);
     final moved = nextLinks.removeAt(oldIndex);
     nextLinks.insert(newIndex, moved);
     int? nextEditing = _editingLinkIndex;
@@ -1230,7 +1284,7 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
   }
 
   /// Loads draft [link] at [index] into the inline link inputs.
-  void _handleStartLinkEdit(EntityLinkViewModel link, int index) {
+  void _handleStartLinkEdit(TaskLink link, int index) {
     setState(() {
       _editingLinkIndex = index;
       _linkTitleController.text = link.title;
@@ -1239,7 +1293,7 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
     });
   }
 
-  /// Validates pending sub-inputs and commits the full [LabelDraftInput] via `EntityController`.
+  /// Validates pending sub-inputs and commits the full [LabelDraftInput] via [entityActionsProvider].
   Future<void> _handleSubmit() async {
     if (_isSubmitting || !_flushPendingSubInputs()) {
       return;
@@ -1251,32 +1305,32 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
       _generalError = null;
     });
     final result = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .createLabelDraft(input, locale: Localizations.localeOf(context));
     _applySubmitResult(result);
   }
 
   /// Toggles [locationId] inside draft GPS location conditions.
   void _handleToggleLocation(String locationId) {
-    final nextIds = List<String>.of(_conditionDraft.selectedLocationIds);
+    final nextIds = List<String>.of(_conditionDraft.locationIds);
     if (!nextIds.remove(locationId)) {
       nextIds.add(locationId);
     }
     setState(() {
-      _conditionDraft = _conditionDraft.copyWith(selectedLocationIds: nextIds);
+      _conditionDraft = _conditionDraft.copyWith(locationIds: nextIds);
       _generalError = null;
     });
   }
 
   /// Toggles ISO weekday [isoWeekday] (`1..7`) inside draft weekday conditions.
   void _handleToggleWeekday(int isoWeekday) {
-    final nextDays = List<int>.of(_conditionDraft.selectedWeekdays);
+    final nextDays = List<int>.of(_conditionDraft.weekdays);
     if (!nextDays.remove(isoWeekday)) {
       nextDays.add(isoWeekday);
       nextDays.sort();
     }
     setState(() {
-      _conditionDraft = _conditionDraft.copyWith(selectedWeekdays: nextDays);
+      _conditionDraft = _conditionDraft.copyWith(weekdays: nextDays);
       _generalError = null;
     });
   }
@@ -1353,7 +1407,14 @@ class _LabelDraftConditionGroup extends StatelessWidget {
 /// Vertical description and condition picker groups rendered inside [_LabelDraftConditionsSection].
 class _LabelDraftConditionsBody extends StatelessWidget {
   /// Creates a [_LabelDraftConditionsBody].
-  const _LabelDraftConditionsBody({required this.data, required this.enabled});
+  const _LabelDraftConditionsBody({
+    required this.data,
+    required this.allLocations,
+    required this.enabled,
+  });
+
+  /// Saved workspace locations selectable in draft GPS conditions.
+  final List<TdfLocation> allLocations;
 
   /// Bundled draft conditions state and callbacks.
   final _LabelDraftConditionsData data;
@@ -1377,7 +1438,7 @@ class _LabelDraftConditionsBody extends StatelessWidget {
         _LabelDraftConditionGroup(
           title: localizations.conditionDayGroupTitle,
           child: _LabelDraftWeekdaysWrap(
-            selectedWeekdays: data.draft.selectedWeekdays,
+            selectedWeekdays: data.draft.weekdays,
             enabled: enabled,
             onToggleWeekday: data.onToggleWeekday,
           ),
@@ -1389,8 +1450,8 @@ class _LabelDraftConditionsBody extends StatelessWidget {
         _LabelDraftConditionGroup(
           title: localizations.conditionLocationGroupTitle,
           child: _LabelDraftLocationsWrap(
-            allLocations: data.allLocations,
-            selectedLocationIds: data.draft.selectedLocationIds,
+            allLocations: allLocations,
+            selectedLocationIds: data.draft.locationIds,
             enabled: enabled,
             onToggleLocation: data.onToggleLocation,
           ),
@@ -1406,7 +1467,6 @@ class _LabelDraftConditionsData {
   /// Creates a [_LabelDraftConditionsData].
   const _LabelDraftConditionsData({
     required this.draft,
-    required this.allLocations,
     required this.timeStartController,
     required this.timeEndController,
     required this.timeInputError,
@@ -1416,18 +1476,14 @@ class _LabelDraftConditionsData {
     required this.onToggleLocation,
   });
 
-  /// Saved workspace locations selectable in draft GPS conditions.
-  final List<LocationOptionViewModel> allLocations;
-
   /// Current editable condition draft.
-  final ConditionDraftViewModel draft;
+  final ConditionDraft draft;
 
   /// Callback adding a typed `HH:MM`..`HH:MM` time window.
   final VoidCallback onAddTimeWindow;
 
   /// Callback removing a draft time window row.
-  final UiOrderedItemActionCallback<TimeWindowDraftViewModel>
-  onRemoveTimeWindow;
+  final UiOrderedItemActionCallback<TimeWindowDraft> onRemoveTimeWindow;
 
   /// Callback toggling a draft GPS location condition.
   final ValueChanged<String> onToggleLocation;
@@ -1446,7 +1502,7 @@ class _LabelDraftConditionsData {
 }
 
 /// Optional Activation Conditions inset card inside the uncommitted Label Draft Card.
-class _LabelDraftConditionsSection extends StatelessWidget {
+class _LabelDraftConditionsSection extends ConsumerWidget {
   /// Creates a [_LabelDraftConditionsSection].
   const _LabelDraftConditionsSection({
     required this.data,
@@ -1460,13 +1516,23 @@ class _LabelDraftConditionsSection extends StatelessWidget {
   final bool enabled;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
+    final allLocations = ref.watch(
+      taskNotifierProvider.select(
+        (boardAsync) =>
+            boardAsync.asData?.value.sortedLocations ?? const <TdfLocation>[],
+      ),
+    );
 
     return UiCard.inset(
       headerIcon: Icons.tune_rounded,
       headerTitle: localizations.taskConditionsSectionTitle,
-      child: _LabelDraftConditionsBody(data: data, enabled: enabled),
+      child: _LabelDraftConditionsBody(
+        data: data,
+        allLocations: allLocations,
+        enabled: enabled,
+      ),
     );
   }
 }
@@ -1606,7 +1672,7 @@ class _LabelDraftLinkAddBar extends StatelessWidget {
         _LabelDraftLinkInputsGrid(data: data, enabled: enabled),
         if (error != null && error.isNotEmpty) ...<Widget>[
           const SizedBox(height: 6.0),
-          _LabelsErrorText(message: error),
+          EntityInlineErrorText(message: error),
         ],
         SizedBox(height: tokens.spacing.space2),
         _LabelDraftLinkAddActions(
@@ -1645,7 +1711,7 @@ class _LabelDraftLinkInputsGrid extends StatelessWidget {
           kind: UiFieldKind.text,
           controller: data.titleController,
           hintText: localizations.linkTitleHint,
-          maxLength: _maxSingleLineLength,
+          maxLength: maxTdfTextLength,
           enabled: enabled,
           onChanged: data.onInputChanged,
           onSubmitted: (_) => data.onCommitLink(),
@@ -1671,7 +1737,7 @@ class _LabelDraftLinkRowContent extends StatelessWidget {
   const _LabelDraftLinkRowContent({required this.link});
 
   /// Draft reference link to display.
-  final EntityLinkViewModel link;
+  final TaskLink link;
 
   @override
   Widget build(BuildContext context) {
@@ -1729,7 +1795,7 @@ class _LabelDraftLinksData {
   final String? inputError;
 
   /// Current draft links list.
-  final List<EntityLinkViewModel> links;
+  final List<TaskLink> links;
 
   /// Callback cancelling an active link row edit.
   final VoidCallback onCancelRowEdit;
@@ -1738,10 +1804,10 @@ class _LabelDraftLinksData {
   final VoidCallback onCommitLink;
 
   /// Callback deleting a draft link row.
-  final UiOrderedItemActionCallback<EntityLinkViewModel> onDelete;
+  final UiOrderedItemActionCallback<TaskLink> onDelete;
 
   /// Callback starting inline edit on a draft link row.
-  final UiOrderedItemActionCallback<EntityLinkViewModel> onEdit;
+  final UiOrderedItemActionCallback<TaskLink> onEdit;
 
   /// Callback clearing input errors when typing.
   final ValueChanged<String> onInputChanged;
@@ -1774,10 +1840,10 @@ class _LabelDraftLinksSection extends StatelessWidget {
       headerIcon: Icons.link_rounded,
       headerTitle: localizations.linksSectionTitle,
       headerBadge: UiPill(
-        label: '${data.links.length} / $_maxLinksPerLabel',
+        label: '${data.links.length} / $maxTdfLinksPerLabel',
         variant: UiPillVariant.count,
       ),
-      child: UiOrderedItemList<EntityLinkViewModel>(
+      child: UiOrderedItemList<TaskLink>(
         items: data.links,
         itemKey: (link, index) =>
             ValueKey<String>('label_draft_link_${index}_${link.uri}'),
@@ -1808,7 +1874,7 @@ class _LabelDraftLocationsWrap extends StatelessWidget {
   });
 
   /// Available saved locations.
-  final List<LocationOptionViewModel> allLocations;
+  final List<TdfLocation> allLocations;
 
   /// Whether location chips accept input.
   final bool enabled;
@@ -1881,7 +1947,7 @@ class _LabelDraftNoteSection extends StatelessWidget {
         kind: UiFieldKind.multiline,
         controller: controller,
         hintText: localizations.taskNoteHint,
-        maxLength: _maxNoteLength,
+        maxLength: maxTdfNoteLength,
         enabled: enabled,
         errorText: errorText,
         onChanged: onChanged,
@@ -2031,7 +2097,7 @@ class _LabelDraftPrimaryFields extends StatelessWidget {
           controller: data.nameController,
           label: localizations.labelNameLabel,
           hintText: localizations.labelNameHint,
-          maxLength: _maxSingleLineLength,
+          maxLength: maxTdfTextLength,
           autofocus: true,
           enabled: !isBusy,
           errorText: data.nameError,
@@ -2122,7 +2188,7 @@ class _LabelDraftTimeWindowAddBar extends StatelessWidget {
         _LabelDraftTimeInputsGrid(data: data, enabled: enabled),
         if (error != null && error.isNotEmpty) ...<Widget>[
           const SizedBox(height: 6.0),
-          _LabelsErrorText(message: error),
+          EntityInlineErrorText(message: error),
         ],
         SizedBox(height: tokens.spacing.space2),
         Align(
@@ -2156,7 +2222,7 @@ class _LabelDraftTimeWindowsList extends StatelessWidget {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
 
-    return UiOrderedItemList<TimeWindowDraftViewModel>(
+    return UiOrderedItemList<TimeWindowDraft>(
       items: data.draft.timeWindows,
       itemKey: (window, index) => ValueKey<String>(
         'label_draft_time_${index}_${window.start}_${window.end}',
@@ -2236,7 +2302,7 @@ class _LabelEditNameButton extends ConsumerWidget {
       onPressed: isBusy
           ? null
           : () => ref
-                .read(appShellControllerProvider.notifier)
+                .read(shellProvider.notifier)
                 .openInlineEdit(
                   InlineEditTarget.label(labelId, LabelSectionKind.title),
                 ),
@@ -2249,15 +2315,12 @@ class _LabelExpandableCardView extends ConsumerWidget {
   /// Creates a [_LabelExpandableCardView].
   const _LabelExpandableCardView({
     required this.label,
-    required this.allLocations,
+    required this.openCount,
     required this.isExpanded,
     required this.editingSection,
     required this.isConfirmingDelete,
     required this.isBusy,
   });
-
-  /// Saved workspace locations for Activation Conditions.
-  final List<LocationOptionViewModel> allLocations;
 
   /// Currently open inline section editor on this card, if any.
   final LabelSectionKind? editingSection;
@@ -2271,8 +2334,11 @@ class _LabelExpandableCardView extends ConsumerWidget {
   /// Whether this card is currently expanded.
   final bool isExpanded;
 
-  /// Label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
+
+  /// Count of open tasks referencing [label].
+  final int openCount;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2286,7 +2352,7 @@ class _LabelExpandableCardView extends ConsumerWidget {
       isExpanded: isExpanded,
       onToggleExpand: toggleExpand,
       leading: _LabelLeadingColorDot(
-        colorValue: label.colorValue,
+        colorValue: TaskScheduleHelper.parseLabelColorValue(label.color),
         onTap: toggleExpand,
       ),
       isEditingTitle: isEditingName,
@@ -2299,12 +2365,13 @@ class _LabelExpandableCardView extends ConsumerWidget {
       ],
       collapsedMetadata: _LabelCollapsedMetadataStrip(
         label: label,
+        openCount: openCount,
         onToggleExpand: toggleExpand,
       ),
       expandedChild: isExpanded
           ? _LabelExpandedPanel(
               label: label,
-              allLocations: allLocations,
+              openCount: openCount,
               editingSection: editingSection,
               isConfirmingDelete: isConfirmingDelete,
               isBusy: isBusy,
@@ -2313,10 +2380,10 @@ class _LabelExpandableCardView extends ConsumerWidget {
     );
   }
 
-  /// Toggles single-expand state for [label] in `AppShellController`.
+  /// Toggles single-expand state for [label] in [shellProvider].
   void _toggleExpand(WidgetRef ref) {
     ref
-        .read(appShellControllerProvider.notifier)
+        .read(shellProvider.notifier)
         .toggleExpandEntity(EntityRef(kind: EntityKind.label, id: label.id));
   }
 }
@@ -2326,14 +2393,11 @@ class _LabelExpandedPanel extends ConsumerWidget {
   /// Creates a [_LabelExpandedPanel].
   const _LabelExpandedPanel({
     required this.label,
-    required this.allLocations,
+    required this.openCount,
     required this.editingSection,
     required this.isConfirmingDelete,
     required this.isBusy,
   });
-
-  /// Saved locations selectable inside the Activation Conditions section.
-  final List<LocationOptionViewModel> allLocations;
 
   /// Currently open inline section editor on this label card, if any.
   final LabelSectionKind? editingSection;
@@ -2344,15 +2408,18 @@ class _LabelExpandedPanel extends ConsumerWidget {
   /// Whether the inline delete confirmation banner is active in [EntityCardMetaBar].
   final bool isConfirmingDelete;
 
-  /// Label card projection.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
+
+  /// Count of open tasks referencing [label].
+  final int openCount;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tokens = UiThemeTokens.of(context);
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
+    final shellNotifier = ref.read(shellProvider.notifier);
     final visibleUnset = <LabelSectionKind>[
-      for (final section in label.unsetSections)
+      for (final section in _computeUnsetLabelSections(label))
         if (section != editingSection) section,
     ];
 
@@ -2360,10 +2427,13 @@ class _LabelExpandedPanel extends ConsumerWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _LabelCardMetaBar(label: label, isConfirmingDelete: isConfirmingDelete),
+        _LabelCardMetaBar(
+          label: label,
+          openCount: openCount,
+          isConfirmingDelete: isConfirmingDelete,
+        ),
         _LabelExpandedSectionsStack(
           label: label,
-          allLocations: allLocations,
           editingSection: editingSection,
           isBusy: isBusy,
         ),
@@ -2387,13 +2457,9 @@ class _LabelExpandedSectionsStack extends StatelessWidget {
   /// Creates a [_LabelExpandedSectionsStack].
   const _LabelExpandedSectionsStack({
     required this.label,
-    required this.allLocations,
     required this.editingSection,
     required this.isBusy,
   });
-
-  /// Workspace locations for Activation Conditions.
-  final List<LocationOptionViewModel> allLocations;
 
   /// Active inline section editor, if any.
   final LabelSectionKind? editingSection;
@@ -2401,8 +2467,8 @@ class _LabelExpandedSectionsStack extends StatelessWidget {
   /// Disables actions while busy.
   final bool isBusy;
 
-  /// Label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
 
   @override
   Widget build(BuildContext context) {
@@ -2431,7 +2497,6 @@ class _LabelExpandedSectionsStack extends StatelessWidget {
         _LabelScopeSectionCard(label: label, isBusy: isBusy),
         _LabelConditionsSectionCard(
           label: label,
-          allLocations: allLocations,
           isEditing: editingSection == LabelSectionKind.conditions,
           isBusy: isBusy,
         ),
@@ -2493,8 +2558,8 @@ class _LabelInlineNameEditor extends ConsumerStatefulWidget {
   /// Disables actions while a parent mutation is in flight.
   final bool isBusy;
 
-  /// Persisted label projection seeding the text input and target identifier.
-  final LabelCardViewModel label;
+  /// Persisted domain label seeding the text input and target identifier.
+  final TdfLabel label;
 
   @override
   ConsumerState<_LabelInlineNameEditor> createState() =>
@@ -2535,7 +2600,7 @@ class _LabelInlineNameEditorState
           kind: UiFieldKind.text,
           controller: _controller,
           hintText: localizations.labelNameHint,
-          maxLength: _maxSingleLineLength,
+          maxLength: maxTdfTextLength,
           autofocus: true,
           enabled: !busy,
           errorText: _errorText,
@@ -2545,9 +2610,7 @@ class _LabelInlineNameEditorState
         const SizedBox(height: 6.0),
         _LabelInlineNameActions(
           isBusy: busy,
-          onCancel: ref
-              .read(appShellControllerProvider.notifier)
-              .closeInlineEdit,
+          onCancel: ref.read(shellProvider.notifier).closeInlineEdit,
           onSave: () => unawaited(_handleSave()),
         ),
       ],
@@ -2571,7 +2634,7 @@ class _LabelInlineNameEditorState
       _errorText = null;
     });
     final result = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .saveLabelName(
           widget.label.id,
           _controller.text,
@@ -2661,7 +2724,7 @@ class _LabelLinksBadge extends StatelessWidget {
   }
 }
 
-/// Wires [EntityLinksSection] (`isLabel: true`) to `EntityController` for one label card.
+/// Wires [EntityLinksSection] (`isLabel: true`) to [entityActionsProvider] for one label card.
 class _LabelLinksSectionCard extends ConsumerWidget {
   /// Creates a [_LabelLinksSectionCard].
   const _LabelLinksSectionCard({
@@ -2676,8 +2739,8 @@ class _LabelLinksSectionCard extends ConsumerWidget {
   /// Whether inline Links editing is active.
   final bool isEditing;
 
-  /// Label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2686,8 +2749,8 @@ class _LabelLinksSectionCard extends ConsumerWidget {
     }
     final locale = Localizations.localeOf(context);
     final tokens = UiThemeTokens.of(context);
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
-    final entityNotifier = ref.read(entityControllerProvider.notifier);
+    final shellNotifier = ref.read(shellProvider.notifier);
+    final entityNotifier = ref.read(entityActionsProvider.notifier);
 
     return Padding(
       padding: EdgeInsets.only(top: tokens.spacing.space2),
@@ -2708,7 +2771,7 @@ class _LabelLinksSectionCard extends ConsumerWidget {
   }
 }
 
-/// Wires [EntityNoteSection] to `EntityController` and `UiTelemetry` for one label card.
+/// Wires [EntityNoteSection] to [entityActionsProvider] and [UiTelemetry] for one label card.
 class _LabelNoteSectionCard extends ConsumerWidget {
   /// Creates a [_LabelNoteSectionCard].
   const _LabelNoteSectionCard({
@@ -2723,8 +2786,8 @@ class _LabelNoteSectionCard extends ConsumerWidget {
   /// Whether inline Note editing is active.
   final bool isEditing;
 
-  /// Label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2733,8 +2796,8 @@ class _LabelNoteSectionCard extends ConsumerWidget {
     }
     final locale = Localizations.localeOf(context);
     final tokens = UiThemeTokens.of(context);
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
-    final entityNotifier = ref.read(entityControllerProvider.notifier);
+    final shellNotifier = ref.read(shellProvider.notifier);
+    final entityNotifier = ref.read(entityActionsProvider.notifier);
 
     return Padding(
       padding: EdgeInsets.only(top: tokens.spacing.space2),
@@ -2843,7 +2906,7 @@ class _LabelScopeSection extends StatelessWidget {
   }
 }
 
-/// Wires always-visible live [_LabelScopeSection] to `EntityController.setLabelScoped`.
+/// Wires always-visible live [_LabelScopeSection] to [EntityActionsNotifier.setLabelScoped].
 class _LabelScopeSectionCard extends ConsumerWidget {
   /// Creates a [_LabelScopeSectionCard].
   const _LabelScopeSectionCard({required this.label, required this.isBusy});
@@ -2851,8 +2914,8 @@ class _LabelScopeSectionCard extends ConsumerWidget {
   /// Disables the segmented toggle while a mutation is in flight.
   final bool isBusy;
 
-  /// Label card view model.
-  final LabelCardViewModel label;
+  /// Persisted domain label.
+  final TdfLabel label;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -2936,28 +2999,21 @@ class _LabelUnsetSectionChip extends StatelessWidget {
   }
 }
 
-/// Renders an inline `danger` live-region validation or persistence error line.
-class _LabelsErrorText extends StatelessWidget {
-  /// Creates a [_LabelsErrorText].
-  const _LabelsErrorText({required this.message});
-
-  /// Localized error copy to display.
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    return Semantics(
-      liveRegion: true,
-      child: Text(
-        message,
-        style: tokens.typography.meta.copyWith(
-          color: tokens.colors.danger,
-          fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
+/// Lazily builds read-only [ConditionSummaryChip] items for [label] against [allLocations].
+List<ConditionSummaryChip> _buildLabelConditionsSummary(
+  TdfLabel label,
+  List<TdfLocation> allLocations,
+  AppLocalizations localizations,
+) {
+  final locationsById = <String, TdfLocation>{
+    for (final location in allLocations) location.id: location,
+  };
+  return TaskScheduleHelper.buildConditionSummaryChips(
+    ownRules: label.conditions,
+    inheritedRules: const <TaskCondition>[],
+    locationsById: locationsById,
+    localizations: localizations,
+  );
 }
 
 /// Clears all activation conditions on [labelId] and surfaces any failure via a danger floating notice.
@@ -2967,7 +3023,7 @@ Future<void> _clearLabelConditions(
   String labelId,
 ) async {
   final result = await ref
-      .read(entityControllerProvider.notifier)
+      .read(entityActionsProvider.notifier)
       .clearLabelConditions(labelId, locale: Localizations.localeOf(context));
   if (!context.mounted) {
     return;
@@ -2982,12 +3038,21 @@ Future<void> _clearLabelNote(
   String labelId,
 ) async {
   final result = await ref
-      .read(entityControllerProvider.notifier)
+      .read(entityActionsProvider.notifier)
       .clearLabelNote(labelId, locale: Localizations.localeOf(context));
   if (!context.mounted) {
     return;
   }
   _reportActionFailure(ref, result);
+}
+
+/// Computes the ordered optional [LabelSectionKind] sections not yet populated on [label].
+List<LabelSectionKind> _computeUnsetLabelSections(TdfLabel label) {
+  return <LabelSectionKind>[
+    if (!_hasNonEmptyNote(label.note)) LabelSectionKind.note,
+    if (label.links.isEmpty) LabelSectionKind.links,
+    if (label.conditions.isEmpty) LabelSectionKind.conditions,
+  ];
 }
 
 /// Confirms deletion of [labelId] and surfaces any persistence failure via a danger floating notice.
@@ -2997,7 +3062,7 @@ Future<void> _confirmDeleteLabel(
   String labelId,
 ) async {
   final result = await ref
-      .read(entityControllerProvider.notifier)
+      .read(entityActionsProvider.notifier)
       .deleteLabel(labelId, locale: Localizations.localeOf(context));
   if (!context.mounted) {
     return;
@@ -3016,7 +3081,7 @@ Future<void> _copyLabelId(
   if (!context.mounted) {
     return;
   }
-  ref.read(floatingNoticeControllerProvider.notifier).showNotice(copiedNotice);
+  ref.read(floatingNoticeProvider.notifier).showNotice(copiedNotice);
 }
 
 /// Returns `true` when [note] contains at least one non-whitespace character.
@@ -3051,38 +3116,6 @@ bool _hasNonEmptyNote(String? note) => note != null && note.trim().isNotEmpty;
   };
 }
 
-/// Parses two ASCII digits starting at [offset] in [raw], returning `null` for non-digits.
-int? _parseAsciiTwoDigits(String raw, int offset) {
-  if (offset < 0 || offset + 2 > raw.length) {
-    return null;
-  }
-  final tens = raw.codeUnitAt(offset) - 0x30;
-  final ones = raw.codeUnitAt(offset + 1) - 0x30;
-  if (tens < 0 || tens > 9 || ones < 0 || ones > 9) {
-    return null;
-  }
-  return tens * 10 + ones;
-}
-
-/// Parses a strict 24-hour `HH:MM` string into minutes since midnight (`0..1439`), or `null` if invalid.
-int? _parseDraftTimeMinutes(String raw) {
-  final trimmed = raw.trim();
-  if (trimmed.length != 5 || trimmed.codeUnitAt(2) != 0x3A) {
-    return null;
-  }
-  final hours = _parseAsciiTwoDigits(trimmed, 0);
-  final minutes = _parseAsciiTwoDigits(trimmed, 3);
-  if (hours == null ||
-      minutes == null ||
-      hours < 0 ||
-      hours > 23 ||
-      minutes < 0 ||
-      minutes > 59) {
-    return null;
-  }
-  return hours * 60 + minutes;
-}
-
 /// Resolves the active [LabelSectionKind] targeted by [target] when it belongs to [labelId].
 LabelSectionKind? _parseInlineEditSection(
   InlineEditTarget? target,
@@ -3101,19 +3134,19 @@ LabelSectionKind? _parseInlineEditSection(
   return null;
 }
 
-/// Emits a `danger` floating notice when a non-inline controller mutation returns a failure [result].
+/// Emits a `danger` floating notice when a non-inline mutation returns a failure [result].
 void _reportActionFailure(WidgetRef ref, ActionResult result) {
   switch (result) {
     case ActionSucceeded():
       return;
     case ActionValidationFailed(:final message):
       ref
-          .read(floatingNoticeControllerProvider.notifier)
-          .showNotice(message, tone: NoticeTone.danger);
+          .read(floatingNoticeProvider.notifier)
+          .showNotice(message, tone: FloatingNoticeTone.danger);
     case ActionPersistFailed(:final message):
       ref
-          .read(floatingNoticeControllerProvider.notifier)
-          .showNotice(message, tone: NoticeTone.danger);
+          .read(floatingNoticeProvider.notifier)
+          .showNotice(message, tone: FloatingNoticeTone.danger);
   }
 }
 
@@ -3144,7 +3177,7 @@ Future<void> _updateLabelScope(
   bool isScoped,
 ) async {
   final result = await ref
-      .read(entityControllerProvider.notifier)
+      .read(entityActionsProvider.notifier)
       .setLabelScoped(
         labelId,
         isScoped,

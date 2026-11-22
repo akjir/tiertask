@@ -128,6 +128,49 @@ class TaskBoardEvaluator {
     return true;
   }
 
+  /// Evaluates whether [task]'s effective condition groups are satisfied per `spec/TDF_SPEC_0.8.0.md` Section 9.2 (`TDF-EVAL-002`, `TDF-EVAL-003`).
+  static bool areTaskConditionsSatisfied(
+    TaskItem task,
+    Map<String, TdfLabel> labelMap,
+    Map<String, TdfLocation> locationMap,
+    DateTime? evaluationTime,
+    String? activeLabelId,
+    double? latitude,
+    double? longitude,
+  ) {
+    if (task.conditions.any((rule) => rule is GlobalResetTaskCondition)) {
+      return true;
+    }
+    if (task.labelIds.isEmpty || activeLabelId != null) {
+      final baseRules = activeLabelId != null
+          ? (labelMap[activeLabelId]?.conditions ?? const <TaskCondition>[])
+          : const <TaskCondition>[];
+      return _evaluateRuleContext(
+        baseRules,
+        task.conditions,
+        locationMap,
+        evaluationTime,
+        latitude,
+        longitude,
+      );
+    }
+    for (final labelId in _sortedAsciiIds(task.labelIds)) {
+      final label = labelMap[labelId];
+      if (label != null && label.isScoped) continue;
+      if (_evaluateRuleContext(
+        label?.conditions ?? const <TaskCondition>[],
+        task.conditions,
+        locationMap,
+        evaluationTime,
+        latitude,
+        longitude,
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Removes expired task, label, and location deletion records (`now - deletedAt > 2,592,000` seconds) from [board],
   /// strips `blocked` prerequisite references targeting expired task tombstones across all live tasks (including `Completed`),
   /// and increments `deletedBlock.generation` once when at least one record is removed per `spec/TDF_SPEC_0.8.0.md` Section 13.2 (`TDF-PUB-004`).
@@ -377,7 +420,7 @@ class TaskBoardEvaluator {
       final isBlocked =
           _hasActiveDeferral(task, now) ||
           !areDependenciesSatisfied(task, taskMap) ||
-          !_areTaskConditionsSatisfied(
+          !areTaskConditionsSatisfied(
             task,
             labelMap,
             locationMap,
@@ -833,49 +876,6 @@ class TaskBoardEvaluator {
           targetTaskId: targetId,
           taskMap: {for (final task in board.allTasks) task.id: task},
         );
-  }
-
-  /// Evaluates whether [task]'s effective condition groups are satisfied per `spec/TDF_SPEC_0.8.0.md` Section 9.2 (`TDF-EVAL-002`, `TDF-EVAL-003`).
-  static bool _areTaskConditionsSatisfied(
-    TaskItem task,
-    Map<String, TdfLabel> labelMap,
-    Map<String, TdfLocation> locationMap,
-    DateTime? evaluationTime,
-    String? activeLabelId,
-    double? latitude,
-    double? longitude,
-  ) {
-    if (task.conditions.any((rule) => rule is GlobalResetTaskCondition)) {
-      return true;
-    }
-    if (task.labelIds.isEmpty || activeLabelId != null) {
-      final baseRules = activeLabelId != null
-          ? (labelMap[activeLabelId]?.conditions ?? const <TaskCondition>[])
-          : const <TaskCondition>[];
-      return _evaluateRuleContext(
-        baseRules,
-        task.conditions,
-        locationMap,
-        evaluationTime,
-        latitude,
-        longitude,
-      );
-    }
-    for (final labelId in _sortedAsciiIds(task.labelIds)) {
-      final label = labelMap[labelId];
-      if (label != null && label.isScoped) continue;
-      if (_evaluateRuleContext(
-        label?.conditions ?? const <TaskCondition>[],
-        task.conditions,
-        locationMap,
-        evaluationTime,
-        latitude,
-        longitude,
-      )) {
-        return true;
-      }
-    }
-    return false;
   }
 
   /// Cleans expired finite `suspended` and resolved `blocked` directives on a single [task] at [normalizedNow].

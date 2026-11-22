@@ -697,6 +697,10 @@ final class AppLogger {
     bool? persistToDisk,
     int maxLines = defaultMaxLines,
   }) {
+    final previousMinimumLevel = _minimumLevel;
+    final previousMetadata = _metadata;
+    final previousPersistToDisk = _persistToDisk;
+    final previousBaseDirectoryPath = _baseDirectoryPath;
     if (sink != null) {
       _sink = sink;
     }
@@ -737,7 +741,13 @@ final class AppLogger {
       _sessionStartUtc = _clock().toUtc();
       _applyLocalStoragePolicy();
       _initializeSessionFile();
-    } else {
+    } else if (previousMinimumLevel != _minimumLevel ||
+        previousMetadata != _metadata ||
+        previousPersistToDisk != _persistToDisk ||
+        previousBaseDirectoryPath != _baseDirectoryPath) {
+      if (previousPersistToDisk != _persistToDisk) {
+        _applyLocalStoragePolicy();
+      }
       _refreshHeaderLinesInPlace();
     }
   }

@@ -18,16 +18,16 @@ import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import 'l10n/app_localizations.dart';
-import 'presentation/shell_chrome_view_models.dart';
+import 'models/webdav_config.dart';
 import 'providers/config_providers.dart';
 import 'providers/local_file_watch_providers.dart';
 import 'providers/workspace_providers.dart';
 import 'services/app_logger.dart';
 import 'ui/tier_task_shell_screen.dart';
-import 'ui/ui_icon_mapper.dart';
+import 'ui/tokens/ui_theme_tokens.dart';
+import 'ui/ui_domain_mappers.dart';
 
 /// Root Material 3 application widget for TierTask.
 class TierTaskApp extends ConsumerStatefulWidget {
@@ -38,8 +38,33 @@ class TierTaskApp extends ConsumerStatefulWidget {
   ConsumerState<TierTaskApp> createState() => _TierTaskAppState();
 }
 
-/// State for [TierTaskApp] managing application lifecycle log flushing and Material routing.
+/// Keeps background diagnostic logging and local file-watching active without rebuilding [MaterialApp].
+class _BackgroundServicesHost extends ConsumerWidget {
+  /// Creates a [_BackgroundServicesHost] wrapping [child].
+  const _BackgroundServicesHost({required this.child});
+
+  /// Stable child subtree shielded from background service rebuilds.
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(diagnosticsEnabledProvider);
+    ref.watch(localFileWatcherProvider);
+    return child;
+  }
+}
+
+/// State for [TierTaskApp] managing application lifecycle log flushing, cached themes, and Material routing.
 class _TierTaskAppState extends ConsumerState<TierTaskApp> {
+  static final ThemeData _calmDarkTheme = UiThemePresets.calm.dark
+      .toThemeData();
+  static final ThemeData _calmLightTheme = UiThemePresets.calm.light
+      .toThemeData();
+  static final ThemeData _plumDarkTheme = UiThemePresets.plumUmber.dark
+      .toThemeData();
+  static final ThemeData _plumLightTheme = UiThemePresets.plumUmber.light
+      .toThemeData();
+
   AppLifecycleListener? _lifecycleListener;
 
   @override
@@ -62,27 +87,27 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
 
   @override
   Widget build(BuildContext context) {
-    ref.watch(diagnosticsEnabledProvider);
-    ref.watch(localFileWatcherProvider);
-    final themeState = ref.watch(shellThemeStateProvider);
-    final preset = UiThemePresets.byId(themeState.presetId);
+    final palette = ref.watch(appThemePaletteProvider);
+    final themeMode = ref.watch(appThemeModeProvider);
+    final locale = ref.watch(appLocaleProvider);
     final buildProfile = ref.watch(appBuildProfileProvider);
+    final themes = _resolveCachedThemes(palette);
 
     return MaterialApp(
       title: buildProfile.formatWindowTitle('TierTask'),
       onGenerateTitle: (context) =>
           buildProfile.formatWindowTitle(AppLocalizations.of(context).appTitle),
       debugShowCheckedModeBanner: false,
-      locale: themeState.locale,
+      locale: locale,
       localizationsDelegates: const [
         AppLocalizations.delegate,
         ...GlobalMaterialLocalizations.delegates,
       ],
       supportedLocales: AppLocalizations.supportedLocales,
-      themeMode: UiIconMapper.flutterThemeMode(themeState.themeMode),
-      theme: preset.light.toThemeData(),
-      darkTheme: preset.dark.toThemeData(),
-      home: const TierTaskShellScreen(),
+      themeMode: UiDomainMappers.flutterThemeMode(themeMode),
+      theme: themes.light,
+      darkTheme: themes.dark,
+      home: const _BackgroundServicesHost(child: TierTaskShellScreen()),
     );
   }
 
@@ -102,6 +127,19 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
         state == AppLifecycleState.paused) {
       unawaited(_flushRemoteLogQuietly());
     }
+  }
+
+  /// Returns cached light and dark [ThemeData] instances for [palette].
+  ({ThemeData light, ThemeData dark}) _resolveCachedThemes(
+    AppThemePalette palette,
+  ) {
+    return switch (palette) {
+      AppThemePalette.calm => (light: _calmLightTheme, dark: _calmDarkTheme),
+      AppThemePalette.plumUmber => (
+        light: _plumLightTheme,
+        dark: _plumDarkTheme,
+      ),
+    };
   }
 }
 

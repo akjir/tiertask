@@ -17,12 +17,19 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/settings_controller.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/ui_telemetry.dart';
+import '../../models/app_workspace.dart';
+import '../../models/tdf_file_path.dart';
+import '../../providers/config_providers.dart';
+import '../../providers/settings_draft_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/ui_telemetry.dart';
+import '../../providers/workspace_providers.dart';
+import '../components/ui_dialog_frame.dart';
+import '../components/ui_searchable_picker.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_field.dart';
 import '../widgets/entity_card_chrome.dart';
 
 /// Body input field for [_RenameLocalFileModal].
@@ -104,7 +111,7 @@ class _RenameLocalFileModalState extends ConsumerState<_RenameLocalFileModal> {
   void initState() {
     super.initState();
     _controller = TextEditingController(
-      text: _stripTdfExtension(widget.currentFileName),
+      text: TdfFilePath.extractFileBaseName(widget.currentFileName),
     );
   }
 
@@ -118,7 +125,7 @@ class _RenameLocalFileModalState extends ConsumerState<_RenameLocalFileModal> {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final isBusy = ref.watch(
-      settingsControllerProvider.select((state) => state.isBusy),
+      settingsDraftProvider.select((state) => state.isStorageOperationBusy),
     );
 
     return UiDialogFrame(
@@ -136,9 +143,7 @@ class _RenameLocalFileModalState extends ConsumerState<_RenameLocalFileModal> {
         isBusy: isBusy,
         errorText: _resolveErrorText(localizations),
         onChanged: _handleInputChanged,
-        onSubmitted: (_) async {
-          await _handleSubmit();
-        },
+        onSubmitted: _triggerSubmitFromInput,
       ),
       footer: EntityModalActionFooter(
         cancelKey: const ValueKey<String>('rename_local_file_cancel_button'),
@@ -147,9 +152,7 @@ class _RenameLocalFileModalState extends ConsumerState<_RenameLocalFileModal> {
         confirmVariant: UiButtonVariant.primary,
         isBusy: isBusy,
         onCancel: widget.onClose,
-        onConfirm: () async {
-          await _handleSubmit();
-        },
+        onConfirm: _triggerSubmit,
       ),
     );
   }
@@ -159,10 +162,10 @@ class _RenameLocalFileModalState extends ConsumerState<_RenameLocalFileModal> {
     setState(() => _submitError = null);
   }
 
-  /// Commits the rename via [SettingsController.renameLocalFile] and closes on success.
+  /// Commits the rename via [SettingsDraftNotifier.renameLocalFile] and closes on success.
   Future<void> _handleSubmit() async {
     final result = await ref
-        .read(settingsControllerProvider.notifier)
+        .read(settingsDraftProvider.notifier)
         .renameLocalFile(_controller.text);
     if (!mounted) {
       return;
@@ -183,6 +186,16 @@ class _RenameLocalFileModalState extends ConsumerState<_RenameLocalFileModal> {
       return localizations.localFileNameErrorInvalid;
     }
     return _submitError;
+  }
+
+  /// Dispatches async local file rename from synchronous button callbacks.
+  void _triggerSubmit() {
+    unawaited(_handleSubmit());
+  }
+
+  /// Dispatches async local file rename from text submission callbacks.
+  void _triggerSubmitFromInput(String _) {
+    unawaited(_handleSubmit());
   }
 }
 
@@ -289,8 +302,12 @@ class _SelectLocalFileModalState extends ConsumerState<_SelectLocalFileModal> {
   @override
   void initState() {
     super.initState();
-    final settingsNotifier = ref.read(settingsControllerProvider.notifier);
-    final currentFileName = ref.read(settingsControllerProvider).localFileName;
+    final settingsNotifier = ref.read(settingsDraftProvider.notifier);
+    final localFilePath =
+        ref.read(webDavConfigProvider).asData?.value.localFilePath ??
+        ref.read(activeWorkspaceProvider).asData?.value.config.localFilePath ??
+        '';
+    final currentFileName = TdfFilePath.extractFileNameFromPath(localFilePath);
     _existingFileNames = settingsNotifier.listLocalTdfFileNames();
     _fileNameController = TextEditingController(text: currentFileName);
   }
@@ -305,7 +322,7 @@ class _SelectLocalFileModalState extends ConsumerState<_SelectLocalFileModal> {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final isBusy = ref.watch(
-      settingsControllerProvider.select((state) => state.isBusy),
+      settingsDraftProvider.select((state) => state.isStorageOperationBusy),
     );
     final selectedName = _normalizeTdfFileName(_fileNameController.text);
 
@@ -371,10 +388,10 @@ class _SelectLocalFileModalState extends ConsumerState<_SelectLocalFileModal> {
     });
   }
 
-  /// Submits the chosen `.tdf` filename via [SettingsController.selectLocalFile].
+  /// Submits the chosen `.tdf` filename via [SettingsDraftNotifier.selectLocalFile].
   Future<void> _handleSubmit() async {
     final result = await ref
-        .read(settingsControllerProvider.notifier)
+        .read(settingsDraftProvider.notifier)
         .selectLocalFile(chosenFileName: _fileNameController.text);
     if (!mounted) {
       return;
@@ -388,7 +405,7 @@ class _SelectLocalFileModalState extends ConsumerState<_SelectLocalFileModal> {
     }
   }
 
-  /// Resolves live client validation or controller error text.
+  /// Resolves live client validation or persistence error text.
   String? _resolveErrorText(AppLocalizations localizations) {
     final raw = _fileNameController.text;
     if (raw.isNotEmpty && !_isValidLocalFileName(raw)) {
@@ -399,12 +416,12 @@ class _SelectLocalFileModalState extends ConsumerState<_SelectLocalFileModal> {
 
   /// Dispatches async local file selection from synchronous callbacks.
   void _triggerSubmit() {
-    _handleSubmit();
+    unawaited(_handleSubmit());
   }
 
   /// Dispatches async local file selection from text submission callbacks.
   void _triggerSubmitFromInput(String _) {
-    _handleSubmit();
+    unawaited(_handleSubmit());
   }
 }
 
@@ -438,32 +455,13 @@ Future<void> showSelectLocalFileModal(BuildContext context) {
   );
 }
 
-/// Returns `true` when [value] contains ASCII control characters (`0x00..0x1F`) or `DEL` (`0x7F`).
-bool _containsControlCharacters(String value) {
-  for (var i = 0; i < value.length; i++) {
-    final codeUnit = value.codeUnitAt(i);
-    if (codeUnit < 0x20 || codeUnit == 0x7F) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /// Validates that [rawValue] is a safe single local `.tdf` filename without path separators, `..`, or control characters.
 bool _isValidLocalFileName(String rawValue) {
-  if (_containsControlCharacters(rawValue)) {
+  if (AppWorkspace.hasControlCharacters(rawValue)) {
     return false;
   }
   final trimmed = rawValue.trim();
-  if (trimmed.isEmpty ||
-      trimmed == '.' ||
-      trimmed == '..' ||
-      trimmed.contains('/') ||
-      trimmed.contains(r'\') ||
-      trimmed.contains('..')) {
-    return false;
-  }
-  return _stripTdfExtension(trimmed).isNotEmpty;
+  return TdfFilePath.isValidSingleFileName(trimmed) && !trimmed.contains('..');
 }
 
 /// Normalizes a trimmed filename by appending `.tdf` when absent so picker selection highlights consistently.
@@ -472,17 +470,5 @@ String _normalizeTdfFileName(String rawValue) {
   if (trimmed.isEmpty) {
     return '';
   }
-  if (trimmed.toLowerCase().endsWith('.tdf')) {
-    return trimmed;
-  }
-  return '$trimmed.tdf';
-}
-
-/// Removes a trailing `.tdf` extension case-insensitively when present.
-String _stripTdfExtension(String fileName) {
-  final trimmed = fileName.trim();
-  if (trimmed.length >= 4 && trimmed.toLowerCase().endsWith('.tdf')) {
-    return trimmed.substring(0, trimmed.length - 4);
-  }
-  return trimmed;
+  return TdfFilePath.ensureTdfExtension(trimmed);
 }

@@ -182,11 +182,16 @@ class ActiveWorkspaceNotifier extends AsyncNotifier<AppWorkspace> {
 
   /// Updates and persists [newConfig] for the currently active workspace.
   Future<void> updateActiveConfig(WebDavConfig newConfig) async {
+    final previousSummary = state.asData?.value.summary;
     final repository = ref.read(settingsRepositoryProvider);
     await repository.saveConfig(newConfig);
     final reloaded = await repository.loadActiveWorkspace();
     state = AsyncData(reloaded);
-    ref.read(_workspaceListRevisionProvider.notifier).bump();
+    if (previousSummary == null ||
+        previousSummary.name != reloaded.name ||
+        previousSummary.localFilePath != reloaded.config.localFilePath) {
+      ref.read(_workspaceListRevisionProvider.notifier).bump();
+    }
   }
 
   /// Unloads the current [AppWorkspace] snapshot and replaces it with [nextWorkspace].

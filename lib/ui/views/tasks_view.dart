@@ -17,28 +17,68 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import '../../l10n/app_localizations.dart';
-import '../../presentation/app_shell_controller.dart';
-import '../../presentation/entity_controller.dart';
-import '../../presentation/floating_notice_controller.dart';
-import '../../presentation/shell_models.dart';
-import '../../presentation/sync_controller.dart';
-import '../../presentation/task_controller.dart';
-import '../../presentation/tasks_view_model.dart';
-import '../../presentation/view_model_primitives.dart';
+import '../../l10n/storage_file_read_localization_extension.dart';
+import '../../l10n/tier_localization_extension.dart';
+import '../../models/app_workspace.dart';
+import '../../models/location_state.dart';
+import '../../models/storage_file_read_status.dart';
+import '../../models/task_board.dart';
+import '../../models/task_item.dart';
+import '../../models/task_tier.dart';
+import '../../models/tdf_error.dart';
+import '../../models/tdf_location.dart';
+import '../../models/tdf_metadata.dart';
+import '../../models/tdf_sync_metadata.dart';
+import '../../models/webdav_config.dart';
+import '../../providers/board_actions_provider.dart';
+import '../../providers/board_providers.dart';
+import '../../providers/config_providers.dart';
+import '../../providers/entity_actions_provider.dart';
+import '../../providers/floating_notice_providers.dart';
+import '../../providers/location_providers.dart';
+import '../../providers/shell_providers.dart';
+import '../../providers/sync_providers.dart';
+import '../../providers/task_providers.dart';
+import '../../providers/task_schedule_helper.dart';
+import '../../providers/workspace_providers.dart';
+import '../components/ui_quick_composer.dart';
 import '../dialogs/compact_label_picker_sheet.dart';
-import '../ui_icon_mapper.dart';
+import '../layout/ui_page_header.dart';
+import '../primitives/ui_banner.dart';
+import '../primitives/ui_button.dart';
+import '../primitives/ui_card.dart';
+import '../primitives/ui_field.dart';
+import '../primitives/ui_pill.dart';
+import '../primitives/ui_segmented_control.dart';
+import '../tokens/ui_breakpoints.dart';
+import '../tokens/ui_theme_tokens.dart';
+import '../ui_domain_mappers.dart';
 import '../widgets/entity_label_picker.dart';
 import 'task_card.dart';
 import 'task_draft_card.dart';
 
-/// Maximum single-line task title length allowed by `TDF 0.8.0` (`maxTdfTextLength`).
-const int _maxTaskTitleLength = 500;
-
 /// Duration used for smooth `Scrollable.ensureVisible` entity card reveals (`U-LAYOUT-007`).
 const Duration _revealDuration = Duration(milliseconds: 220);
+
+/// Operational banner kinds displayed in priority order above the task list (`U-UX-007`).
+enum _TasksBannerKind {
+  /// WebDAV storage mode selected without complete server configuration.
+  unconfiguredWebDav,
+
+  /// `TDF-DEL-003` deletion conflict requiring user resolution.
+  deletionConflict,
+
+  /// `TDF-REC-002` generation recovery requiring user resolution.
+  recoveryRequired,
+
+  /// Partial file readability error where one active target still loaded cleanly.
+  partialFileRead,
+
+  /// Dismissible synchronization or generation rollback error.
+  syncError,
+}
 
 /// Pinned bottom dock Task Quick-Add composer (`U-CARD-006`, `U-LAYOUT-005`).
 ///
@@ -88,7 +128,7 @@ class _FileReadDiagnosticRow extends StatelessWidget {
   final Color iconColor;
 
   /// Per-target diagnostic entry.
-  final FileReadDiagnosticLineViewModel line;
+  final FileReadDiagnosticLine line;
 
   /// Localized readable status pill text.
   final String okLabel;
@@ -138,7 +178,7 @@ class _FileReadDiagnosticRowDetails extends StatelessWidget {
   });
 
   /// Per-target diagnostic entry.
-  final FileReadDiagnosticLineViewModel line;
+  final FileReadDiagnosticLine line;
 
   /// Localized readable status pill text.
   final String okLabel;
@@ -190,7 +230,7 @@ class _FileReadDiagnosticsCard extends StatelessWidget {
   const _FileReadDiagnosticsCard({required this.lines});
 
   /// Per-target readability diagnostics lines.
-  final List<FileReadDiagnosticLineViewModel> lines;
+  final List<FileReadDiagnosticLine> lines;
 
   @override
   Widget build(BuildContext context) {
@@ -218,6 +258,26 @@ class _FileReadDiagnosticsCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Immutable full-screen file-read or workspace load error descriptor.
+@immutable
+class _FullScreenFileReadError {
+  /// Creates a [_FullScreenFileReadError].
+  const _FullScreenFileReadError({
+    required this.title,
+    required this.summary,
+    required this.lines,
+  });
+
+  /// Per-target local and remote readability lines.
+  final List<FileReadDiagnosticLine> lines;
+
+  /// Localized summary describing the load failure.
+  final String summary;
+
+  /// Localized error banner heading.
+  final String title;
 }
 
 /// Renders the design-system [UiQuickComposer] bound to shell expansion and popover handlers.
@@ -257,7 +317,7 @@ class _QuickAddComposerSurface extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
+    final shellNotifier = ref.read(shellProvider.notifier);
 
     return UiQuickComposer(
       key: const ValueKey<String>('tasks_quick_add_composer'),
@@ -265,7 +325,7 @@ class _QuickAddComposerSurface extends ConsumerWidget {
       focusNode: session.titleFocusNode,
       placeholder: localizations.quickAddHint,
       submitLabel: localizations.actionAdd,
-      maxLength: _maxTaskTitleLength,
+      maxLength: maxTdfTextLength,
       enabled: !isBusy,
       expandDraftLabel: localizations.actionOpenAsDraft,
       isCollapsibleOnCompact: true,
@@ -317,8 +377,8 @@ class _QuickAddDraftLabelsBar extends StatelessWidget {
   /// Callback removing a selected label from the Quick-Add draft.
   final ValueChanged<String> onRemoveLabel;
 
-  /// Resolved selected label options in alphabetical order.
-  final List<LabelPickerOptionViewModel> selectedLabels;
+  /// Resolved selected domain labels in alphabetical order.
+  final List<TdfLabel> selectedLabels;
 
   @override
   Widget build(BuildContext context) {
@@ -335,10 +395,7 @@ class _QuickAddDraftLabelsBar extends StatelessWidget {
             key: ValueKey<String>('quick_add_label_chip_${label.id}'),
             label: label.name,
             variant: UiPillVariant.splitChip,
-            colorDot: switch (label.colorValue) {
-              final value? => Color(value),
-              null => tokens.colors.accent,
-            },
+            colorDot: _resolveLabelColorDot(label.color, tokens),
             removeTooltip: localizations.labelPickerRemoveTooltip(label.name),
             enabled: !isBusy,
             onRemove: isBusy ? null : () => onRemoveLabel(label.id),
@@ -397,14 +454,14 @@ class _QuickAddFooterSlot extends ConsumerWidget {
   /// Toggles the desktop label popover or triggers the compact mobile label sheet.
   void _handleOpenPicker(WidgetRef ref) {
     if (!isCompact) {
-      final shellNotifier = ref.read(appShellControllerProvider.notifier);
-      if (ref.read(appShellControllerProvider).activeInlineEdit != null) {
+      final shellNotifier = ref.read(shellProvider.notifier);
+      if (ref.read(shellProvider).activeInlineEdit != null) {
         shellNotifier.closeInlineEdit();
       }
       shellNotifier.setLabelPickerOpen(!isPopoverOpen);
       return;
     }
-    session.onOpenCompactLabelPicker(session.viewModel, session.selectedIds);
+    session.onOpenCompactLabelPicker(session.selectedIds);
   }
 }
 
@@ -419,10 +476,7 @@ class _QuickAddLabelPopover extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final tokens = UiThemeTokens.of(context);
-    final query = ref.watch(
-      appShellControllerProvider.select((shell) => shell.labelPickerQuery),
-    );
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
+    final shellNotifier = ref.read(shellProvider.notifier);
 
     return Column(
       key: const ValueKey<String>('quick_add_label_popover'),
@@ -435,14 +489,12 @@ class _QuickAddLabelPopover extends ConsumerWidget {
         ),
         SizedBox(height: tokens.spacing.space2),
         EntitySearchableLabelPicker(
-          allLabels: session.viewModel.allLabels,
+          allLabels: session.allLabels,
           selectedIds: session.selectedIds,
-          hasBothScopedAndGlobal:
-              session.viewModel.hasBothScopedAndGlobalLabels,
+          openCountsByLabelId: session.openLabelCounts,
           showSelectedChips: false,
           autoFocusSearch: true,
-          query: query,
-          onQueryChanged: shellNotifier.setLabelPickerQuery,
+          useSharedQuery: true,
           onToggleLabel: session.onToggleDraftLabel,
           onCreateAndAssign: session.onCreateAndAssignLabel,
           onOpenLabelInfo: session.onOpenLabelInfo,
@@ -517,28 +569,28 @@ class _QuickAddPlacementControl extends StatelessWidget {
   final bool enabled;
 
   /// Callback notified when placement changes.
-  final ValueChanged<TaskPlacementOption> onChanged;
+  final ValueChanged<QuickAddMode> onChanged;
 
   /// Active placement selection.
-  final TaskPlacementOption placement;
+  final QuickAddMode placement;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    return UiSegmentedControl<TaskPlacementOption>(
+    return UiSegmentedControl<QuickAddMode>(
       key: const ValueKey<String>('quick_add_placement_control'),
       mode: UiSegmentedControlMode.vertical,
-      segments: <UiSegment<TaskPlacementOption>>[
-        UiSegment<TaskPlacementOption>(
-          value: TaskPlacementOption.queue,
+      segments: <UiSegment<QuickAddMode>>[
+        UiSegment<QuickAddMode>(
+          value: QuickAddMode.standard,
           label: localizations.placementQueueOption,
         ),
-        UiSegment<TaskPlacementOption>(
-          value: TaskPlacementOption.priority,
+        UiSegment<QuickAddMode>(
+          value: QuickAddMode.priority,
           label: localizations.quickAddPriority,
         ),
-        UiSegment<TaskPlacementOption>(
-          value: TaskPlacementOption.someday,
+        UiSegment<QuickAddMode>(
+          value: QuickAddMode.someday,
           label: localizations.tier5Name,
         ),
       ],
@@ -557,7 +609,8 @@ class _QuickAddSession {
   const _QuickAddSession._({
     required this.titleController,
     required this.titleFocusNode,
-    required this.viewModel,
+    required this.allLabels,
+    required this.openLabelCounts,
     required this.placement,
     required this.selectedLabels,
     required this.selectedIds,
@@ -574,27 +627,28 @@ class _QuickAddSession {
   factory _QuickAddSession.from({
     required TextEditingController titleController,
     required FocusNode? titleFocusNode,
-    required TasksViewModel viewModel,
-    required TaskPlacementOption placement,
+    required List<TdfLabel> allLabels,
+    required Map<String, int> openLabelCounts,
+    required QuickAddMode placement,
     required Set<String> draftLabelIds,
-    required ValueChanged<TaskPlacementOption> onPlacementChanged,
+    required ValueChanged<QuickAddMode> onPlacementChanged,
     required ValueChanged<String> onToggleDraftLabel,
     required ValueChanged<String> onCreateAndAssignLabel,
     required ValueChanged<String> onOpenLabelInfo,
-    required void Function(TasksViewModel viewModel, Set<String> selectedIds)
-    onOpenCompactLabelPicker,
+    required ValueChanged<Set<String>> onOpenCompactLabelPicker,
     required ValueChanged<Set<String>> onExpandDraft,
     required ValueChanged<Set<String>> onSubmit,
   }) {
     final selectedLabels = _resolveValidSelectedLabels(
-      viewModel.allLabels,
+      allLabels,
       draftLabelIds,
     );
     final selectedIds = <String>{for (final label in selectedLabels) label.id};
     return _QuickAddSession._(
       titleController: titleController,
       titleFocusNode: titleFocusNode,
-      viewModel: viewModel,
+      allLabels: allLabels,
+      openLabelCounts: openLabelCounts,
       placement: placement,
       selectedLabels: selectedLabels,
       selectedIds: selectedIds,
@@ -608,6 +662,9 @@ class _QuickAddSession {
     );
   }
 
+  /// Sorted workspace labels available in the desktop popover.
+  final List<TdfLabel> allLabels;
+
   /// Callback creating and immediately assigning a new workspace label to the draft.
   final ValueChanged<String> onCreateAndAssignLabel;
 
@@ -615,14 +672,13 @@ class _QuickAddSession {
   final ValueChanged<Set<String>> onExpandDraft;
 
   /// Callback presenting the compact mobile label picker bottom sheet.
-  final void Function(TasksViewModel viewModel, Set<String> selectedIds)
-  onOpenCompactLabelPicker;
+  final ValueChanged<Set<String>> onOpenCompactLabelPicker;
 
   /// Callback opening a label inside Labels manager.
   final ValueChanged<String> onOpenLabelInfo;
 
   /// Callback updating the selected placement option.
-  final ValueChanged<TaskPlacementOption> onPlacementChanged;
+  final ValueChanged<QuickAddMode> onPlacementChanged;
 
   /// Callback submitting Quick-Add with the resolved selected label identifiers.
   final ValueChanged<Set<String>> onSubmit;
@@ -630,40 +686,127 @@ class _QuickAddSession {
   /// Callback toggling label membership on the Quick-Add draft.
   final ValueChanged<String> onToggleDraftLabel;
 
-  /// Active placement selection.
-  final TaskPlacementOption placement;
+  /// Precomputed open task counts keyed by label identifier.
+  final Map<String, int> openLabelCounts;
 
-  /// Resolved selected draft label identifiers still present in [viewModel].
+  /// Active placement selection.
+  final QuickAddMode placement;
+
+  /// Resolved selected draft label identifiers still present in [allLabels].
   final Set<String> selectedIds;
 
-  /// Resolved selected label options in alphabetical order.
-  final List<LabelPickerOptionViewModel> selectedLabels;
+  /// Resolved selected domain labels in alphabetical order.
+  final List<TdfLabel> selectedLabels;
 
   /// Controller for the Quick-Add title input.
   final TextEditingController titleController;
 
   /// Optional caller-owned focus node for the title input.
   final FocusNode? titleFocusNode;
+}
 
-  /// Projected Tasks view model.
-  final TasksViewModel viewModel;
+/// Immutable descriptor for one operational status banner rendered by [_TasksStatusBanners].
+@immutable
+class _TasksBannerEntry {
+  /// Creates a [_TasksBannerEntry].
+  const _TasksBannerEntry({
+    required this.kind,
+    required this.tone,
+    required this.message,
+    required this.dismissible,
+    this.primaryActionLabel,
+    this.secondaryActionLabel,
+    this.diagnosticLines = const <FileReadDiagnosticLine>[],
+  });
+
+  /// Optional structured per-target diagnostics lines for partial file-read errors.
+  final List<FileReadDiagnosticLine> diagnosticLines;
+
+  /// Whether the user can dismiss this banner until a new error arrives.
+  final bool dismissible;
+
+  /// Operational banner category determining keys and action dispatch.
+  final _TasksBannerKind kind;
+
+  /// Primary localized banner message.
+  final String message;
+
+  /// Optional primary action button label.
+  final String? primaryActionLabel;
+
+  /// Optional secondary action button label.
+  final String? secondaryActionLabel;
+
+  /// Design-system semantic banner tone.
+  final UiBannerTone tone;
+}
+
+/// Immutable per-evaluation snapshot shared across header, draft slot, and lazy task cards.
+@immutable
+class _TasksBoardContext {
+  /// Creates a [_TasksBoardContext].
+  const _TasksBoardContext({
+    required this.board,
+    required this.activeLabelId,
+    required this.labelsById,
+    required this.locationsById,
+    required this.tasksById,
+    required this.configuration,
+    required this.nowUtc,
+    required this.localNow,
+    required this.activeFix,
+    required this.currentLocalDateTimeHint,
+  });
+
+  /// Active foreground GPS fix when status is [LocationStatus.found], or `null`.
+  final LocationFix? activeFix;
+
+  /// Active sidebar label filter identifier, or `null` for `All Tasks`.
+  final String? activeLabelId;
+
+  /// Evaluated task board snapshot for [activeLabelId].
+  final TaskBoard board;
+
+  /// Active workspace configuration supplying timezone and due lead-window settings.
+  final WebDavConfig configuration;
+
+  /// Current workspace local wall-clock timestamp formatted for date/time pickers.
+  final String currentLocalDateTimeHint;
+
+  /// Lookup map of workspace labels by identifier.
+  final Map<String, TdfLabel> labelsById;
+
+  /// Current local wall-clock evaluation timestamp in [configuration]'s timezone.
+  final DateTime localNow;
+
+  /// Lookup map of workspace locations by identifier.
+  final Map<String, TdfLocation> locationsById;
+
+  /// Current evaluation UTC timestamp.
+  final DateTime nowUtc;
+
+  /// Lookup map of all workspace tasks by identifier for prerequisite evaluation.
+  final Map<String, TaskItem> tasksById;
 }
 
 /// Compact viewport tier selector dropdown rendered above [UiPageHeader] when Search is closed.
 class _TasksCompactTierSelect extends ConsumerWidget {
   /// Creates a [_TasksCompactTierSelect].
-  const _TasksCompactTierSelect({required this.tierOptions});
+  const _TasksCompactTierSelect({
+    required this.board,
+    required this.activeTier,
+  });
 
-  /// Projected tier option labels and task counts.
-  final List<CompactTierOptionViewModel> tierOptions;
+  /// Currently selected domain tier.
+  final TaskTier activeTier;
+
+  /// Evaluated board providing per-tier counts.
+  final TaskBoard board;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final activeTier = ref.watch(
-      appShellControllerProvider.select((shell) => shell.activeTier),
-    );
 
     return UiField(
       key: const ValueKey<String>('compact_tier_select'),
@@ -671,27 +814,89 @@ class _TasksCompactTierSelect extends ConsumerWidget {
       height: tokens.spacing.touchTargetMobile,
       selectValue: activeTier.name,
       selectOptions: <UiSelectOption>[
-        for (final option in tierOptions)
+        for (final tier in TaskTier.values)
           UiSelectOption(
-            value: option.tier.name,
-            label: '${option.label} · ${option.count}',
+            value: tier.name,
+            label:
+                '${localizations.tierName(tier)} · ${board.tasksForTier(tier).length}',
           ),
       ],
       semanticLabel: localizations.sectionTasksTitle,
       onSelectChanged: (value) {
-        final nextTier = _parseShellTier(value);
+        final nextTier = _parseTaskTier(value);
         if (nextTier != null) {
-          ref.read(appShellControllerProvider.notifier).selectTier(nextTier);
+          ref.read(shellProvider.notifier).selectTier(nextTier);
         }
       },
     );
   }
 }
 
-/// Full-screen file-read error state replacing [TasksView] when all active targets fail (`U-UX-007`).
-class _TasksFullScreenErrorBody extends StatelessWidget {
-  /// Creates a [_TasksFullScreenErrorBody].
-  const _TasksFullScreenErrorBody({
+/// Narrow-scoped Task Draft Card slot mounted only while [EntityDraftKind.task] is active.
+class _TasksDraftCardSlot extends ConsumerWidget {
+  /// Creates a [_TasksDraftCardSlot].
+  const _TasksDraftCardSlot({required this.boardContext});
+
+  /// Shared evaluated board context supplying labels, locations, open counts, and local timestamp hint.
+  final _TasksBoardContext boardContext;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isTaskDraftOpen = ref.watch(
+      shellProvider.select(
+        (shell) => shell.activeDraft == EntityDraftKind.task,
+      ),
+    );
+    if (!isTaskDraftOpen) {
+      return const SizedBox.shrink();
+    }
+    final tokens = UiThemeTokens.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        SizedBox(height: tokens.spacing.space4),
+        TaskDraftCard(
+          allLabels: boardContext.board.sortedLabels,
+          allLocations: boardContext.board.sortedLocations,
+          openLabelCounts: boardContext.board.openTaskCountsByLabel,
+          currentLocalDateTimeHint: boardContext.currentLocalDateTimeHint,
+        ),
+      ],
+    );
+  }
+}
+
+/// Empty-state sliver displayed when the active tier or search view has zero visible tasks.
+class _TasksEmptySliver extends StatelessWidget {
+  /// Creates a [_TasksEmptySliver].
+  const _TasksEmptySliver({required this.activeTier, required this.searchOpen});
+
+  /// Active domain tier when not in Global Search.
+  final TaskTier activeTier;
+
+  /// Whether Global Search mode is active.
+  final bool searchOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return SliverToBoxAdapter(
+      child: UiBanner(
+        key: const ValueKey<String>('tasks_empty_banner'),
+        variant: UiBannerVariant.emptyState,
+        message: searchOpen
+            ? localizations.searchEmptyHint
+            : UiDomainMappers.tierEmptyHint(activeTier, localizations),
+      ),
+    );
+  }
+}
+
+/// Full-screen file-read error banner card rendered inside [_TasksFullScreenErrorBody].
+class _TasksFullScreenErrorBanner extends StatelessWidget {
+  /// Creates a [_TasksFullScreenErrorBanner].
+  const _TasksFullScreenErrorBanner({
     required this.errorReport,
     required this.isSyncing,
     required this.onOpenSettings,
@@ -699,9 +904,9 @@ class _TasksFullScreenErrorBody extends StatelessWidget {
   });
 
   /// Structured file-read diagnostics report.
-  final FileReadReportViewModel errorReport;
+  final _FullScreenFileReadError errorReport;
 
-  /// Whether retry synchronization is currently in flight.
+  /// Whether a synchronization retry is currently in flight.
   final bool isSyncing;
 
   /// Callback navigating to Settings view.
@@ -713,73 +918,97 @@ class _TasksFullScreenErrorBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    return UiBanner(
+      key: const ValueKey<String>('tasks_full_error_banner'),
+      variant: UiBannerVariant.fullError,
+      icon: Icons.cloud_off_outlined,
+      title: errorReport.title,
+      message: errorReport.summary,
+      detailsChild: errorReport.lines.isNotEmpty
+          ? _FileReadDiagnosticsCard(lines: errorReport.lines)
+          : null,
+      actions: <Widget>[
+        UiButton(
+          key: const ValueKey<String>('tasks_full_error_settings_button'),
+          label: localizations.actionSettings,
+          leadingIcon: Icons.settings_outlined,
+          variant: UiButtonVariant.secondary,
+          onPressed: onOpenSettings,
+        ),
+        UiButton(
+          key: const ValueKey<String>('tasks_full_error_retry_button'),
+          label: localizations.actionRetry,
+          leadingIcon: Icons.refresh_rounded,
+          variant: UiButtonVariant.primary,
+          isLoading: isSyncing,
+          onPressed: isSyncing ? null : onRetry,
+        ),
+      ],
+    );
+  }
+}
+
+/// Full-screen file-read error state replacing [TasksView] when all active targets fail (`U-UX-007`).
+class _TasksFullScreenErrorBody extends ConsumerWidget {
+  /// Creates a [_TasksFullScreenErrorBody].
+  const _TasksFullScreenErrorBody({
+    required this.errorReport,
+    required this.onOpenSettings,
+    required this.onRetry,
+  });
+
+  /// Structured file-read diagnostics report.
+  final _FullScreenFileReadError errorReport;
+
+  /// Callback navigating to Settings view.
+  final VoidCallback onOpenSettings;
+
+  /// Callback retrying file load / sync.
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     final tokens = UiThemeTokens.of(context);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
+    final isSyncing = ref.watch(
+      syncActionsProvider.select((state) => state.isBusy),
+    );
 
     return Center(
       child: SingleChildScrollView(
         padding: tokens.spacing.mainContentPadding(viewport),
-        child: UiBanner(
-          key: const ValueKey<String>('tasks_full_error_banner'),
-          variant: UiBannerVariant.fullError,
-          icon: Icons.cloud_off_outlined,
-          title: errorReport.title,
-          message: errorReport.summary,
-          detailsChild: errorReport.lines.isNotEmpty
-              ? _FileReadDiagnosticsCard(lines: errorReport.lines)
-              : null,
-          actions: <Widget>[
-            UiButton(
-              key: const ValueKey<String>('tasks_full_error_settings_button'),
-              label: localizations.actionSettings,
-              leadingIcon: Icons.settings_outlined,
-              variant: UiButtonVariant.secondary,
-              onPressed: onOpenSettings,
-            ),
-            UiButton(
-              key: const ValueKey<String>('tasks_full_error_retry_button'),
-              label: localizations.actionRetry,
-              leadingIcon: Icons.refresh_rounded,
-              variant: UiButtonVariant.primary,
-              isLoading: isSyncing,
-              onPressed: isSyncing ? null : onRetry,
-            ),
-          ],
+        child: _TasksFullScreenErrorBanner(
+          errorReport: errorReport,
+          isSyncing: isSyncing,
+          onOpenSettings: onOpenSettings,
+          onRetry: onRetry,
         ),
       ),
     );
   }
 }
 
-/// Top non-card sliver of [TasksView]: page header, status banners, and optional Task Draft Card.
+/// Top non-card sliver of [TasksView]: page header, decoupled status banners, and optional Task Draft Card.
 class _TasksHeaderAndBannersSliver extends StatelessWidget {
   /// Creates a [_TasksHeaderAndBannersSliver].
   const _TasksHeaderAndBannersSliver({
-    required this.viewModel,
-    required this.isTaskDraftOpen,
+    required this.boardContext,
     required this.isCompact,
-    required this.isSyncing,
     required this.padding,
     required this.onRetrySync,
   });
 
+  /// Shared evaluated board snapshot.
+  final _TasksBoardContext boardContext;
+
   /// Whether viewport is compact (`<= 720`).
   final bool isCompact;
-
-  /// Whether a synchronization retry is currently in flight.
-  final bool isSyncing;
-
-  /// Whether the uncommitted Task Draft Card is open.
-  final bool isTaskDraftOpen;
 
   /// Callback retrying synchronization.
   final VoidCallback onRetrySync;
 
   /// Outer sliver padding around header, banners, and draft card.
   final EdgeInsets padding;
-
-  /// Projected Tasks view model.
-  final TasksViewModel viewModel;
 
   @override
   Widget build(BuildContext context) {
@@ -792,23 +1021,12 @@ class _TasksHeaderAndBannersSliver extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            _TasksPageHeaderSection(viewModel: viewModel, isCompact: isCompact),
-            if (viewModel.banners.isNotEmpty)
-              _TasksStatusBannersList(
-                banners: viewModel.banners,
-                isSyncing: isSyncing,
-                onRetrySync: onRetrySync,
-              ),
-            if (isTaskDraftOpen) ...<Widget>[
-              SizedBox(height: tokens.spacing.space4),
-              TaskDraftCard(
-                allLabels: viewModel.allLabels,
-                allLocations: viewModel.allLocations,
-                hasBothScopedAndGlobalLabels:
-                    viewModel.hasBothScopedAndGlobalLabels,
-                currentLocalDateTimeHint: viewModel.currentLocalDateTimeHint,
-              ),
-            ],
+            _TasksPageHeaderSection(
+              boardContext: boardContext,
+              isCompact: isCompact,
+            ),
+            _TasksStatusBanners(onRetrySync: onRetrySync),
+            _TasksDraftCardSlot(boardContext: boardContext),
             SizedBox(height: tokens.spacing.space4),
           ],
         ),
@@ -822,22 +1040,30 @@ class _TasksListCardItem extends StatelessWidget {
   /// Creates a [_TasksListCardItem].
   const _TasksListCardItem({
     required this.task,
+    required this.tier,
+    required this.isSearchMode,
     required this.isLast,
-    required this.viewModel,
+    required this.boardContext,
     required this.revealKey,
   });
+
+  /// Shared evaluated board context providing lookup maps, configuration, and evaluation clock.
+  final _TasksBoardContext boardContext;
 
   /// Whether this item is the last visible task card in the list.
   final bool isLast;
 
+  /// Whether Global Search mode is active.
+  final bool isSearchMode;
+
   /// Stable [GlobalKey] used for post-frame reveal scrolling.
   final GlobalKey revealKey;
 
-  /// Projected task card view model.
-  final TaskCardViewModel task;
+  /// Domain task item rendered by this row.
+  final TaskItem task;
 
-  /// Projected Tasks view model providing shared labels, locations, and hints.
-  final TasksViewModel viewModel;
+  /// Evaluated tier containing [task].
+  final TaskTier tier;
 
   @override
   Widget build(BuildContext context) {
@@ -852,10 +1078,19 @@ class _TasksListCardItem extends StatelessWidget {
         child: TaskCard(
           key: ValueKey<String>('task_card_${task.id}'),
           task: task,
-          allLabels: viewModel.allLabels,
-          allLocations: viewModel.allLocations,
-          hasBothScopedAndGlobalLabels: viewModel.hasBothScopedAndGlobalLabels,
-          currentLocalDateTimeHint: viewModel.currentLocalDateTimeHint,
+          tier: tier,
+          labelsById: boardContext.labelsById,
+          locationsById: boardContext.locationsById,
+          tasksById: boardContext.tasksById,
+          allLabels: boardContext.board.sortedLabels,
+          allLocations: boardContext.board.sortedLocations,
+          openLabelCounts: boardContext.board.openTaskCountsByLabel,
+          isSearchMode: isSearchMode,
+          activeLabelId: boardContext.activeLabelId,
+          configuration: boardContext.configuration,
+          nowUtc: boardContext.nowUtc,
+          localNow: boardContext.localNow,
+          activeFix: boardContext.activeFix,
         ),
       ),
     );
@@ -863,44 +1098,56 @@ class _TasksListCardItem extends StatelessWidget {
 }
 
 /// Lazy task list or empty-state sliver rendered inside [_TasksScrollableBody].
-class _TasksListSliver extends StatelessWidget {
+class _TasksListSliver extends ConsumerWidget {
   /// Creates a [_TasksListSliver].
   const _TasksListSliver({
-    required this.viewModel,
-    required this.isTaskDraftOpen,
+    required this.boardContext,
     required this.resolveRevealCardKey,
+    required this.onPruneRevealKeys,
   });
 
-  /// Whether the uncommitted Task Draft Card is open.
-  final bool isTaskDraftOpen;
+  /// Shared evaluated board snapshot.
+  final _TasksBoardContext boardContext;
+
+  /// Callback pruning stale owned reveal keys for task IDs no longer in the visible list.
+  final ValueChanged<Set<String>> onPruneRevealKeys;
 
   /// Callback resolving stable [GlobalKey]s for reveal targeting.
   final GlobalKey Function(String taskId) resolveRevealCardKey;
 
-  /// Projected Tasks view model.
-  final TasksViewModel viewModel;
-
   @override
-  Widget build(BuildContext context) {
-    if (viewModel.tasks.isEmpty && !isTaskDraftOpen) {
-      return SliverToBoxAdapter(
-        child: UiBanner(
-          key: const ValueKey<String>('tasks_empty_banner'),
-          variant: UiBannerVariant.emptyState,
-          message: viewModel.emptyHint,
-        ),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final shellState = ref.watch(shellProvider.select(_selectListShellSlice));
+    final searchQuery = shellState.searchOpen
+        ? ref.watch(searchQueryProvider)
+        : '';
+    final visibleEntries = _collectVisibleTasks(
+      board: boardContext.board,
+      activeTier: shellState.activeTier,
+      searchOpen: shellState.searchOpen,
+      searchQuery: searchQuery,
+    );
+    onPruneRevealKeys(<String>{
+      for (final entry in visibleEntries) entry.task.id,
+    });
+    if (visibleEntries.isEmpty && !shellState.isTaskDraftOpen) {
+      return _TasksEmptySliver(
+        activeTier: shellState.activeTier,
+        searchOpen: shellState.searchOpen,
       );
     }
 
     return SliverList.builder(
-      itemCount: viewModel.tasks.length,
+      itemCount: visibleEntries.length,
       itemBuilder: (context, index) {
-        final task = viewModel.tasks[index];
+        final entry = visibleEntries[index];
         return _TasksListCardItem(
-          task: task,
-          isLast: index + 1 >= viewModel.tasks.length,
-          viewModel: viewModel,
-          revealKey: resolveRevealCardKey(task.id),
+          task: entry.task,
+          tier: entry.tier,
+          isSearchMode: shellState.searchOpen,
+          isLast: index + 1 >= visibleEntries.length,
+          boardContext: boardContext,
+          revealKey: resolveRevealCardKey(entry.task.id),
         );
       },
     );
@@ -936,47 +1183,86 @@ class _TasksLoadingBody extends StatelessWidget {
 class _TasksPageHeaderSection extends ConsumerWidget {
   /// Creates a [_TasksPageHeaderSection].
   const _TasksPageHeaderSection({
-    required this.viewModel,
+    required this.boardContext,
     required this.isCompact,
   });
 
+  /// Shared evaluated board snapshot.
+  final _TasksBoardContext boardContext;
+
   /// Whether viewport is compact (`<= 720`).
   final bool isCompact;
-
-  /// Projected Tasks view model.
-  final TasksViewModel viewModel;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final searchOpen = ref.watch(
-      appShellControllerProvider.select((shell) => shell.searchOpen),
-    );
+    final shellState = ref.watch(shellProvider.select(_selectHeaderShellSlice));
+    final searchQuery = shellState.searchOpen
+        ? ref.watch(searchQueryProvider)
+        : '';
+    final meta = _computeHeaderMeta(localizations, shellState, searchQuery);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        if (isCompact && !searchOpen) ...<Widget>[
-          _TasksCompactTierSelect(tierOptions: viewModel.tierOptions),
+        if (isCompact && !shellState.searchOpen) ...<Widget>[
+          _TasksCompactTierSelect(
+            board: boardContext.board,
+            activeTier: shellState.activeTier,
+          ),
           SizedBox(height: tokens.spacing.space3),
         ],
         UiPageHeader(
           key: const ValueKey<String>('tasks_page_header'),
-          title: viewModel.headerTitle,
-          subtitle: viewModel.headerSubtitle,
-          countLabel: viewModel.headerCountLabel,
-          activeFilterLabel: viewModel.activeFilterLabelName,
+          title: meta.title,
+          subtitle: meta.subtitle,
+          countLabel: meta.countLabel,
+          activeFilterLabel: meta.activeFilterLabel?.name,
           activeFilterTooltip: localizations.activeFilterClearTooltip,
-          onClearActiveFilter: viewModel.activeFilterLabelId != null
-              ? () => ref
-                    .read(appShellControllerProvider.notifier)
-                    .selectLabelFilter(null)
+          onClearActiveFilter: meta.activeFilterLabel != null
+              ? () => ref.read(shellProvider.notifier).selectLabelFilter(null)
               : null,
-          showInlineFilterOnCompact: searchOpen,
+          showInlineFilterOnCompact: shellState.searchOpen,
         ),
       ],
+    );
+  }
+
+  /// Resolves localized title, subtitle, count badge, and active label filter for the header.
+  ({
+    String title,
+    String subtitle,
+    String countLabel,
+    TdfLabel? activeFilterLabel,
+  })
+  _computeHeaderMeta(
+    AppLocalizations localizations,
+    _HeaderShellSlice shellState,
+    String searchQuery,
+  ) {
+    final visibleCount = shellState.searchOpen
+        ? _countSearchMatches(boardContext.board, searchQuery)
+        : boardContext.board.tasksForTier(shellState.activeTier).length;
+    final wipLimit = shellState.searchOpen
+        ? null
+        : TaskScheduleHelper.tierWipLimit(shellState.activeTier);
+    final activeFilterLabel = switch (boardContext.activeLabelId) {
+      final labelId? => boardContext.labelsById[labelId],
+      null => null,
+    };
+    return (
+      title: shellState.searchOpen
+          ? localizations.searchViewTitle
+          : localizations.tierName(shellState.activeTier),
+      subtitle: shellState.searchOpen
+          ? localizations.searchViewSubtitle
+          : UiDomainMappers.tierSubtitle(shellState.activeTier, localizations),
+      countLabel: wipLimit != null
+          ? '$visibleCount / $wipLimit'
+          : '$visibleCount',
+      activeFilterLabel: activeFilterLabel,
     );
   }
 }
@@ -994,7 +1280,7 @@ class _TasksQuickAddDockBody extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     final isCompact = UiBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
     final shellState = ref.watch(
-      appShellControllerProvider.select(
+      shellProvider.select(
         (shell) => (
           compactComposerOpen: shell.compactComposerOpen,
           hasInlineEdit: shell.activeInlineEdit != null,
@@ -1003,7 +1289,7 @@ class _TasksQuickAddDockBody extends ConsumerWidget {
       ),
     );
     final isBusy = ref.watch(
-      taskControllerProvider.select((state) => state.isBusy),
+      boardActionsProvider.select((state) => state.isBusy),
     );
     final isPopoverOpen =
         !isCompact && shellState.labelPickerOpen && !shellState.hasInlineEdit;
@@ -1027,15 +1313,13 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
   late final TextEditingController _titleController;
 
   late Set<String> _draftLabelIds;
-  TaskPlacementOption _placement = TaskPlacementOption.queue;
+  QuickAddMode _placement = QuickAddMode.standard;
 
   @override
   void initState() {
     super.initState();
     _titleController = TextEditingController();
-    final initialActiveLabelId = ref
-        .read(appShellControllerProvider)
-        .activeLabelId;
+    final initialActiveLabelId = ref.read(shellProvider).activeLabelId;
     _draftLabelIds = initialActiveLabelId != null
         ? <String>{initialActiveLabelId}
         : <String>{};
@@ -1050,35 +1334,45 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
   @override
   Widget build(BuildContext context) {
     ref.listen<String?>(
-      appShellControllerProvider.select((shell) => shell.activeLabelId),
+      shellProvider.select((shell) => shell.activeLabelId),
       _handleActiveLabelFilterChanged,
     );
-
-    final viewModel = ref.watch(tasksViewModelProvider);
-    final activeDraft = ref.watch(
-      appShellControllerProvider.select((shell) => shell.activeDraft),
+    final hasWorkspaceError = ref.watch(
+      activeWorkspaceProvider.select((workspace) => workspace.hasError),
     );
-    if (viewModel.isLoading ||
-        viewModel.fullScreenFileReadError != null ||
-        activeDraft == EntityDraftKind.task) {
+    final boardSlice = ref.watch(
+      taskNotifierProvider.select(_selectQuickAddBoardSlice),
+    );
+    final isTaskDraftOpen = ref.watch(
+      shellProvider.select(
+        (shell) => shell.activeDraft == EntityDraftKind.task,
+      ),
+    );
+    if (hasWorkspaceError ||
+        boardSlice.hasFullError ||
+        boardSlice.isLoading ||
+        isTaskDraftOpen) {
       return const SizedBox.shrink();
     }
+    return _TasksQuickAddDockBody(session: _buildSession(boardSlice));
+  }
 
-    return _TasksQuickAddDockBody(
-      session: _QuickAddSession.from(
-        titleController: _titleController,
-        titleFocusNode: widget.titleFocusNode,
-        viewModel: viewModel,
-        placement: _placement,
-        draftLabelIds: _draftLabelIds,
-        onPlacementChanged: _handlePlacementChanged,
-        onToggleDraftLabel: _handleToggleDraftLabel,
-        onCreateAndAssignLabel: _triggerCreateAndAssignLabel,
-        onOpenLabelInfo: _handleOpenLabelInfo,
-        onOpenCompactLabelPicker: _handleOpenCompactLabelPicker,
-        onExpandDraft: _handleExpandDraft,
-        onSubmit: _triggerQuickAdd,
-      ),
+  /// Creates the [_QuickAddSession] snapshot for the current Quick-Add render pass.
+  _QuickAddSession _buildSession(_QuickAddBoardSlice boardSlice) {
+    return _QuickAddSession.from(
+      titleController: _titleController,
+      titleFocusNode: widget.titleFocusNode,
+      allLabels: boardSlice.sortedLabels,
+      openLabelCounts: boardSlice.openLabelCounts,
+      placement: _placement,
+      draftLabelIds: _draftLabelIds,
+      onPlacementChanged: _handlePlacementChanged,
+      onToggleDraftLabel: _handleToggleDraftLabel,
+      onCreateAndAssignLabel: _triggerCreateAndAssignLabel,
+      onOpenLabelInfo: _handleOpenLabelInfo,
+      onOpenCompactLabelPicker: _handleOpenCompactLabelPicker,
+      onExpandDraft: _handleExpandDraft,
+      onSubmit: _triggerQuickAdd,
     );
   }
 
@@ -1095,22 +1389,22 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
     });
   }
 
-  /// Creates a new workspace label from [rawName] and selects it on the Quick-Add draft.
-  Future<void> _handleCreateAndAssignLabel(String rawName) async {
+  /// Creates a new workspace label from [rawName], selects it on the Quick-Add draft, and returns the [ActionResult].
+  Future<ActionResult> _handleCreateAndAssignLabel(String rawName) async {
     final locale = Localizations.localeOf(context);
     final result = await ref
-        .read(entityControllerProvider.notifier)
+        .read(entityActionsProvider.notifier)
         .quickCreateLabel(rawName, locale: locale);
     if (!mounted) {
-      return;
+      return result;
     }
     switch (result) {
       case ActionSucceeded(:final entityId):
         if (entityId != null) {
-          final shell = ref.read(appShellControllerProvider);
+          final shell = ref.read(shellProvider);
           if (shell.expandedEntity ==
               EntityRef(kind: EntityKind.label, id: entityId)) {
-            ref.read(appShellControllerProvider.notifier).collapseEntity();
+            ref.read(shellProvider.notifier).collapseEntity();
           }
           setState(() {
             _draftLabelIds = <String>{..._draftLabelIds, entityId};
@@ -1120,10 +1414,11 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
       case ActionPersistFailed(:final message):
         if (message.isNotEmpty) {
           ref
-              .read(floatingNoticeControllerProvider.notifier)
-              .showNotice(message, tone: NoticeTone.danger);
+              .read(floatingNoticeProvider.notifier)
+              .showNotice(message, tone: FloatingNoticeTone.danger);
         }
     }
+    return result;
   }
 
   /// Transfers typed Quick-Add inputs into an uncommitted Task Draft Card and resets composer state (`U-CARD-006`).
@@ -1131,9 +1426,9 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
     final seedTitle = _titleController.text;
     final seedPlacement = _placement;
     final seedLabelIds = selectedIds.toList(growable: false);
-    final activeLabelId = ref.read(appShellControllerProvider).activeLabelId;
+    final activeLabelId = ref.read(shellProvider).activeLabelId;
     ref
-        .read(appShellControllerProvider.notifier)
+        .read(shellProvider.notifier)
         .openDraft(
           EntityDraftKind.task,
           seedTitle: seedTitle,
@@ -1142,7 +1437,7 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
         );
     setState(() {
       _titleController.clear();
-      _placement = TaskPlacementOption.queue;
+      _placement = QuickAddMode.standard;
       _draftLabelIds = activeLabelId != null
           ? <String>{activeLabelId}
           : <String>{};
@@ -1150,20 +1445,16 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
   }
 
   /// Presents the compact mobile label picker bottom sheet for the Quick-Add draft.
-  void _handleOpenCompactLabelPicker(
-    TasksViewModel viewModel,
-    Set<String> selectedIds,
-  ) {
+  void _handleOpenCompactLabelPicker(Set<String> selectedIds) {
     final localizations = AppLocalizations.of(context);
     unawaited(
       showCompactLabelPickerSheet(
         context,
         title: localizations.taskLabelsSectionTitle,
-        allLabels: viewModel.allLabels,
-        hasBothScopedAndGlobal: viewModel.hasBothScopedAndGlobalLabels,
-        selectedIds: selectedIds,
+        taskId: null,
+        initialSelectedLabelIds: selectedIds,
         onToggleLabel: _handleToggleDraftLabel,
-        onCreateAndAssign: _triggerCreateAndAssignLabel,
+        onCreateLabel: _handleCreateAndAssignLabel,
         onOpenLabelInfo: _handleOpenLabelInfo,
       ),
     );
@@ -1172,7 +1463,7 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
   /// Opens [labelId] inside Labels manager preserving `returnContext`.
   void _handleOpenLabelInfo(String labelId) {
     ref
-        .read(appShellControllerProvider.notifier)
+        .read(shellProvider.notifier)
         .openEntityInManager(
           EntityRef(kind: EntityKind.label, id: labelId),
           preserveReturnContext: true,
@@ -1180,16 +1471,16 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
   }
 
   /// Updates the active Quick-Add placement option.
-  void _handlePlacementChanged(TaskPlacementOption nextPlacement) {
+  void _handlePlacementChanged(QuickAddMode nextPlacement) {
     setState(() => _placement = nextPlacement);
   }
 
-  /// Submits Quick-Add via [TaskController.quickAddTask], clearing title ONLY on [ActionSucceeded] (`U-CARD-006`).
+  /// Submits Quick-Add via [BoardActionsNotifier.quickAddTask], clearing title ONLY on [ActionSucceeded] (`U-CARD-006`).
   Future<void> _handleQuickAdd(Set<String> selectedIds) async {
     final localizations = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context);
     final result = await ref
-        .read(taskControllerProvider.notifier)
+        .read(boardActionsProvider.notifier)
         .quickAddTask(
           rawTitle: _titleController.text,
           placement: _placement,
@@ -1206,14 +1497,14 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
         if (message.isNotEmpty &&
             message != localizations.taskNameErrorDuplicate) {
           ref
-              .read(floatingNoticeControllerProvider.notifier)
-              .showNotice(message, tone: NoticeTone.danger);
+              .read(floatingNoticeProvider.notifier)
+              .showNotice(message, tone: FloatingNoticeTone.danger);
         }
       case ActionPersistFailed(:final message):
         if (message.isNotEmpty) {
           ref
-              .read(floatingNoticeControllerProvider.notifier)
-              .showNotice(message, tone: NoticeTone.danger);
+              .read(floatingNoticeProvider.notifier)
+              .showNotice(message, tone: FloatingNoticeTone.danger);
         }
     }
   }
@@ -1239,18 +1530,21 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
 }
 
 /// Scrollable tier/search body hosting compact tier select, header, banners, draft card, and lazy task cards.
-class _TasksScrollableBody extends ConsumerWidget {
+class _TasksScrollableBody extends StatelessWidget {
   /// Creates a [_TasksScrollableBody].
   const _TasksScrollableBody({
     required this.scrollController,
-    required this.viewModel,
-    required this.isSyncing,
+    required this.boardContext,
     required this.resolveRevealCardKey,
+    required this.onPruneRevealKeys,
     required this.onRetrySync,
   });
 
-  /// Whether a synchronization retry is currently in flight.
-  final bool isSyncing;
+  /// Shared evaluated board snapshot.
+  final _TasksBoardContext boardContext;
+
+  /// Callback pruning stale owned card reveal keys.
+  final ValueChanged<Set<String>> onPruneRevealKeys;
 
   /// Callback retrying synchronization from status banners.
   final VoidCallback onRetrySync;
@@ -1261,18 +1555,10 @@ class _TasksScrollableBody extends ConsumerWidget {
   /// Optional caller-owned scroll controller.
   final ScrollController? scrollController;
 
-  /// Projected Tasks view model.
-  final TasksViewModel viewModel;
-
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
-    final isTaskDraftOpen = ref.watch(
-      appShellControllerProvider.select(
-        (shell) => shell.activeDraft == EntityDraftKind.task,
-      ),
-    );
     final padding = tokens.spacing.mainContentPadding(viewport);
 
     return CustomScrollView(
@@ -1280,19 +1566,17 @@ class _TasksScrollableBody extends ConsumerWidget {
       controller: scrollController,
       slivers: <Widget>[
         _TasksHeaderAndBannersSliver(
-          viewModel: viewModel,
-          isTaskDraftOpen: isTaskDraftOpen,
+          boardContext: boardContext,
           isCompact: viewport == UiViewportClass.compact,
-          isSyncing: isSyncing,
           padding: padding.copyWith(bottom: 0.0),
           onRetrySync: onRetrySync,
         ),
         SliverPadding(
           padding: padding.copyWith(top: 0.0),
           sliver: _TasksListSliver(
-            viewModel: viewModel,
-            isTaskDraftOpen: isTaskDraftOpen,
+            boardContext: boardContext,
             resolveRevealCardKey: resolveRevealCardKey,
+            onPruneRevealKeys: onPruneRevealKeys,
           ),
         ),
       ],
@@ -1300,7 +1584,7 @@ class _TasksScrollableBody extends ConsumerWidget {
   }
 }
 
-/// Renders one operational [ShellBannerViewModel] mapped to its design-system [UiBanner] and actions (`U-UX-007`).
+/// Renders one operational [_TasksBannerEntry] mapped to its design-system [UiBanner] and actions (`U-UX-007`).
 class _TasksStatusBanner extends StatelessWidget {
   /// Creates a [_TasksStatusBanner].
   const _TasksStatusBanner({
@@ -1312,8 +1596,8 @@ class _TasksStatusBanner extends StatelessWidget {
     required this.onDismissFileRead,
   });
 
-  /// Status banner projection.
-  final ShellBannerViewModel banner;
+  /// Operational banner descriptor.
+  final _TasksBannerEntry banner;
 
   /// Whether a synchronization retry is currently in flight.
   final bool isSyncing;
@@ -1344,7 +1628,7 @@ class _TasksStatusBanner extends StatelessWidget {
     return UiBanner(
       key: ValueKey<String>('tasks_status_banner_${banner.kind.name}'),
       variant: UiBannerVariant.status,
-      tone: UiIconMapper.bannerTone(banner.tone),
+      tone: banner.tone,
       message: banner.message,
       sublines: sublines,
       actions: _buildActions(localizations),
@@ -1356,7 +1640,7 @@ class _TasksStatusBanner extends StatelessWidget {
   /// Maps [banner.kind] exhaustively to its interactive banner action buttons.
   List<Widget> _buildActions(AppLocalizations localizations) {
     return switch (banner.kind) {
-      ShellBannerKind.unconfiguredWebDav => <Widget>[
+      _TasksBannerKind.unconfiguredWebDav => <Widget>[
         UiButton(
           label: banner.primaryActionLabel ?? localizations.actionConfigure,
           variant: UiButtonVariant.secondary,
@@ -1364,7 +1648,8 @@ class _TasksStatusBanner extends StatelessWidget {
           onPressed: () => onOpenView(ShellView.settings),
         ),
       ],
-      ShellBannerKind.syncError || ShellBannerKind.partialFileRead => <Widget>[
+      _TasksBannerKind.syncError ||
+      _TasksBannerKind.partialFileRead => <Widget>[
         UiButton(
           label: banner.primaryActionLabel ?? localizations.actionRetry,
           variant: UiButtonVariant.secondary,
@@ -1379,7 +1664,7 @@ class _TasksStatusBanner extends StatelessWidget {
           onPressed: () => onOpenView(ShellView.settings),
         ),
       ],
-      ShellBannerKind.deletionConflict => <Widget>[
+      _TasksBannerKind.deletionConflict => <Widget>[
         UiButton(
           label:
               banner.primaryActionLabel ?? localizations.actionResolveConflict,
@@ -1388,7 +1673,7 @@ class _TasksStatusBanner extends StatelessWidget {
           onPressed: () => onOpenView(ShellView.conflict),
         ),
       ],
-      ShellBannerKind.recoveryRequired => <Widget>[
+      _TasksBannerKind.recoveryRequired => <Widget>[
         UiButton(
           label:
               banner.primaryActionLabel ?? localizations.actionResolveRecovery,
@@ -1403,37 +1688,42 @@ class _TasksStatusBanner extends StatelessWidget {
   /// Returns the matching banner dismissal callback for dismissible banner kinds.
   VoidCallback? _resolveDismissHandler() {
     return switch (banner.kind) {
-      ShellBannerKind.syncError => onDismissSyncError,
-      ShellBannerKind.partialFileRead => onDismissFileRead,
-      ShellBannerKind.unconfiguredWebDav ||
-      ShellBannerKind.deletionConflict ||
-      ShellBannerKind.recoveryRequired => null,
+      _TasksBannerKind.syncError => onDismissSyncError,
+      _TasksBannerKind.partialFileRead => onDismissFileRead,
+      _TasksBannerKind.unconfiguredWebDav ||
+      _TasksBannerKind.deletionConflict ||
+      _TasksBannerKind.recoveryRequired => null,
     };
   }
 }
 
-/// Vertical stack of operational status banners rendered below [_TasksPageHeaderSection].
-class _TasksStatusBannersList extends ConsumerWidget {
-  /// Creates a [_TasksStatusBannersList].
-  const _TasksStatusBannersList({
-    required this.banners,
-    required this.isSyncing,
-    required this.onRetrySync,
-  });
-
-  /// Active status banners to display in priority order.
-  final List<ShellBannerViewModel> banners;
-
-  /// Whether a synchronization retry is currently in flight.
-  final bool isSyncing;
+/// Decoupled status banner stack watching sync, WebDAV config, and banner dismissal slices independently of the task list.
+class _TasksStatusBanners extends ConsumerWidget {
+  /// Creates a [_TasksStatusBanners].
+  const _TasksStatusBanners({required this.onRetrySync});
 
   /// Callback triggering immediate synchronization retry.
   final VoidCallback onRetrySync;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final shellNotifier = ref.read(appShellControllerProvider.notifier);
+    final isSyncing = ref.watch(
+      syncActionsProvider.select((state) => state.isBusy),
+    );
+    final banners = _buildStatusBanners(
+      syncSlice: ref.watch(syncStateProvider.select(_selectSyncBannerSlice)),
+      webDavSlice: ref.watch(
+        webDavConfigProvider.select(_selectWebDavBannerSlice),
+      ),
+      shellSlice: ref.watch(shellProvider.select(_selectBannerShellSlice)),
+      localizations: localizations,
+    );
+    if (banners.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final shellNotifier = ref.read(shellProvider.notifier);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1455,16 +1745,14 @@ class _TasksStatusBannersList extends ConsumerWidget {
   }
 }
 
-/// Manages smooth entity reveal scrolling, draft scroll-to-top, and card keys for [TasksView].
+/// Manages smooth entity reveal scrolling, draft scroll-to-top, and pruned card keys for [TasksView].
 class _TasksViewState extends ConsumerState<TasksView> {
   final Map<String, GlobalKey> _ownedCardKeys = <String, GlobalKey>{};
 
   @override
   void initState() {
     super.initState();
-    final pendingReveal = ref
-        .read(appShellControllerProvider)
-        .revealEntityRequest;
+    final pendingReveal = ref.read(shellProvider).revealEntityRequest;
     if (pendingReveal != null && pendingReveal.kind == EntityKind.task) {
       _scheduleRevealTask(pendingReveal.id);
     }
@@ -1472,37 +1760,76 @@ class _TasksViewState extends ConsumerState<TasksView> {
 
   @override
   Widget build(BuildContext context) {
-    ref.listen<EntityRef?>(
-      appShellControllerProvider.select((shell) => shell.revealEntityRequest),
-      _handleRevealEntityRequested,
+    _registerShellListeners();
+    final activeLabelId = ref.watch(
+      shellProvider.select((shell) => shell.activeLabelId),
     );
-    ref.listen<EntityDraftKind?>(
-      appShellControllerProvider.select((shell) => shell.activeDraft),
-      _handleActiveDraftChanged,
+    final workspaceError = ref.watch(
+      activeWorkspaceProvider.select(_selectWorkspaceError),
     );
-
-    final viewModel = ref.watch(tasksViewModelProvider);
-    final isSyncing = ref.watch(
-      syncControllerProvider.select((syncState) => syncState.isBusy),
+    final evaluatedAsync = ref.watch(evaluatedBoardProvider(activeLabelId));
+    final fullScreenError = _resolveFullScreenFileReadError(
+      evaluatedAsync: evaluatedAsync,
+      workspaceError: workspaceError,
+      localizations: AppLocalizations.of(context),
     );
-
-    if (viewModel.isLoading) {
+    if (fullScreenError == null &&
+        evaluatedAsync.isLoading &&
+        !evaluatedAsync.hasValue) {
+      _ownedCardKeys.clear();
       return const _TasksLoadingBody();
     }
-    if (viewModel.fullScreenFileReadError case final errorReport?) {
+    if (fullScreenError case final errorReport?) {
+      _ownedCardKeys.clear();
       return _TasksFullScreenErrorBody(
         errorReport: errorReport,
-        isSyncing: isSyncing,
         onOpenSettings: _openSettings,
         onRetry: _triggerSyncNow,
       );
     }
     return _TasksScrollableBody(
       scrollController: widget.scrollController,
-      viewModel: viewModel,
-      isSyncing: isSyncing,
+      boardContext: _buildBoardContext(
+        board: evaluatedAsync.asData?.value ?? TaskBoard.empty(),
+        activeLabelId: activeLabelId,
+      ),
       resolveRevealCardKey: _resolveRevealCardKey,
+      onPruneRevealKeys: _pruneOwnedCardKeys,
       onRetrySync: _triggerSyncNow,
+    );
+  }
+
+  /// Builds the shared [_TasksBoardContext] snapshot for the current evaluated [board].
+  _TasksBoardContext _buildBoardContext({
+    required TaskBoard board,
+    required String? activeLabelId,
+  }) {
+    final configuration = _readCurrentConfig(ref);
+    final nowUtc = ref.read(clockProvider)().toUtc();
+    final locationState = ref.read(locationStateProvider);
+    final activeFix = locationState.status == LocationStatus.found
+        ? locationState.fix
+        : null;
+    return _TasksBoardContext(
+      board: board,
+      activeLabelId: activeLabelId,
+      labelsById: <String, TdfLabel>{
+        for (final label in board.labels) label.id: label,
+      },
+      locationsById: <String, TdfLocation>{
+        for (final location in board.locations) location.id: location,
+      },
+      tasksById: <String, TaskItem>{
+        for (final task in board.allTasks) task.id: task,
+      },
+      configuration: configuration,
+      nowUtc: nowUtc,
+      localNow: configuration.toLocalWallClock(nowUtc),
+      activeFix: activeFix,
+      currentLocalDateTimeHint: TaskScheduleHelper.formatLocalTimestamp(
+        nowUtc,
+        configuration,
+      ),
     );
   }
 
@@ -1525,7 +1852,27 @@ class _TasksViewState extends ConsumerState<TasksView> {
 
   /// Opens the Settings view from the full-screen file-read error banner.
   void _openSettings() {
-    ref.read(appShellControllerProvider.notifier).openView(ShellView.settings);
+    ref.read(shellProvider.notifier).openView(ShellView.settings);
+  }
+
+  /// Prunes owned card [GlobalKey]s for task IDs no longer present in [visibleTaskIds].
+  void _pruneOwnedCardKeys(Set<String> visibleTaskIds) {
+    if (widget.revealCardKeyBuilder != null || _ownedCardKeys.isEmpty) {
+      return;
+    }
+    _ownedCardKeys.removeWhere((taskId, _) => !visibleTaskIds.contains(taskId));
+  }
+
+  /// Registers reveal and draft-open shell listeners for [TasksView].
+  void _registerShellListeners() {
+    ref.listen<EntityRef?>(
+      shellProvider.select((shell) => shell.revealEntityRequest),
+      _handleRevealEntityRequested,
+    );
+    ref.listen<EntityDraftKind?>(
+      shellProvider.select((shell) => shell.activeDraft),
+      _handleActiveDraftChanged,
+    );
   }
 
   /// Resolves the stable [GlobalKey] for revealing [taskId].
@@ -1554,7 +1901,7 @@ class _TasksViewState extends ConsumerState<TasksView> {
           ),
         );
       }
-      ref.read(appShellControllerProvider.notifier).clearRevealRequest();
+      ref.read(shellProvider.notifier).clearRevealRequest();
     });
   }
 
@@ -1578,18 +1925,236 @@ class _TasksViewState extends ConsumerState<TasksView> {
     });
   }
 
-  /// Triggers immediate synchronization or initial load retry through [SyncController].
+  /// Triggers immediate synchronization or initial load retry through [SyncActionsNotifier].
   void _triggerSyncNow() {
     final locale = Localizations.localeOf(context);
-    unawaited(
-      ref.read(syncControllerProvider.notifier).syncNow(locale: locale),
-    );
+    unawaited(ref.read(syncActionsProvider.notifier).syncNow(locale: locale));
   }
 }
 
-/// Parses a serialized [ShellTier] name safely without unchecked casts.
-ShellTier? _parseShellTier(String value) {
-  for (final tier in ShellTier.values) {
+/// Narrow shell banner-suppression and dismissal slice watched by [_TasksStatusBanners].
+typedef _BannerShellSlice = ({
+  bool syncErrorDismissed,
+  bool fileReadDismissed,
+  ShellView activeView,
+});
+
+/// Narrow shell tier and search-mode slice watched by [_TasksPageHeaderSection].
+typedef _HeaderShellSlice = ({TaskTier activeTier, bool searchOpen});
+
+/// Narrow shell tier, search-mode, and draft slice watched by [_TasksListSliver].
+typedef _ListShellSlice = ({
+  TaskTier activeTier,
+  bool searchOpen,
+  bool isTaskDraftOpen,
+});
+
+/// Narrow board slice watched by [_TasksQuickAddDockState].
+typedef _QuickAddBoardSlice = ({
+  bool isLoading,
+  bool hasFullError,
+  List<TdfLabel> sortedLabels,
+  Map<String, int> openLabelCounts,
+});
+
+/// Narrow sync state slice watched by [_TasksStatusBanners].
+typedef _SyncBannerSlice = ({
+  bool hasOpenConflict,
+  TdfSyncOutcomeException? syncOutcome,
+  StorageFileReadReport? fileReadReport,
+  String? errorMessage,
+});
+
+/// Paired task item and evaluated tier displayed in [_TasksListSliver].
+typedef _VisibleTaskEntry = ({TaskItem task, TaskTier tier});
+
+/// Narrow WebDAV readiness slice watched by [_TasksStatusBanners].
+typedef _WebDavBannerSlice = ({bool usesWebDav, bool isConfigured});
+
+/// Appends tasks in [tierTasks] matching lowercase [needle] into [results].
+void _appendTierSearchMatches(
+  List<TaskItem> tierTasks,
+  TaskTier tier,
+  String needle,
+  List<_VisibleTaskEntry> results,
+) {
+  for (final task in tierTasks) {
+    if (needle.isEmpty || _matchesSearchQuery(task, needle)) {
+      results.add((task: task, tier: tier));
+    }
+  }
+}
+
+/// Builds the ordered operational status banners for [TasksView] (`U-UX-007`).
+List<_TasksBannerEntry> _buildStatusBanners({
+  required _SyncBannerSlice syncSlice,
+  required _WebDavBannerSlice webDavSlice,
+  required _BannerShellSlice shellSlice,
+  required AppLocalizations localizations,
+}) {
+  final banners = <_TasksBannerEntry>[];
+  if (webDavSlice.usesWebDav && !webDavSlice.isConfigured) {
+    banners.add(
+      _TasksBannerEntry(
+        kind: _TasksBannerKind.unconfiguredWebDav,
+        tone: UiBannerTone.warning,
+        message: localizations.unconfiguredBannerText,
+        dismissible: false,
+        primaryActionLabel: localizations.actionConfigure,
+      ),
+    );
+  }
+  final syncOutcome = syncSlice.syncOutcome;
+  final errorMessage = syncSlice.errorMessage;
+  if (syncSlice.hasOpenConflict && syncOutcome != null) {
+    switch (syncOutcome.kind) {
+      case TdfSyncOutcomeKind.deletionConflict:
+        if (shellSlice.activeView != ShellView.conflict) {
+          banners.add(
+            _TasksBannerEntry(
+              kind: _TasksBannerKind.deletionConflict,
+              tone: UiBannerTone.warning,
+              message: errorMessage ?? localizations.syncConflictDeletionBanner,
+              dismissible: false,
+              primaryActionLabel: localizations.actionResolveConflict,
+            ),
+          );
+        }
+      case TdfSyncOutcomeKind.recoveryRequired:
+        if (shellSlice.activeView != ShellView.recovery) {
+          banners.add(
+            _TasksBannerEntry(
+              kind: _TasksBannerKind.recoveryRequired,
+              tone: UiBannerTone.warning,
+              message: errorMessage ?? localizations.syncConflictRecoveryBanner,
+              dismissible: false,
+              primaryActionLabel: localizations.actionResolveRecovery,
+            ),
+          );
+        }
+      case TdfSyncOutcomeKind.syncGenerationRollback:
+        if (!shellSlice.syncErrorDismissed) {
+          banners.add(
+            _TasksBannerEntry(
+              kind: _TasksBannerKind.syncError,
+              tone: UiBannerTone.danger,
+              message:
+                  errorMessage ??
+                  localizations.syncErrorGenerationRollbackBanner,
+              dismissible: true,
+              primaryActionLabel: localizations.actionRetry,
+              secondaryActionLabel: localizations.actionSettings,
+            ),
+          );
+        }
+    }
+  } else if (syncSlice.fileReadReport case final report?) {
+    if (!shellSlice.fileReadDismissed && report.hasFailure) {
+      final scope = report.failureScope;
+      banners.add(
+        _TasksBannerEntry(
+          kind: _TasksBannerKind.partialFileRead,
+          tone: UiBannerTone.danger,
+          message: scope != null
+              ? localizations.storageFileReadSummary(scope)
+              : localizations.fileReadErrorTitle,
+          dismissible: true,
+          primaryActionLabel: localizations.actionRetry,
+          secondaryActionLabel: localizations.actionSettings,
+          diagnosticLines: TaskScheduleHelper.formatFileReadDiagnosticLines(
+            report,
+            localizations,
+          ),
+        ),
+      );
+    }
+  } else if (errorMessage case final currentErrorMessage?) {
+    if (!shellSlice.syncErrorDismissed && currentErrorMessage.isNotEmpty) {
+      banners.add(
+        _TasksBannerEntry(
+          kind: _TasksBannerKind.syncError,
+          tone: UiBannerTone.danger,
+          message: currentErrorMessage,
+          dismissible: true,
+          primaryActionLabel: localizations.actionRetry,
+          secondaryActionLabel: localizations.actionSettings,
+        ),
+      );
+    }
+  }
+  return banners;
+}
+
+/// Collects `(task, tier)` entries for [activeTier] or across all six tiers in Global Search.
+List<_VisibleTaskEntry> _collectVisibleTasks({
+  required TaskBoard board,
+  required TaskTier activeTier,
+  required bool searchOpen,
+  required String searchQuery,
+}) {
+  if (!searchOpen) {
+    final tasks = board.tasksForTier(activeTier);
+    return <_VisibleTaskEntry>[
+      for (final task in tasks) (task: task, tier: activeTier),
+    ];
+  }
+  final needle = searchQuery.trim().toLowerCase();
+  final results = <_VisibleTaskEntry>[];
+  for (final tier in TaskTier.values) {
+    _appendTierSearchMatches(board.tasksForTier(tier), tier, needle, results);
+  }
+  return results;
+}
+
+/// Counts tasks across all six tiers matching [searchQuery].
+int _countSearchMatches(TaskBoard board, String searchQuery) {
+  final needle = searchQuery.trim().toLowerCase();
+  var count = 0;
+  for (final tier in TaskTier.values) {
+    count += _countTierSearchMatches(board.tasksForTier(tier), needle);
+  }
+  return count;
+}
+
+/// Counts tasks in [tierTasks] matching lowercase [needle].
+int _countTierSearchMatches(List<TaskItem> tierTasks, String needle) {
+  if (needle.isEmpty) {
+    return tierTasks.length;
+  }
+  var count = 0;
+  for (final task in tierTasks) {
+    if (_matchesSearchQuery(task, needle)) {
+      count++;
+    }
+  }
+  return count;
+}
+
+/// Checks whether [task] matches lowercase Global Search query [needle].
+bool _matchesSearchQuery(TaskItem task, String needle) {
+  if (task.title.toLowerCase().contains(needle)) {
+    return true;
+  }
+  if (task.note?.toLowerCase().contains(needle) ?? false) {
+    return true;
+  }
+  for (final subtask in task.subtasks) {
+    if (subtask.title.toLowerCase().contains(needle)) {
+      return true;
+    }
+  }
+  for (final link in task.links) {
+    if (link.title.toLowerCase().contains(needle) ||
+        link.uri.toLowerCase().contains(needle)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Parses a serialized [TaskTier] name safely without unchecked casts.
+TaskTier? _parseTaskTier(String value) {
+  for (final tier in TaskTier.values) {
     if (tier.name == value) {
       return tier;
     }
@@ -1599,23 +2164,145 @@ ShellTier? _parseShellTier(String value) {
 
 /// Returns the localized helper caption describing [placement] in [TasksQuickAddDock].
 String _quickAddPlacementHint(
-  TaskPlacementOption placement,
+  QuickAddMode placement,
   AppLocalizations localizations,
 ) {
   return switch (placement) {
-    TaskPlacementOption.queue => localizations.placementQueueHint,
-    TaskPlacementOption.priority => localizations.placementPriorityHint,
-    TaskPlacementOption.someday => localizations.placementSomedayHint,
+    QuickAddMode.standard => localizations.placementQueueHint,
+    QuickAddMode.priority => localizations.placementPriorityHint,
+    QuickAddMode.someday => localizations.placementSomedayHint,
   };
 }
 
-/// Resolves selected [LabelPickerOptionViewModel] entries still present in [allLabels].
-List<LabelPickerOptionViewModel> _resolveValidSelectedLabels(
-  List<LabelPickerOptionViewModel> allLabels,
+/// Reads the current [WebDavConfig] synchronously from [ref] with workspace fallback.
+WebDavConfig _readCurrentConfig(WidgetRef ref) {
+  return ref.read(webDavConfigProvider).asData?.value ??
+      ref.read(activeWorkspaceProvider).asData?.value.config ??
+      const WebDavConfig();
+}
+
+/// Resolves a full-screen file-read or workspace error descriptor when initial load fails.
+_FullScreenFileReadError? _resolveFullScreenFileReadError({
+  required AsyncValue<TaskBoard> evaluatedAsync,
+  required Object? workspaceError,
+  required AppLocalizations localizations,
+}) {
+  final error =
+      workspaceError ??
+      ((evaluatedAsync.hasError && !evaluatedAsync.hasValue)
+          ? evaluatedAsync.error
+          : null);
+  if (error == null) {
+    return null;
+  }
+  if (error is StorageFileReadException) {
+    final report = error.report;
+    final scope = report.failureScope;
+    return _FullScreenFileReadError(
+      title: localizations.fileReadErrorTitle,
+      summary: scope != null
+          ? localizations.storageFileReadSummary(scope)
+          : localizations.fileReadErrorTitle,
+      lines: TaskScheduleHelper.formatFileReadDiagnosticLines(
+        report,
+        localizations,
+      ),
+    );
+  }
+  if (error is WorkspaceException) {
+    return _FullScreenFileReadError(
+      title: localizations.fileReadErrorTitle,
+      summary: localizations.localizeWorkspaceError(error),
+      lines: const <FileReadDiagnosticLine>[],
+    );
+  }
+  return _FullScreenFileReadError(
+    title: localizations.fileReadErrorTitle,
+    summary: TaskScheduleHelper.formatSyncError(error, localizations),
+    lines: const <FileReadDiagnosticLine>[],
+  );
+}
+
+/// Resolves an optional `#RRGGBB` label color string, falling back to `tokens.colors.accent`.
+Color _resolveLabelColorDot(String? colorHex, UiThemeTokens tokens) {
+  return switch (TaskScheduleHelper.parseLabelColorValue(colorHex)) {
+    final value? => Color(value),
+    null => tokens.colors.accent,
+  };
+}
+
+/// Resolves selected [TdfLabel] entries still present in [allLabels].
+List<TdfLabel> _resolveValidSelectedLabels(
+  List<TdfLabel> allLabels,
   Set<String> selectedIds,
 ) {
-  return <LabelPickerOptionViewModel>[
+  return <TdfLabel>[
     for (final label in allLabels)
       if (selectedIds.contains(label.id)) label,
   ];
+}
+
+/// Extracts banner dismissal and conflict/recovery suppression view state from [shell].
+_BannerShellSlice _selectBannerShellSlice(ShellState shell) {
+  return (
+    syncErrorDismissed: shell.syncErrorBannerDismissed,
+    fileReadDismissed: shell.fileReadBannerDismissed,
+    activeView:
+        shell.view == ShellView.conflict || shell.view == ShellView.recovery
+        ? shell.view
+        : ShellView.tasks,
+  );
+}
+
+/// Extracts active tier and search state from [shell] for [_TasksPageHeaderSection].
+_HeaderShellSlice _selectHeaderShellSlice(ShellState shell) {
+  return (activeTier: shell.activeTier, searchOpen: shell.searchOpen);
+}
+
+/// Extracts active tier, search state, and task draft flag from [shell] for [_TasksListSliver].
+_ListShellSlice _selectListShellSlice(ShellState shell) {
+  return (
+    activeTier: shell.activeTier,
+    searchOpen: shell.searchOpen,
+    isTaskDraftOpen: shell.activeDraft == EntityDraftKind.task,
+  );
+}
+
+/// Extracts Quick-Add load status, sorted labels, and open label counts from [boardAsync].
+_QuickAddBoardSlice _selectQuickAddBoardSlice(
+  AsyncValue<TaskBoard> boardAsync,
+) {
+  final board = boardAsync.asData?.value;
+  return (
+    isLoading: boardAsync.isLoading && !boardAsync.hasValue,
+    hasFullError: boardAsync.hasError && !boardAsync.hasValue,
+    sortedLabels: board?.sortedLabels ?? const <TdfLabel>[],
+    openLabelCounts: board?.openTaskCountsByLabel ?? const <String, int>{},
+  );
+}
+
+/// Extracts operational banner fields from [syncState].
+_SyncBannerSlice _selectSyncBannerSlice(SyncState syncState) {
+  return (
+    hasOpenConflict: syncState.hasOpenConflict,
+    syncOutcome: syncState.syncOutcome,
+    fileReadReport: syncState.fileReadReport,
+    errorMessage: syncState.errorMessage,
+  );
+}
+
+/// Extracts WebDAV usage and readiness flags from [asyncConfig].
+_WebDavBannerSlice _selectWebDavBannerSlice(
+  AsyncValue<WebDavConfig> asyncConfig,
+) {
+  final config = asyncConfig.asData?.value ?? const WebDavConfig();
+  return (
+    usesWebDav: config.storageMode.usesWebDav,
+    isConfigured: config.isWebDavConfigured,
+  );
+}
+
+/// Extracts the error object from [workspace] when active workspace loading failed.
+Object? _selectWorkspaceError(AsyncValue<AppWorkspace> workspace) {
+  return workspace.hasError ? workspace.error : null;
 }

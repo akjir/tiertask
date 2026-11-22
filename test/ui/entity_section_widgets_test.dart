@@ -18,17 +18,23 @@ import 'dart:async';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:tiertask/presentation/floating_notice_controller.dart';
-import 'package:tiertask/presentation/shell_models.dart';
-import 'package:tiertask/presentation/view_model_primitives.dart';
+import 'package:tiertask/models/tdf_location.dart';
+import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/providers/floating_notice_providers.dart';
+import 'package:tiertask/providers/shell_providers.dart';
+import 'package:tiertask/providers/task_schedule_helper.dart';
 import 'package:tiertask/repositories/link_launcher_repository.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/primitives/ui_field.dart';
+import 'package:tiertask/ui/primitives/ui_pill.dart';
+import 'package:tiertask/ui/primitives/ui_segmented_control.dart';
+import 'package:tiertask/ui/tokens/ui_focus_tokens.dart';
 import 'package:tiertask/ui/widgets/entity_card_chrome.dart';
 import 'package:tiertask/ui/widgets/entity_conditions_section.dart';
 import 'package:tiertask/ui/widgets/entity_date_time_fields.dart';
 import 'package:tiertask/ui/widgets/entity_label_picker.dart';
 import 'package:tiertask/ui/widgets/entity_links_section.dart';
 import 'package:tiertask/ui/widgets/entity_note_section.dart';
-import 'package:tiertask_ui/tiertask_ui.dart';
 
 import 'test_helpers.dart';
 
@@ -357,7 +363,7 @@ void main() {
         expect(copyCallbackCount, equals(1));
         expect(startEditCount, equals(0));
         expect(
-          container.read(floatingNoticeControllerProvider)?.message,
+          container.read(floatingNoticeProvider)?.message,
           equals('Note copied to clipboard.'),
         );
       },
@@ -529,7 +535,7 @@ void main() {
 
   group('EntityLinksSection', () {
     testWidgets(
-      'read-only mode launches links via LinkActionController and shows danger notice on failure',
+      'read-only mode launches links via openExternalLinkProvider and shows danger notice on failure',
       (tester) async {
         final fakeLauncher = FakeLinkLauncherRepository();
         final container = await pumpLeafWidget(
@@ -538,11 +544,8 @@ void main() {
             body: Padding(
               padding: const EdgeInsets.all(16.0),
               child: EntityLinksSection(
-                links: const <EntityLinkViewModel>[
-                  EntityLinkViewModel(
-                    title: 'Spec Docs',
-                    uri: 'https://example.com/spec',
-                  ),
+                links: const <TaskLink>[
+                  TaskLink(title: 'Spec Docs', uri: 'https://example.com/spec'),
                 ],
                 isEditing: false,
                 canEdit: true,
@@ -566,14 +569,14 @@ void main() {
           fakeLauncher.launchedUris,
           equals(<String>['https://example.com/spec']),
         );
-        expect(container.read(floatingNoticeControllerProvider), isNull);
+        expect(container.read(floatingNoticeProvider), isNull);
 
         fakeLauncher.shouldThrow = true;
         await tester.tap(find.text('Spec Docs'));
         await tester.pumpAndSettle();
-        final notice = container.read(floatingNoticeControllerProvider);
+        final notice = container.read(floatingNoticeProvider);
         expect(notice, isNotNull);
-        expect(notice?.tone, equals(NoticeTone.danger));
+        expect(notice?.tone, equals(FloatingNoticeTone.danger));
         expect(notice?.message, equals('Could not open link.'));
       },
     );
@@ -581,7 +584,7 @@ void main() {
     testWidgets(
       'inline edit mode validates, adds, edits, cancels row edit, reorders, removes, clears, and saves links',
       (tester) async {
-        final savedSnapshots = <List<EntityLinkViewModel>>[];
+        final savedSnapshots = <List<TaskLink>>[];
 
         await pumpLeafWidget(
           tester,
@@ -589,15 +592,9 @@ void main() {
             body: SingleChildScrollView(
               padding: const EdgeInsets.all(16.0),
               child: EntityLinksSection(
-                links: const <EntityLinkViewModel>[
-                  EntityLinkViewModel(
-                    title: 'Alpha',
-                    uri: 'https://alpha.example',
-                  ),
-                  EntityLinkViewModel(
-                    title: 'Beta',
-                    uri: 'https://beta.example',
-                  ),
+                links: const <TaskLink>[
+                  TaskLink(title: 'Alpha', uri: 'https://alpha.example'),
+                  TaskLink(title: 'Beta', uri: 'https://beta.example'),
                 ],
                 isEditing: true,
                 canEdit: true,
@@ -662,12 +659,9 @@ void main() {
 
         expect(
           savedSnapshots.last,
-          equals(const <EntityLinkViewModel>[
-            EntityLinkViewModel(title: 'Beta', uri: 'https://beta.example'),
-            EntityLinkViewModel(
-              title: 'Alpha Edited',
-              uri: 'https://alpha.example',
-            ),
+          equals(const <TaskLink>[
+            TaskLink(title: 'Beta', uri: 'https://beta.example'),
+            TaskLink(title: 'Alpha Edited', uri: 'https://alpha.example'),
           ]),
         );
 
@@ -679,16 +673,20 @@ void main() {
   });
 
   group('EntityConditionsSection', () {
-    const locations = <LocationOptionViewModel>[
-      LocationOptionViewModel(
+    const locations = <TdfLocation>[
+      TdfLocation(
         id: 'loc-home',
         name: 'Home',
-        coordinatesSummary: '52.5200, 13.4050 · 200m',
+        latitude: 52.52,
+        longitude: 13.405,
+        radius: 200.0,
       ),
-      LocationOptionViewModel(
+      TdfLocation(
         id: 'loc-office',
         name: 'Office',
-        coordinatesSummary: '52.5100, 13.3800 · 150m',
+        latitude: 52.51,
+        longitude: 13.38,
+        radius: 150.0,
       ),
     ];
 
@@ -707,17 +705,11 @@ void main() {
                 hasConditions: true,
                 isSuspended: true,
                 conditionsStatusLabel: 'Currently unmet (blocked)',
-                conditionsSummary: const <ConditionSummaryChipViewModel>[
-                  ConditionSummaryChipViewModel(
-                    label: 'Mon, Wed',
-                    isInherited: true,
-                  ),
-                  ConditionSummaryChipViewModel(
-                    label: 'Home',
-                    locationId: 'loc-home',
-                  ),
+                conditionsSummary: const <ConditionSummaryChip>[
+                  ConditionSummaryChip(label: 'Mon, Wed', isInherited: true),
+                  ConditionSummaryChip(label: 'Home', locationId: 'loc-home'),
                 ],
-                conditionDraft: ConditionDraftViewModel(),
+                conditionDraft: ConditionDraft(),
                 allLocations: locations,
                 isEditing: false,
                 canEdit: true,
@@ -761,10 +753,10 @@ void main() {
                 isTask: true,
                 hasConditions: true,
                 isSuspended: true,
-                conditionsSummary: const <ConditionSummaryChipViewModel>[],
-                conditionDraft: ConditionDraftViewModel(
+                conditionsSummary: const <ConditionSummaryChip>[],
+                conditionDraft: ConditionDraft(
                   daysMode: ConditionDimensionMode.custom,
-                  selectedWeekdays: const <int>[1],
+                  weekdays: const <int>[1],
                 ),
                 allLocations: locations,
                 isEditing: true,
@@ -813,7 +805,7 @@ void main() {
     testWidgets(
       'inline edit mode supports task Inherit/Any/Custom switches, global reset, weekday, time window add/remove, and location editing',
       (tester) async {
-        ConditionDraftViewModel? savedDraft;
+        ConditionDraft? savedDraft;
         var clearedCount = 0;
 
         await pumpLeafWidget(
@@ -824,8 +816,8 @@ void main() {
               child: EntityConditionsSection(
                 isTask: true,
                 hasConditions: true,
-                conditionsSummary: const <ConditionSummaryChipViewModel>[],
-                conditionDraft: ConditionDraftViewModel(),
+                conditionsSummary: const <ConditionSummaryChip>[],
+                conditionDraft: ConditionDraft(),
                 allLocations: locations,
                 isEditing: true,
                 canEdit: true,
@@ -892,16 +884,16 @@ void main() {
         expect(
           savedDraft,
           equals(
-            ConditionDraftViewModel(
+            ConditionDraft(
               ignoreAllLabelConditions: false,
               daysMode: ConditionDimensionMode.custom,
-              selectedWeekdays: const <int>[1, 3],
-              timesMode: ConditionDimensionMode.custom,
-              timeWindows: const <TimeWindowDraftViewModel>[
-                TimeWindowDraftViewModel(start: '09:00', end: '17:30'),
+              weekdays: const <int>[1, 3],
+              timeMode: ConditionDimensionMode.custom,
+              timeWindows: const <TimeWindowDraft>[
+                TimeWindowDraft(start: '09:00', end: '17:30'),
               ],
-              locationsMode: ConditionDimensionMode.custom,
-              selectedLocationIds: const <String>['loc-office'],
+              locationMode: ConditionDimensionMode.custom,
+              locationIds: const <String>['loc-office'],
             ),
           ),
         );
@@ -918,8 +910,8 @@ void main() {
         await tester.pumpAndSettle();
         expect(savedDraft?.ignoreAllLabelConditions, isTrue);
         expect(savedDraft?.daysMode, equals(ConditionDimensionMode.any));
-        expect(savedDraft?.timesMode, equals(ConditionDimensionMode.any));
-        expect(savedDraft?.locationsMode, equals(ConditionDimensionMode.any));
+        expect(savedDraft?.timeMode, equals(ConditionDimensionMode.any));
+        expect(savedDraft?.locationMode, equals(ConditionDimensionMode.any));
 
         await tester.tap(find.text('Clear'));
         await tester.pump();
@@ -938,13 +930,13 @@ void main() {
               child: EntityConditionsSection(
                 isTask: false,
                 hasConditions: false,
-                conditionsSummary: const <ConditionSummaryChipViewModel>[],
-                conditionDraft: ConditionDraftViewModel(
+                conditionsSummary: const <ConditionSummaryChip>[],
+                conditionDraft: ConditionDraft(
                   daysMode: ConditionDimensionMode.custom,
-                  timesMode: ConditionDimensionMode.custom,
-                  locationsMode: ConditionDimensionMode.custom,
+                  timeMode: ConditionDimensionMode.custom,
+                  locationMode: ConditionDimensionMode.custom,
                 ),
-                allLocations: const <LocationOptionViewModel>[],
+                allLocations: const <TdfLocation>[],
                 isEditing: true,
                 canEdit: true,
                 onStartEdit: () {},
@@ -968,25 +960,19 @@ void main() {
   });
 
   group('EntitySearchableLabelPicker', () {
-    const sampleLabels = <LabelPickerOptionViewModel>[
-      LabelPickerOptionViewModel(
-        id: 'lbl-work',
-        name: 'Work',
-        isScoped: true,
-        openCount: 4,
-        colorValue: 0xFF2196F3,
-      ),
-      LabelPickerOptionViewModel(
+    const sampleLabels = <TdfLabel>[
+      TdfLabel(id: 'lbl-work', name: 'Work', isScoped: true, color: '#2196F3'),
+      TdfLabel(
         id: 'lbl-errands',
         name: 'Errands',
         isScoped: false,
-        openCount: 2,
-        colorValue: 0xFF4CAF50,
+        color: '#4CAF50',
       ),
     ];
+    const sampleOpenCounts = <String, int>{'lbl-work': 4, 'lbl-errands': 2};
 
     testWidgets(
-      'renders conditional scope pills only when hasBothScopedAndGlobal is true, filters rows, and blocks cross-scope duplicate create',
+      'renders conditional scope pills only when both scoped and global labels exist, filters rows, and blocks cross-scope duplicate create',
       (tester) async {
         String? toggledId;
         String? infoId;
@@ -999,7 +985,7 @@ void main() {
               child: EntitySearchableLabelPicker(
                 allLabels: sampleLabels,
                 selectedIds: const <String>{'lbl-work'},
-                hasBothScopedAndGlobal: true,
+                openCountsByLabelId: sampleOpenCounts,
                 onToggleLabel: (id) => toggledId = id,
                 onCreateAndAssign: (_) {},
                 onOpenLabelInfo: (id) => infoId = id,
@@ -1042,7 +1028,7 @@ void main() {
     );
 
     testWidgets(
-      'omits scope pills when hasBothScopedAndGlobal is false and supports 500-char inline create',
+      'omits scope pills when all labels share the same scope and supports 500-char inline create',
       (tester) async {
         String? createdName;
         final longName = 'A' * 500;
@@ -1053,16 +1039,11 @@ void main() {
             body: Padding(
               padding: const EdgeInsets.all(16.0),
               child: EntitySearchableLabelPicker(
-                allLabels: const <LabelPickerOptionViewModel>[
-                  LabelPickerOptionViewModel(
-                    id: 'lbl-errands',
-                    name: 'Errands',
-                    isScoped: false,
-                    openCount: 2,
-                  ),
+                allLabels: const <TdfLabel>[
+                  TdfLabel(id: 'lbl-errands', name: 'Errands', isScoped: false),
                 ],
                 selectedIds: const <String>{},
-                hasBothScopedAndGlobal: false,
+                openCountsByLabelId: const <String, int>{'lbl-errands': 2},
                 showSelectedChips: false,
                 autoFocusSearch: true,
                 onToggleLabel: (_) {},
@@ -1103,7 +1084,7 @@ void main() {
               child: EntitySearchableLabelPicker(
                 allLabels: sampleLabels,
                 selectedIds: const <String>{},
-                hasBothScopedAndGlobal: true,
+                openCountsByLabelId: sampleOpenCounts,
                 autoFocusSearch: true,
                 isCompactSheet: true,
                 onToggleLabel: (_) {},
