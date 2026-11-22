@@ -983,6 +983,48 @@ void main() {
           );
         },
       );
+
+      testWidgets(
+        'hides Local Watch toggle at ${viewportCase.name} when supportsLocalFileWatch is false and shows it when true',
+        (tester) async {
+          await pumpLeafWidget(
+            tester,
+            const _SettingsTestFrame(),
+            config: configuredBoth,
+            supportsLocalFileWatch: false,
+            surfaceSize: viewportCase.size,
+          );
+
+          expect(
+            find.byKey(const ValueKey<String>('settings_local_card')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const ValueKey<String>('settings_local_actions_grid')),
+            findsOneWidget,
+          );
+          expect(
+            find.byKey(const ValueKey<String>('settings_local_watch_toggle')),
+            findsNothing,
+            reason:
+                'Local Watch toggle must be hidden on ${viewportCase.name} when supportsLocalFileWatch is false',
+          );
+
+          await pumpLeafWidget(
+            tester,
+            const _SettingsTestFrame(),
+            config: configuredBoth,
+            surfaceSize: viewportCase.size,
+          );
+
+          expect(
+            find.byKey(const ValueKey<String>('settings_local_watch_toggle')),
+            findsOneWidget,
+            reason:
+                'Local Watch toggle must render on ${viewportCase.name} when supportsLocalFileWatch is true',
+          );
+        },
+      );
     }
 
     testWidgets(

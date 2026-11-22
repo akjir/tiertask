@@ -1048,6 +1048,41 @@ void main() {
       expect(inMemoryRepo.directoryExists(), isTrue);
       expect(await inMemoryRepo.watchTdfChanges().isEmpty, isTrue);
 
+      final androidDir = Directory('${watchTempRoot.path}/android_files')
+        ..createSync(recursive: true);
+      final androidRepo = LocalFileRepository(
+        config: const WebDavConfig(),
+        baseDirectoryPath: androidDir.path,
+        androidFilesDirectoryResolver: () async => androidDir.path,
+      );
+      expect(
+        androidRepo.canWatchDirectory,
+        isFalse,
+        reason:
+            'Android sandboxed local storage must disable directory watching',
+      );
+      expect(
+        await androidRepo.watchTdfChanges().isEmpty,
+        isTrue,
+        reason: 'watchTdfChanges must return an empty stream on Android',
+      );
+
+      const operations = LocalFileOperations<LocalFileException>(
+        LocalFileException.new,
+      );
+      expect(
+        await operations
+            .watchTdfFile(
+              directoryPath: androidDir.path,
+              targetFileName: 'tasks.tdf',
+              inMemory: false,
+              isAndroid: true,
+            )
+            .isEmpty,
+        isTrue,
+        reason: 'LocalFileOperations.watchTdfFile must return an empty stream when isAndroid is true',
+      );
+
       final traversalRepo = LocalFileRepository(
         config: const WebDavConfig(localFilePath: '../escape.tdf'),
         baseDirectoryPath: watchTempRoot.path,

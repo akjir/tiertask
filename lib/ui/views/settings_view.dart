@@ -494,15 +494,16 @@ class _LocalStorageActionButton extends ConsumerWidget {
   }
 }
 
-/// Full-width auto-saved Local TDF File card with resolved path, capability-gated actions, and file watch toggle.
-class _LocalStorageCard extends StatelessWidget {
+/// Full-width auto-saved Local TDF File card with resolved path, capability-gated actions, and desktop file watch toggle.
+class _LocalStorageCard extends ConsumerWidget {
   /// Creates a [_LocalStorageCard].
   const _LocalStorageCard();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final gap = UiThemeTokens.of(context).spacing.space3;
+    final supportsLocalFileWatch = ref.watch(supportsLocalFileWatchProvider);
 
     return _SettingsAutoSavedCard(
       cardKey: const ValueKey<String>('settings_local_card'),
@@ -516,8 +517,10 @@ class _LocalStorageCard extends StatelessWidget {
           const _LocalResolvedPathField(),
           SizedBox(height: gap),
           const _LocalActionsGrid(),
-          SizedBox(height: gap),
-          const _LocalWatchToggle(),
+          if (supportsLocalFileWatch) ...<Widget>[
+            SizedBox(height: gap),
+            const _LocalWatchToggle(),
+          ],
         ],
       ),
     );

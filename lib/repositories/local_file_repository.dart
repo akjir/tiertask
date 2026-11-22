@@ -182,9 +182,11 @@ class LocalFileRepository {
   final HostFileLockManager<LocalFileException> _lockManager;
   String? _resolvedAndroidFilesDirectory;
 
-  /// Whether parent-directory observation is supported for this repository instance.
+  /// Whether parent-directory observation is supported for this repository instance (`false` on Android and in-memory test stores).
   bool get canWatchDirectory =>
-      !_useInMemoryFallback && FileSystemEntity.isWatchSupported;
+      !_useInMemoryFallback &&
+      !_isAndroidHost &&
+      FileSystemEntity.isWatchSupported;
 
   /// Host operating system version string reported by the Dart VM.
   static String get hostOsVersion => Platform.operatingSystemVersion;
@@ -200,6 +202,10 @@ class LocalFileRepository {
   /// Cached Android `Context.filesDir` path applicable to this repository instance, if resolved.
   String? get _effectiveAndroidFilesDirectory =>
       _resolvedAndroidFilesDirectory ?? _cachedAndroidFilesDirectory;
+
+  /// Whether this repository targets the sandboxed Android host platform.
+  bool get _isAndroidHost =>
+      Platform.isAndroid || _androidFilesDirectoryResolver != null;
 
   /// Resolves the active [AppLocalizations] instance for error messages.
   AppLocalizations get _messages {
@@ -221,7 +227,7 @@ class LocalFileRepository {
       !_useInMemoryFallback &&
       baseDirectoryPath == null &&
       !_operations.isAbsolutePath(config.localFilePath.trim()) &&
-      (Platform.isAndroid || _androidFilesDirectoryResolver != null);
+      _isAndroidHost;
 
   /// Records [directoryPath] as the process-wide cached Android `Context.filesDir`.
   static void cacheAndroidFilesDirectory(String? directoryPath) {
@@ -751,6 +757,7 @@ class LocalFileRepository {
       directoryPath: directoryPath,
       targetFileName: extractFileNameFromPath(filePath),
       inMemory: _useInMemoryFallback,
+      isAndroid: _isAndroidHost,
     );
   }
 

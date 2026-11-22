@@ -325,6 +325,12 @@ final supportsDirectoryPickerProvider = Provider<bool>((ref) {
       defaultTargetPlatform == TargetPlatform.windows;
 });
 
+/// Whether the host platform supports observing external local `.tdf` file edits (`true` on Linux and Windows, `false` on Android).
+final supportsLocalFileWatchProvider = Provider<bool>((ref) {
+  return defaultTargetPlatform == TargetPlatform.linux ||
+      defaultTargetPlatform == TargetPlatform.windows;
+});
+
 /// Provides the stateless [TdfService] scanner, parser, and serializer.
 final tdfServiceProvider = Provider<TdfService>((ref) {
   return const TdfService();

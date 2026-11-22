@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Changed external local TDF file watching to desktop platforms only and hid its Settings toggle on Android.
+
 ### Fixed
 
 - Fixed Android system status bar, navigation bar, and on-screen keyboard overlapping the top bar, bottom actions, drawers, and dialogs.

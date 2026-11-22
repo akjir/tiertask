@@ -49,7 +49,9 @@ class _BackgroundServicesHost extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     ref.watch(diagnosticsEnabledProvider);
-    ref.watch(localFileWatcherProvider);
+    if (ref.watch(supportsLocalFileWatchProvider)) {
+      ref.watch(localFileWatcherProvider);
+    }
     return child;
   }
 }

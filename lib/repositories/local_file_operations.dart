@@ -571,13 +571,15 @@ class LocalFileOperations<E extends Exception> {
     return joined;
   }
 
-  /// Watches [directoryPath] non-recursively and emits `null` whenever [targetFileName] is created, modified, or moved in.
+  /// Watches [directoryPath] non-recursively on desktop hosts and emits `null` whenever [targetFileName] is created, modified, or moved in.
   Stream<void> watchTdfFile({
     required String directoryPath,
     required String targetFileName,
     required bool inMemory,
+    bool? isAndroid,
   }) {
-    if (inMemory || !FileSystemEntity.isWatchSupported) {
+    final effectiveAndroid = isAndroid ?? Platform.isAndroid;
+    if (inMemory || effectiveAndroid || !FileSystemEntity.isWatchSupported) {
       return const Stream<void>.empty();
     }
     late final StreamController<void> controller;

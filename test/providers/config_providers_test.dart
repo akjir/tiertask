@@ -558,6 +558,30 @@ void main() {
       }
     });
 
+    test('supportsLocalFileWatchProvider is true on Linux and Windows and false on Android', () {
+      const cases = <(TargetPlatform, bool)>[
+        (TargetPlatform.linux, true),
+        (TargetPlatform.windows, true),
+        (TargetPlatform.android, false),
+      ];
+
+      for (final (platform, expected) in cases) {
+        debugDefaultTargetPlatformOverride = platform;
+        final container = ProviderContainer();
+        try {
+          expect(
+            container.read(supportsLocalFileWatchProvider),
+            equals(expected),
+            reason:
+                'Platform $platform local file watch support must be $expected',
+          );
+        } finally {
+          container.dispose();
+          debugDefaultTargetPlatformOverride = null;
+        }
+      }
+    });
+
     test('WebDavConfigNotifier updates preferences synchronously without dropping through AsyncLoading', () async {
       final settingsRepository = InMemorySettingsRepository(
         const WebDavConfig(

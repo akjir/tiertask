@@ -103,6 +103,7 @@ task taskB00002 {
         settingsRepositoryProvider.overrideWithValue(settingsRepository),
         localFileRepositoryProvider.overrideWith((ref) => localRepository),
         clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 12)),
+        supportsLocalFileWatchProvider.overrideWithValue(true),
       ],
     );
   }

@@ -16,6 +16,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -124,12 +125,14 @@ void main() {
 
     setUp(() async {
       HttpOverrides.global = null;
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       tempDir = await Directory.systemTemp.createTemp(
         'tiertask_watch_provider_',
       );
     });
 
     tearDown(() async {
+      debugDefaultTargetPlatformOverride = null;
       if (await tempDir.exists()) {
         await tempDir.delete(recursive: true);
       }
@@ -1614,6 +1617,88 @@ void main() {
         greaterThan(0),
         reason: 'Toggling localWatchEnabled must recompute localFileWatchTargetProvider',
       );
+    });
+
+    test('disables directory watching, resume catch-up, and reconcileExternalLocalChanges on Android', () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      var watchSubscribeCount = 0;
+      final settingsRepo = InMemorySettingsRepository();
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepo),
+          localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+          localFileWatchDebounceProvider.overrideWithValue(
+            const Duration(milliseconds: 5),
+          ),
+          localFileRepositoryProvider.overrideWith((ref) {
+            final cfg = _watchCurrentConfig(ref);
+            return _ControllableWatchLocalRepository(
+              config: cfg,
+              baseDirectoryPath: tempDir.path,
+              watchSupported: true,
+              onWatchListen: () => watchSubscribeCount++,
+              streamFactory: () => const Stream<void>.empty(),
+            );
+          }),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      container.listen(
+        localFileWatcherProvider,
+        (_, _) {},
+        fireImmediately: true,
+      );
+
+      await container.read(taskNotifierProvider.future);
+      await container.pump();
+
+      expect(
+        container.read(localFileWatchTargetProvider).enabled,
+        isFalse,
+        reason: 'localFileWatchTargetProvider must stay disabled when supportsLocalFileWatchProvider is false',
+      );
+      expect(
+        watchSubscribeCount,
+        equals(0),
+        reason: 'LocalFileWatcherNotifier must not open a watch stream when supportsLocalFileWatchProvider is false',
+      );
+
+      final tdfFile = File(
+        '${tempDir.path}${Platform.pathSeparator}${WebDavConfig.defaultFileName}',
+      );
+      await tdfFile.writeAsString(
+        'tdf 0.8.0\n\n'
+        'task 000001OkD2 {\n'
+        '    name "External Android Edit"\n'
+        '    created 2026-11-14 10:00\n'
+        '}\n',
+        flush: true,
+      );
+
+      TestWidgetsFlutterBinding.instance.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(
+        container.read(taskNotifierProvider).requireValue.allTasks,
+        isEmpty,
+        reason: 'AppLifecycleState.resumed must not trigger external local reconcile when supportsLocalFileWatchProvider is false',
+      );
+      expect(
+        await container
+            .read(taskNotifierProvider.notifier)
+            .reconcileExternalLocalChanges(),
+        isFalse,
+        reason: 'reconcileExternalLocalChanges must return false when supportsLocalFileWatchProvider is false',
+      );
+      expect(
+        container.read(taskNotifierProvider).requireValue.allTasks,
+        isEmpty,
+        reason: 'Direct reconcileExternalLocalChanges call must not merge on-disk changes when watching is unsupported',
+      );
+      expect(watchSubscribeCount, equals(0));
     });
   });
 }

@@ -63,6 +63,7 @@ final localFileWatchTargetProvider = Provider<LocalFileWatchTarget>((ref) {
     }),
   );
   final localRepo = ref.watch(localFileRepositoryProvider);
+  final supportsLocalFileWatch = ref.watch(supportsLocalFileWatchProvider);
   final effectiveStorageMode =
       configSlice?.storageMode ?? workspaceSlice?.storageMode;
   final effectiveLocalWatchEnabled =
@@ -74,6 +75,7 @@ final localFileWatchTargetProvider = Provider<LocalFileWatchTarget>((ref) {
       ? effectiveLocalWatchEnabled
       : null;
   final usesConfiguredLocal =
+      supportsLocalFileWatch &&
       resolvedLocalWatchEnabled == true &&
       effectiveStorageMode != null &&
       effectiveStorageMode.usesLocal &&
@@ -170,12 +172,12 @@ class LocalFileWatcherNotifier extends Notifier<void> {
     ref.onDispose(_disposeResources);
     final target = ref.watch(localFileWatchTargetProvider);
     final debounce = ref.watch(localFileWatchDebounceProvider);
-    _registerRebindListeners(target, debounce);
     final reEnabledInSameWorkspace = _updateToggleTracking(target);
     if (!target.enabled) {
       _watchGeneration++;
       return;
     }
+    _registerRebindListeners(target, debounce);
     _bindWatchStream(debounce);
     _lifecycleListener = AppLifecycleListener(
       onStateChange: (lifecycleState) =>

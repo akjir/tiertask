@@ -18,6 +18,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/l10n/app_localizations.dart';
@@ -1031,12 +1032,14 @@ void main() {
 
     setUp(() async {
       HttpOverrides.global = null;
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
       watchTempDir = await Directory.systemTemp.createTemp(
         'tiertask_ext_reconcile_',
       );
     });
 
     tearDown(() async {
+      debugDefaultTargetPlatformOverride = null;
       if (await watchTempDir.exists()) {
         await watchTempDir.delete(recursive: true);
       }

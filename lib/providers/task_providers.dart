@@ -1860,8 +1860,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return false;
   }
 
-  /// Returns `true` when [config] enables local directory watching and has a valid local target.
+  /// Returns `true` when the host platform and [config] enable local directory watching for a valid local target.
   bool _isExternalWatchActiveForConfig(WebDavConfig config) =>
+      ref.read(supportsLocalFileWatchProvider) &&
       config.localWatchEnabled &&
       config.storageMode.usesLocal &&
       config.isLocalConfigured;

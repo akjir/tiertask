@@ -202,6 +202,7 @@ Future<ProviderContainer> pumpLeafWidget(
   Locale locale = const Locale('en'),
   bool supportsNativeDirectoryPicker = true,
   bool supportsDesktopWindowControls = true,
+  bool supportsLocalFileWatch = true,
   AppBuildProfile buildProfile = AppBuildProfile.release,
   LocationFix? locationFix,
   LocationRepository? locationRepository,
@@ -239,6 +240,7 @@ Future<ProviderContainer> pumpLeafWidget(
       supportsDesktopWindowControlsProvider.overrideWithValue(
         supportsDesktopWindowControls,
       ),
+      supportsLocalFileWatchProvider.overrideWithValue(supportsLocalFileWatch),
       windowControlRepositoryProvider.overrideWithValue(
         windowControlRepository ?? FakeWindowControlRepository(),
       ),

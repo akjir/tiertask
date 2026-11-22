@@ -524,6 +524,53 @@ void main() {
     );
 
     testWidgets(
+      '_BackgroundServicesHost skips localFileWatcherProvider when supportsLocalFileWatchProvider is false while keeping diagnostics active',
+      (tester) async {
+        const initialConfig = WebDavConfig(
+          language: AppLanguage.english,
+          storageMode: StorageMode.local,
+        );
+        final watchSpy = _SpyWatchLocalFileRepository(
+          config: initialConfig,
+          baseDirectoryPath: tempDir.path,
+        );
+        final container = await _pumpTierTaskApp(
+          tester,
+          tempDir: tempDir,
+          config: initialConfig,
+          localFileRepository: watchSpy,
+          nowUtc: fixedUtc,
+          supportsLocalFileWatch: false,
+        );
+
+        expect(
+          watchSpy.watchCallCount,
+          equals(0),
+          reason: '_BackgroundServicesHost must not subscribe localFileWatcherProvider when supportsLocalFileWatchProvider is false',
+        );
+        expect(AppLogger.isEnabled, isFalse);
+
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateDiagnosticsEnabled(true);
+        await tester.pump();
+        expect(
+          AppLogger.isEnabled,
+          isTrue,
+          reason: 'diagnosticsEnabledProvider must stay active when local file watching is unsupported',
+        );
+        expect(watchSpy.watchCallCount, equals(0));
+
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateDiagnosticsEnabled(false);
+        await tester.pump();
+
+        await _disposeTierTaskApp(tester, container);
+      },
+    );
+
+    testWidgets(
       'onExitRequested drains workspaceUnloadCoordinatorProvider before flushing AppLogger and returning AppExitResponse.exit',
       (tester) async {
         const initialConfig = WebDavConfig(
@@ -645,6 +692,7 @@ Future<ProviderContainer> _pumpTierTaskApp(
   LocalFileRepository? localFileRepository,
   WebDavRepository? webDavRepository,
   WorkspaceUnloadCoordinator? unloadCoordinator,
+  bool supportsLocalFileWatch = true,
 }) async {
   const surfaceSize = Size(1280, 860);
   tester.view.physicalSize = surfaceSize;
@@ -676,6 +724,7 @@ Future<ProviderContainer> _pumpTierTaskApp(
       appVersionProvider.overrideWith((ref) => 'v0.4.0+4.abc1234'),
       supportsDirectoryPickerProvider.overrideWithValue(true),
       supportsDesktopWindowControlsProvider.overrideWithValue(true),
+      supportsLocalFileWatchProvider.overrideWithValue(supportsLocalFileWatch),
       windowControlRepositoryProvider.overrideWithValue(
         FakeWindowControlRepository(),
       ),

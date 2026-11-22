@@ -18,6 +18,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -373,6 +374,7 @@ void main() {
             settingsRepositoryProvider.overrideWithValue(settingsRepo),
             localFileRepositoryProvider.overrideWith((ref) => localRepo),
             clockProvider.overrideWithValue(() => baseTime),
+            supportsLocalFileWatchProvider.overrideWithValue(true),
             appBuildProfileProvider.overrideWithValue(AppBuildProfile.dev),
             appVersionRepositoryProvider.overrideWithValue(
               const FakeAppVersionRepository(version: '0.4.0+7.deadbee'),
@@ -661,6 +663,7 @@ void main() {
             localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
             localFileRepositoryProvider.overrideWith((ref) => realLocalRepo),
             clockProvider.overrideWithValue(() => currentNow),
+            supportsLocalFileWatchProvider.overrideWithValue(true),
           ],
         );
         addTearDown(container.dispose);
@@ -1319,6 +1322,7 @@ void main() {
                 );
               }),
               clockProvider.overrideWithValue(() => baseTime),
+              supportsLocalFileWatchProvider.overrideWithValue(true),
             ],
             child: const TierTaskApp(),
           ),
@@ -1401,6 +1405,87 @@ void main() {
           findsOneWidget,
           reason:
               'Re-enabling watcher must catch up external edits immediately',
+        );
+      },
+    );
+
+    testWidgets(
+      'TierTaskApp disables localFileWatcherProvider and hides Local Watch toggle on Android',
+      (WidgetTester tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.android;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        _setViewport(tester, const Size(390, 844));
+        final tempDir = Directory.systemTemp.createTempSync(
+          'tiertask_android_no_watch_',
+        );
+        addTearDown(() => tempDir.deleteSync(recursive: true));
+        final tdfPath = '${tempDir.path}${Platform.pathSeparator}tasks.tdf';
+        File(tdfPath).writeAsStringSync(
+          'tdf 0.8.0\n\n'
+          'queue {\n'
+          '  modified 2026-11-10 08:00:00\n'
+          '  task 000001OkD2\n'
+          '}\n\n'
+          'task 000001OkD2 {\n'
+          '  name "Android Task"\n'
+          '  created 2026-11-10 08:00:00\n'
+          '  modified 2026-11-10 08:00:00\n'
+          '}\n',
+          flush: true,
+        );
+        final watchEvents = StreamController<void>.broadcast();
+        addTearDown(watchEvents.close);
+
+        final settingsRepository = InMemorySettingsRepository(
+          WebDavConfig(
+            localFilePath: tdfPath,
+            storageMode: StorageMode.local,
+            language: AppLanguage.english,
+          ),
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [
+              settingsRepositoryProvider.overrideWithValue(settingsRepository),
+              localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
+              localFileRepositoryProvider.overrideWith((ref) {
+                final currentConfig =
+                    ref.watch(webDavConfigProvider).asData?.value ??
+                    WebDavConfig(localFilePath: tdfPath);
+                return _DiskBackedWatchLocalFileRepository(
+                  config: currentConfig,
+                  baseDirectoryPath: tempDir.path,
+                  watchStream: watchEvents.stream,
+                );
+              }),
+              clockProvider.overrideWithValue(() => baseTime),
+            ],
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('Android Task'), findsOneWidget);
+        expect(
+          watchEvents.hasListener,
+          isFalse,
+          reason: 'TierTaskApp on Android must not subscribe to localFileWatcherProvider',
+        );
+
+        await tester.tap(find.byIcon(Icons.menu_rounded));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Settings'));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey<String>('settings_local_card')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey<String>('settings_local_watch_toggle')),
+          findsNothing,
+          reason: 'Android SettingsView must hide the Local Watch toggle',
         );
       },
     );
@@ -1692,6 +1777,7 @@ task loc100OkD2 priority {
                 ),
               ),
               clockProvider.overrideWithValue(() => baseTime),
+              supportsLocalFileWatchProvider.overrideWithValue(true),
             ],
             child: const TierTaskApp(),
           ),
@@ -1752,6 +1838,7 @@ task loc100OkD2 priority {
                 ),
               ),
               clockProvider.overrideWithValue(() => baseTime),
+              supportsLocalFileWatchProvider.overrideWithValue(true),
             ],
             child: const TierTaskApp(),
           ),
@@ -1789,6 +1876,7 @@ task loc100OkD2 priority {
                 ),
               ),
               clockProvider.overrideWithValue(() => baseTime),
+              supportsLocalFileWatchProvider.overrideWithValue(true),
             ],
             child: const TierTaskApp(),
           ),
