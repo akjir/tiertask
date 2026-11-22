@@ -1868,7 +1868,7 @@ class AppLocalizationsEn extends AppLocalizations {
       'Structured runtime entries (credentials, raw GPS coordinates, and notes redacted).';
 
   @override
-  String get logFilterSubsystemLabel => 'Subsystem';
+  String get logFilterSubsystemLabel => 'Subsystems';
 
   @override
   String get logActionUpload => 'Upload Log';
@@ -1939,4 +1939,11 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get logFilteredCopiedSnackBar =>
       'Filtered diagnostic log copied to clipboard.';
+
+  @override
+  String get logFilterNoTags => 'None';
+
+  @override
+  String get emptyFilteredLogHint =>
+      'No diagnostic log entries match the active filters.';
 }

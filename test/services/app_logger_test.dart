@@ -181,239 +181,372 @@ void main() {
     },
   );
 
-  group(
-    'Structured Format, Level Thresholding, Sanitization & Rolling Cap',
-    () {
-      test('formats 5-char padded LogLevel and 9-char padded LogTag variants and redacts secrets', () {
-        AppLogger.setEnabled(
-          true,
-          logFilePath: logFilePath,
-          minimumLevel: LogLevel.debug,
-          secretToRedact: 'MySuperSecretWebDavPass!2026',
-        );
-
-        AppLogger.event(
-          LogLevel.debug,
-          LogTag.tdf,
-          'tdf.parse',
-          fields: <String, Object?>{
-            'header': 'Authorization: Basic YWxpY2U6c2VjcmV0',
-          },
-        );
-        AppLogger.event(
-          LogLevel.info,
-          LogTag.domain,
-          'task.add',
-          fields: <String, Object?>{
-            'endpoint': 'https://alice:urlPass123@cloud.example.com/dav',
-          },
-        );
-        AppLogger.event(
-          LogLevel.warn,
-          LogTag.sync,
-          'sync.conflict',
-          fields: <String, Object?>{
-            'detail': 'password=inlinePassword99 and Basic dXNlcjpwYXNz',
-          },
-        );
-        AppLogger.event(
-          LogLevel.error,
-          LogTag.storage,
-          'webdav.get',
-          fields: <String, Object?>{
-            'error': 'Failed with secret MySuperSecretWebDavPass!2026',
-          },
-        );
-        AppLogger.event(
-          LogLevel.info,
-          LogTag.ui,
-          'ui.dialog.open',
-          fields: <String, Object?>{'dialog': 'log_viewer'},
-        );
-
-        final diskText = File(logFilePath).readAsStringSync();
-        expect(
-          diskText,
-          contains('2026-11-03T22:05:14.128Z [DEBUG] [TDF      ] tdf.parse |'),
-          reason: 'DEBUG level (5 chars) and TDF tag (9 chars) must be padded',
-        );
-        expect(
-          diskText,
-          contains('2026-11-03T22:05:14.128Z [INFO ] [DOMAIN   ] task.add |'),
-          reason:
-              'INFO level (5 chars) and DOMAIN tag (9 chars) must be padded',
-        );
-        expect(
-          diskText,
-          contains(
-            '2026-11-03T22:05:14.128Z [WARN ] [SYNC     ] sync.conflict |',
-          ),
-          reason: 'WARN level (5 chars) and SYNC tag (9 chars) must be padded',
-        );
-        expect(
-          diskText,
-          contains('2026-11-03T22:05:14.128Z [ERROR] [STORAGE  ] webdav.get |'),
-          reason: 'ERROR level and STORAGE tag must be padded',
-        );
-        expect(
-          diskText,
-          contains(
-            '2026-11-03T22:05:14.128Z [INFO ] [UI       ] '
-            'ui.dialog.open | dialog=log_viewer',
-          ),
-          reason: 'UI tag (9 chars) must match structured format',
-        );
-
-        expect(
-          diskText,
-          isNot(contains('YWxpY2U6c2VjcmV0')),
-          reason: 'Base64 Basic Auth token must be redacted',
-        );
-        expect(
-          diskText,
-          isNot(contains('urlPass123')),
-          reason: 'Embedded URL userinfo password must be redacted',
-        );
-        expect(
-          diskText,
-          isNot(contains('inlinePassword99')),
-          reason: 'password=... value must be redacted',
-        );
-        expect(
-          diskText,
-          isNot(contains('dXNlcjpwYXNz')),
-          reason: 'Standalone Basic token must be redacted',
-        );
-        expect(
-          diskText,
-          isNot(contains('MySuperSecretWebDavPass!2026')),
-          reason: 'Registered WebDAV password must be redacted',
-        );
-        expect(
-          diskText,
-          contains('[REDACTED]'),
-          reason: 'Redacted secrets must be replaced with [REDACTED]',
-        );
-      });
-
-      test(
-        'enforces minimumLevel filtering while always allowing CRASH entries',
-        () {
-          AppLogger.setEnabled(
-            true,
-            logFilePath: logFilePath,
-            minimumLevel: LogLevel.warn,
-          );
-
-          expect(AppLogger.shouldLog(LogLevel.debug), isFalse);
-          expect(AppLogger.shouldLog(LogLevel.info), isFalse);
-          expect(AppLogger.shouldLog(LogLevel.warn), isTrue);
-          expect(AppLogger.shouldLog(LogLevel.error), isTrue);
-          expect(AppLogger.shouldLog(LogLevel.crash), isTrue);
-
-          AppLogger.debug(LogTag.domain, 'Filtered debug');
-          AppLogger.info(LogTag.domain, 'Filtered info');
-          AppLogger.warn(LogTag.domain, 'Retained warning');
-          AppLogger.error(LogTag.domain, 'Retained error');
-          AppLogger.crash(StateError('Retained crash'), StackTrace.empty);
-
-          final text = AppLogger.fullLogText;
-          expect(text, isNot(contains('Filtered debug')));
-          expect(text, isNot(contains('Filtered info')));
-          expect(text, contains('Retained warning'));
-          expect(text, contains('Retained error'));
-          expect(text, contains('Retained crash'));
-        },
+  group('Structured Format, Level Thresholding, Sanitization & Rolling Cap', () {
+    test('formats 5-char padded LogLevel and 9-char padded LogTag variants and redacts secrets', () {
+      AppLogger.setEnabled(
+        true,
+        logFilePath: logFilePath,
+        minimumLevel: LogLevel.debug,
+        secretToRedact: 'MySuperSecretWebDavPass!2026',
       );
 
-      test('matchesFilter filters lines by LogLevel threshold and LogTag', () {
-        const debugTdfLine =
-            '2026-11-03T22:05:14.128Z [DEBUG] [TDF      ] tdf.parse | tasks=2';
-        const warnSyncLine =
-            '2026-11-03T22:05:14.128Z [WARN ] [SYNC     ] sync.conflict | id=1';
+      AppLogger.event(
+        LogLevel.debug,
+        LogTag.tdf,
+        'tdf.parse',
+        fields: <String, Object?>{
+          'header': 'Authorization: Basic YWxpY2U6c2VjcmV0',
+        },
+      );
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.domain,
+        'task.add',
+        fields: <String, Object?>{
+          'endpoint': 'https://alice:urlPass123@cloud.example.com/dav',
+        },
+      );
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.sync,
+        'sync.conflict',
+        fields: <String, Object?>{
+          'detail': 'password=inlinePassword99 and Basic dXNlcjpwYXNz',
+        },
+      );
+      AppLogger.event(
+        LogLevel.error,
+        LogTag.storage,
+        'webdav.get',
+        fields: <String, Object?>{
+          'error': 'Failed with secret MySuperSecretWebDavPass!2026',
+        },
+      );
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.ui,
+        'ui.dialog.open',
+        fields: <String, Object?>{'dialog': 'log_viewer'},
+      );
 
-        expect(
-          AppLogger.matchesFilter(debugTdfLine, minimumLevel: LogLevel.info),
-          isFalse,
-        );
-        expect(
-          AppLogger.matchesFilter(
-            debugTdfLine,
-            minimumLevel: LogLevel.debug,
-            tag: LogTag.tdf,
-          ),
-          isTrue,
-        );
-        expect(
-          AppLogger.matchesFilter(
-            warnSyncLine,
-            minimumLevel: LogLevel.info,
-            tag: LogTag.sync,
-          ),
-          isTrue,
-        );
-        expect(
-          AppLogger.matchesFilter(
-            warnSyncLine,
-            minimumLevel: LogLevel.info,
-            tag: LogTag.tdf,
-          ),
-          isFalse,
-        );
-      });
+      final diskText = File(logFilePath).readAsStringSync();
+      expect(
+        diskText,
+        contains('2026-11-03T22:05:14.128Z [DEBUG] [TDF      ] tdf.parse |'),
+        reason: 'DEBUG level (5 chars) and TDF tag (9 chars) must be padded',
+      );
+      expect(
+        diskText,
+        contains('2026-11-03T22:05:14.128Z [INFO ] [DOMAIN   ] task.add |'),
+        reason: 'INFO level (5 chars) and DOMAIN tag (9 chars) must be padded',
+      );
+      expect(
+        diskText,
+        contains(
+          '2026-11-03T22:05:14.128Z [WARN ] [SYNC     ] sync.conflict |',
+        ),
+        reason: 'WARN level (5 chars) and SYNC tag (9 chars) must be padded',
+      );
+      expect(
+        diskText,
+        contains('2026-11-03T22:05:14.128Z [ERROR] [STORAGE  ] webdav.get |'),
+        reason: 'ERROR level and STORAGE tag must be padded',
+      );
+      expect(
+        diskText,
+        contains(
+          '2026-11-03T22:05:14.128Z [INFO ] [UI       ] '
+          'ui.dialog.open | dialog=log_viewer',
+        ),
+        reason: 'UI tag (9 chars) must match structured format',
+      );
 
-      test('trims oldest 20% of regular entries when maxLines is exceeded while preserving @meta header and crash blocks', () {
-        File(logFilePath).writeAsStringSync(
-          '2026-11-03T21:00:00.000Z [CRASH] [LIFECYCLE] '
-          'crash.unhandled | error="Previous fatal error"\n'
-          '2026-11-03T21:00:00.000Z [CRASH] [LIFECYCLE] '
-          'crash.stack | trace="#0 main (main.dart:10)"\n',
-          flush: true,
-        );
+      expect(
+        diskText,
+        isNot(contains('YWxpY2U6c2VjcmV0')),
+        reason: 'Base64 Basic Auth token must be redacted',
+      );
+      expect(
+        diskText,
+        isNot(contains('urlPass123')),
+        reason: 'Embedded URL userinfo password must be redacted',
+      );
+      expect(
+        diskText,
+        isNot(contains('inlinePassword99')),
+        reason: 'password=... value must be redacted',
+      );
+      expect(
+        diskText,
+        isNot(contains('dXNlcjpwYXNz')),
+        reason: 'Standalone Basic token must be redacted',
+      );
+      expect(
+        diskText,
+        isNot(contains('MySuperSecretWebDavPass!2026')),
+        reason: 'Registered WebDAV password must be redacted',
+      );
+      expect(
+        diskText,
+        contains('[REDACTED]'),
+        reason: 'Redacted secrets must be replaced with [REDACTED]',
+      );
+    });
 
+    test(
+      'enforces minimumLevel filtering while always allowing CRASH entries',
+      () {
         AppLogger.setEnabled(
           true,
           logFilePath: logFilePath,
+          minimumLevel: LogLevel.warn,
+        );
+
+        expect(AppLogger.shouldLog(LogLevel.debug), isFalse);
+        expect(AppLogger.shouldLog(LogLevel.info), isFalse);
+        expect(AppLogger.shouldLog(LogLevel.warn), isTrue);
+        expect(AppLogger.shouldLog(LogLevel.error), isTrue);
+        expect(AppLogger.shouldLog(LogLevel.crash), isTrue);
+
+        AppLogger.debug(LogTag.domain, 'Filtered debug');
+        AppLogger.info(LogTag.domain, 'Filtered info');
+        AppLogger.warn(LogTag.domain, 'Retained warning');
+        AppLogger.error(LogTag.domain, 'Retained error');
+        AppLogger.crash(StateError('Retained crash'), StackTrace.empty);
+
+        final text = AppLogger.fullLogText;
+        expect(text, isNot(contains('Filtered debug')));
+        expect(text, isNot(contains('Filtered info')));
+        expect(text, contains('Retained warning'));
+        expect(text, contains('Retained error'));
+        expect(text, contains('Retained crash'));
+      },
+    );
+
+    test('matchesFilter filters lines by LogLevel threshold and multi-tag LogTag set', () {
+      const metaLine = '@meta format=1 app_version=0.4.0';
+      const separatorLine = '=== TierTask Diagnostic Log ===';
+      const debugTdfLine =
+          '2026-11-03T22:05:14.128Z [DEBUG] [TDF      ] tdf.parse | tasks=2';
+      const infoStorageLine =
+          '2026-11-03T22:05:14.130Z [INFO ] [STORAGE  ] storage.read | bytes=128';
+      const warnSyncLine =
+          '2026-11-03T22:05:14.135Z [WARN ] [SYNC     ] sync.conflict | id=1';
+      const crashLifecycleLine =
+          '2026-11-03T22:05:14.140Z [CRASH] [LIFECYCLE] crash.unhandled | error="boom"';
+      const unstructuredLine = 'continuation line without tag';
+      final allTags = Set<LogTag>.of(LogTag.values);
+
+      expect(
+        AppLogger.matchesFilter(debugTdfLine, minimumLevel: LogLevel.info),
+        isFalse,
+        reason: 'DEBUG line must be excluded when minimumLevel is INFO',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          metaLine,
           minimumLevel: LogLevel.debug,
-          maxLines: 25,
-        );
-
-        for (var i = 1; i <= 30; i++) {
-          AppLogger.info(LogTag.domain, 'Regular log line $i');
-        }
-
-        final currentLines = AppLogger.lines;
+          tags: null,
+        ),
+        isTrue,
+        reason: '@meta header must match when unfiltered at DEBUG level',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          separatorLine,
+          minimumLevel: LogLevel.debug,
+          tags: allTags,
+        ),
+        isTrue,
+        reason: '=== header must match when all LogTag values are selected at DEBUG level',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          metaLine,
+          minimumLevel: LogLevel.info,
+          tags: allTags,
+        ),
+        isFalse,
+        reason:
+            '@meta header must be excluded when minimumLevel is above DEBUG',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          metaLine,
+          minimumLevel: LogLevel.debug,
+          tags: const <LogTag>{LogTag.tdf, LogTag.storage},
+        ),
+        isFalse,
+        reason: '@meta header must be excluded when filtering to a strict subsystem subset',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          debugTdfLine,
+          minimumLevel: LogLevel.debug,
+          tags: const <LogTag>{LogTag.tdf, LogTag.storage},
+        ),
+        isTrue,
+        reason: 'TDF line must match {tdf, storage}',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          infoStorageLine,
+          minimumLevel: LogLevel.debug,
+          tags: const <LogTag>{LogTag.tdf, LogTag.storage},
+        ),
+        isTrue,
+        reason: 'STORAGE line must match {tdf, storage}',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          warnSyncLine,
+          minimumLevel: LogLevel.info,
+          tags: const <LogTag>{LogTag.tdf, LogTag.storage},
+        ),
+        isFalse,
+        reason: 'SYNC line must be excluded by {tdf, storage}',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          warnSyncLine,
+          minimumLevel: LogLevel.info,
+          tags: const <LogTag>{LogTag.sync},
+        ),
+        isTrue,
+        reason: 'SYNC WARN line must match INFO threshold and {sync}',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          crashLifecycleLine,
+          minimumLevel: LogLevel.error,
+          tags: const <LogTag>{LogTag.lifecycle},
+        ),
+        isTrue,
+        reason:
+            'CRASH line must match selected LIFECYCLE tag at ERROR threshold',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          crashLifecycleLine,
+          minimumLevel: LogLevel.debug,
+          tags: const <LogTag>{LogTag.tdf, LogTag.storage},
+        ),
+        isFalse,
+        reason: 'CRASH LIFECYCLE line must be excluded when LIFECYCLE is deselected',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          unstructuredLine,
+          minimumLevel: LogLevel.debug,
+          tags: allTags,
+        ),
+        isTrue,
+        reason: 'Unstructured line must pass when all tags are selected',
+      );
+      expect(
+        AppLogger.matchesFilter(
+          unstructuredLine,
+          minimumLevel: LogLevel.debug,
+          tags: const <LogTag>{LogTag.tdf},
+        ),
+        isFalse,
+        reason:
+            'Unstructured line without tag must be excluded for a tag subset',
+      );
+      for (final line in <String>[
+        metaLine,
+        separatorLine,
+        debugTdfLine,
+        infoStorageLine,
+        warnSyncLine,
+        crashLifecycleLine,
+        unstructuredLine,
+      ]) {
         expect(
-          currentLines.length <= 25,
-          isTrue,
-          reason: 'Line buffer must stay within maxLines after 20% pruning',
+          AppLogger.matchesFilter(
+            line,
+            minimumLevel: LogLevel.debug,
+            tags: const <LogTag>{},
+          ),
+          isFalse,
+          reason: 'Empty tag set must exclude every line ($line)',
         );
+      }
+      for (final tag in LogTag.values) {
+        final taggedLine =
+            '2026-11-03T22:05:14.150Z [INFO ] [${tag.paddedLabel}] test.event';
         expect(
-          currentLines.first,
-          equals('=== TIERTASK DIAGNOSTIC LOG ==='),
-          reason: '@meta header block must remain at top of file after pruning',
-        );
-        expect(
-          currentLines.any((line) => line.contains('Previous fatal error')),
-          isTrue,
-          reason:
-              'Unacknowledged [CRASH] lines must be preserved during pruning',
-        );
-        expect(
-          currentLines.any(
-            (line) => line.contains('RECOVERED UNCLEAN EXIT / CRASH LOG ABOVE'),
+          AppLogger.matchesFilter(
+            taggedLine,
+            minimumLevel: LogLevel.info,
+            tags: <LogTag>{tag},
           ),
           isTrue,
-          reason: 'Recovery banner must be preserved during pruning',
+          reason: 'Tag ${tag.name} must match when selected',
         );
+        final otherTags = Set<LogTag>.of(LogTag.values)..remove(tag);
         expect(
-          currentLines.last,
-          contains('Regular log line 30'),
-          reason: 'Newest log entries must be retained after pruning',
+          AppLogger.matchesFilter(
+            taggedLine,
+            minimumLevel: LogLevel.info,
+            tags: otherTags,
+          ),
+          isFalse,
+          reason: 'Tag ${tag.name} must be excluded when deselected',
         );
-      });
-    },
-  );
+      }
+    });
+
+    test('trims oldest 20% of regular entries when maxLines is exceeded while preserving @meta header and crash blocks', () {
+      File(logFilePath).writeAsStringSync(
+        '2026-11-03T21:00:00.000Z [CRASH] [LIFECYCLE] '
+        'crash.unhandled | error="Previous fatal error"\n'
+        '2026-11-03T21:00:00.000Z [CRASH] [LIFECYCLE] '
+        'crash.stack | trace="#0 main (main.dart:10)"\n',
+        flush: true,
+      );
+
+      AppLogger.setEnabled(
+        true,
+        logFilePath: logFilePath,
+        minimumLevel: LogLevel.debug,
+        maxLines: 25,
+      );
+
+      for (var i = 1; i <= 30; i++) {
+        AppLogger.info(LogTag.domain, 'Regular log line $i');
+      }
+
+      final currentLines = AppLogger.lines;
+      expect(
+        currentLines.length <= 25,
+        isTrue,
+        reason: 'Line buffer must stay within maxLines after 20% pruning',
+      );
+      expect(
+        currentLines.first,
+        equals('=== TIERTASK DIAGNOSTIC LOG ==='),
+        reason: '@meta header block must remain at top of file after pruning',
+      );
+      expect(
+        currentLines.any((line) => line.contains('Previous fatal error')),
+        isTrue,
+        reason: 'Unacknowledged [CRASH] lines must be preserved during pruning',
+      );
+      expect(
+        currentLines.any(
+          (line) => line.contains('RECOVERED UNCLEAN EXIT / CRASH LOG ABOVE'),
+        ),
+        isTrue,
+        reason: 'Recovery banner must be preserved during pruning',
+      );
+      expect(
+        currentLines.last,
+        contains('Regular log line 30'),
+        reason: 'Newest log entries must be retained after pruning',
+      );
+    });
+  });
 
   group('Lifecycle State Machine, Session Preservation & Crash Recovery', () {
     test('sleep states and clean detached exit preserve log file and record session.exit without triggering false recovery on next start', () {

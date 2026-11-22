@@ -94,6 +94,7 @@ void main() {
       expect(lineA, isNot(equals(lineC)));
 
       final mutableLines = <DiagnosticLogLine>[lineA];
+      final mutableTags = <LogTag>{LogTag.tdf, LogTag.storage};
       final snapshotA = DiagnosticLogSnapshot(
         canSyncWebDav: true,
         errorCount: 0,
@@ -101,7 +102,7 @@ void main() {
         hasEntries: true,
         headerSummary: 'header',
         minimumLevel: LogLevel.info,
-        selectedTag: LogTag.sync,
+        selectedTags: mutableTags,
         totalEntries: 1,
         warningCount: 1,
       );
@@ -112,15 +113,38 @@ void main() {
         hasEntries: true,
         headerSummary: 'header',
         minimumLevel: LogLevel.info,
-        selectedTag: LogTag.sync,
+        selectedTags: const <LogTag>[LogTag.storage, LogTag.tdf],
+        totalEntries: 1,
+        warningCount: 1,
+      );
+      final allTagsSnapshot = DiagnosticLogSnapshot(
+        canSyncWebDav: true,
+        errorCount: 0,
+        filteredLines: const <DiagnosticLogLine>[lineB],
+        hasEntries: true,
+        headerSummary: 'header',
+        minimumLevel: LogLevel.info,
+        selectedTags: LogTag.values,
         totalEntries: 1,
         warningCount: 1,
       );
       mutableLines.add(lineC);
+      mutableTags.add(LogTag.sync);
       expect(snapshotA.filteredLines.length, equals(1));
       expect(() => snapshotA.filteredLines.add(lineC), throwsUnsupportedError);
+      expect(
+        snapshotA.selectedTags,
+        equals(const <LogTag>{LogTag.tdf, LogTag.storage}),
+      );
+      expect(
+        () => snapshotA.selectedTags.add(LogTag.ui),
+        throwsUnsupportedError,
+      );
+      expect(snapshotA.areAllTagsSelected, isFalse);
+      expect(allTagsSnapshot.areAllTagsSelected, isTrue);
       expect(snapshotA, equals(snapshotB));
       expect(snapshotA.hashCode, equals(snapshotB.hashCode));
+      expect(snapshotA, isNot(equals(allTagsSnapshot)));
 
       const failedA = LogSyncFailed('offline');
       const failedB = LogSyncFailed('offline');
@@ -201,15 +225,16 @@ void main() {
       );
     });
 
-    test('preserves filters across webDavConfigProvider updates and supports clear/fullText', () async {
+    test('preserves multi-tag filters across webDavConfigProvider updates and supports toggle/all/none/clear/fullText', () async {
       AppLogger.setEnabled(
         true,
         minimumLevel: LogLevel.debug,
         persistToDisk: false,
       );
       AppLogger.debug(LogTag.ui, 'ui debug');
+      AppLogger.warn(LogTag.tdf, 'tdf warn');
       AppLogger.warn(LogTag.sync, 'sync warn');
-      AppLogger.error(LogTag.sync, 'sync error');
+      AppLogger.error(LogTag.storage, 'storage error');
 
       final configurationNotifier = _TestWebDavConfigNotifier(
         initialConfig: const WebDavConfig(logStorageMode: StorageMode.local),
@@ -225,17 +250,49 @@ void main() {
       final subscription = container.listen(logViewerProvider, (_, _) {});
       addTearDown(subscription.close);
 
+      final initial = container.read(logViewerProvider);
+      expect(initial.areAllTagsSelected, isTrue);
+      expect(initial.selectedTags, equals(Set<LogTag>.of(LogTag.values)));
+
       final notifier = container.read(logViewerProvider.notifier);
+      // Calling selectAllTags when all tags are already selected is a no-op.
+      notifier.selectAllTags();
+      expect(container.read(logViewerProvider).areAllTagsSelected, isTrue);
+
+      // Deselecting a single subsystem removes only its entries.
+      notifier.toggleTag(LogTag.ui);
+      expect(
+        container.read(logViewerProvider).selectedTags,
+        isNot(contains(LogTag.ui)),
+      );
+      expect(container.read(logViewerProvider).areAllTagsSelected, isFalse);
+      expect(notifier.readFilteredLogText(), isNot(contains('ui debug')));
+      expect(notifier.readFilteredLogText(), contains('tdf warn'));
+      expect(notifier.readFilteredLogText(), contains('storage error'));
+
+      // Clear all tags then select only TDF and STORAGE with WARN minimum level.
+      notifier
+        ..clearSelectedTags()
+        ..clearSelectedTags();
+      final noneSelected = container.read(logViewerProvider);
+      expect(noneSelected.selectedTags, isEmpty);
+      expect(noneSelected.filteredLines, isEmpty);
+      expect(noneSelected.hasEntries, isTrue);
+      expect(noneSelected.totalEntries, equals(5));
+
       notifier
         ..setMinimumLevel(LogLevel.warn)
         ..setMinimumLevel(LogLevel.warn)
-        ..setSelectedTag(LogTag.sync)
-        ..setSelectedTag(LogTag.sync);
+        ..toggleTag(LogTag.tdf)
+        ..toggleTag(LogTag.storage);
 
       final filtered = container.read(logViewerProvider);
       expect(filtered.canSyncWebDav, isFalse);
       expect(filtered.minimumLevel, equals(LogLevel.warn));
-      expect(filtered.selectedTag, equals(LogTag.sync));
+      expect(
+        filtered.selectedTags,
+        equals(const <LogTag>{LogTag.tdf, LogTag.storage}),
+      );
       expect(filtered.filteredLines.length, equals(2));
       expect(notifier.readFullLogText(), contains('ui debug'));
 
@@ -256,12 +313,16 @@ void main() {
       final afterConfigChange = container.read(logViewerProvider);
       expect(afterConfigChange.canSyncWebDav, isTrue);
       expect(afterConfigChange.minimumLevel, equals(LogLevel.warn));
-      expect(afterConfigChange.selectedTag, equals(LogTag.sync));
+      expect(
+        afterConfigChange.selectedTags,
+        equals(const <LogTag>{LogTag.tdf, LogTag.storage}),
+      );
       expect(afterConfigChange.filteredLines.length, equals(2));
 
       notifier
-        ..setSelectedTag(null)
+        ..selectAllTags()
         ..setMinimumLevel(LogLevel.debug);
+      expect(container.read(logViewerProvider).areAllTagsSelected, isTrue);
       expect(
         container.read(logViewerProvider).filteredLines.length,
         greaterThan(2),
@@ -274,7 +335,7 @@ void main() {
       expect(afterClear.filteredLines, isEmpty);
     });
 
-    test('readFilteredLogText returns only entries matching active level and subsystem filters', () async {
+    test('readFilteredLogText returns only entries matching active level and multi-subsystem filters', () async {
       AppLogger.setEnabled(
         true,
         minimumLevel: LogLevel.debug,
@@ -283,6 +344,7 @@ void main() {
       AppLogger.debug(LogTag.tdf, 'tdf debug event');
       AppLogger.info(LogTag.tdf, 'tdf info event');
       AppLogger.warn(LogTag.tdf, 'tdf warn event');
+      AppLogger.info(LogTag.storage, 'storage info event');
       AppLogger.error(LogTag.sync, 'sync error event');
 
       final container = ProviderContainer(
@@ -310,21 +372,32 @@ void main() {
         reason: 'Unfiltered readFilteredLogText must match readFullLogText verbatim',
       );
 
-      notifier.setSelectedTag(LogTag.tdf);
-      final tdfOnly = notifier.readFilteredLogText();
-      expect(tdfOnly, contains('tdf debug event'));
-      expect(tdfOnly, contains('tdf info event'));
-      expect(tdfOnly, contains('tdf warn event'));
-      expect(tdfOnly, isNot(contains('sync error event')));
-      expect(tdfOnly, isNot(contains('@meta ')));
-      expect(tdfOnly.split('\n').length, equals(3));
+      notifier
+        ..clearSelectedTags()
+        ..toggleTag(LogTag.tdf)
+        ..toggleTag(LogTag.storage);
+      final tdfAndStorage = notifier.readFilteredLogText();
+      expect(tdfAndStorage, contains('tdf debug event'));
+      expect(tdfAndStorage, contains('tdf info event'));
+      expect(tdfAndStorage, contains('tdf warn event'));
+      expect(tdfAndStorage, contains('storage info event'));
+      expect(tdfAndStorage, isNot(contains('sync error event')));
+      expect(tdfAndStorage, isNot(contains('@meta ')));
+      expect(tdfAndStorage.split('\n').length, equals(4));
 
+      notifier.setMinimumLevel(LogLevel.info);
+      final tdfAndStorageInfo = notifier.readFilteredLogText();
+      expect(tdfAndStorageInfo, isNot(contains('tdf debug event')));
+      expect(tdfAndStorageInfo, contains('tdf info event'));
+      expect(tdfAndStorageInfo, contains('tdf warn event'));
+      expect(tdfAndStorageInfo, contains('storage info event'));
+      expect(tdfAndStorageInfo.split('\n').length, equals(3));
+
+      notifier.toggleTag(LogTag.storage);
       notifier.setMinimumLevel(LogLevel.warn);
       final tdfWarnOnly = notifier.readFilteredLogText();
       expect(tdfWarnOnly, contains('tdf warn event'));
-      expect(tdfWarnOnly, isNot(contains('tdf debug event')));
-      expect(tdfWarnOnly, isNot(contains('tdf info event')));
-      expect(tdfWarnOnly, isNot(contains('sync error event')));
+      expect(tdfWarnOnly, isNot(contains('storage info event')));
       expect(tdfWarnOnly.split('\n').length, equals(1));
 
       notifier.setMinimumLevel(LogLevel.error);

@@ -1901,7 +1901,7 @@ class AppLocalizationsDe extends AppLocalizations {
       'Strukturierte Sitzungsereignisse (ohne Zugangsdaten, GPS-Rohdaten oder Notiztexte).';
 
   @override
-  String get logFilterSubsystemLabel => 'Subsystem';
+  String get logFilterSubsystemLabel => 'Subsysteme';
 
   @override
   String get logActionUpload => 'Log hochladen';
@@ -1974,4 +1974,11 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get logFilteredCopiedSnackBar =>
       'Gefiltertes Diagnoseprotokoll in die Zwischenablage kopiert.';
+
+  @override
+  String get logFilterNoTags => 'Keine';
+
+  @override
+  String get emptyFilteredLogHint =>
+      'Keine Einträge im Diagnoseprotokoll entsprechen den aktiven Filtern.';
 }

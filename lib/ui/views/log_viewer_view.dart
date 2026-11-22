@@ -16,6 +16,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -31,21 +32,37 @@ import '../primitives/ui_banner.dart';
 import '../primitives/ui_button.dart';
 import '../primitives/ui_card.dart';
 import '../primitives/ui_field.dart';
+import '../primitives/ui_pill.dart';
 import '../tokens/ui_breakpoints.dart';
 import '../tokens/ui_theme_tokens.dart';
 import '../tokens/ui_typography_tokens.dart';
 
-/// Sentinel dropdown option value matching all diagnostic subsystems.
-const String _allSubsystemsValue = '__all__';
+/// Minimum body width before compact phone wrapping requires outer vertical scrolling.
+const double _compactScrollWidthThreshold = 560.0;
 
 /// Pixel distance from the end of the log console within which auto-follow stays engaged.
 const double _endProximityThreshold = 4.0;
 
+/// Shared minimum height for filter section header rows so level and subsystem controls align horizontally.
+const double _filterHeaderRowMinHeight = 30.0;
+
+/// Minimum available body width required to place level and subsystem filters side by side.
+const double _inlineFilterBreakpoint = 800.0;
+
+/// Minimum available body width required to place log session metadata and stats on one row.
+const double _inlineMetadataBreakpoint = 820.0;
+
 /// Minimum available body width required to place the log toolbar inline with the page heading.
 const double _inlineToolbarBreakpoint = 960.0;
 
-/// Minimum body height for flex-expanded layout before falling back to outer vertical scrolling.
+/// Total width allocated to the left minimum severity column when filters render side by side.
+const double _levelFilterColumnWidth = 244.0;
+
+/// Minimum body height for flex-expanded layout at desktop widths (`>= _inlineToolbarBreakpoint`).
 const double _minFlexBodyHeight = 520.0;
+
+/// Maximum width allocated to the minimum severity select when filters stack vertically.
+const double _stackedLevelFilterMaxWidth = 340.0;
 
 /// Full-height diagnostic log view with metadata summary, level/subsystem filters,
 /// selectable severity-tinted monospace console, auto-scroll to end, and WebDAV/clipboard/scroll/clear actions (`U-UX-007`).
@@ -287,63 +304,194 @@ class _LogConsoleScrollViewState extends State<_LogConsoleScrollView> {
   }
 }
 
-/// Compact two-select filter bar for minimum severity level and diagnostic subsystem.
-class _LogFilterRow extends StatelessWidget {
-  /// Creates a [_LogFilterRow].
-  const _LogFilterRow({
-    required this.minimumLevel,
-    required this.selectedTag,
-    required this.onLevelChanged,
-    required this.onTagChanged,
+/// Unified flat `panel` control card combining session metadata and level/subsystem filters.
+class _LogControlPanel extends StatelessWidget {
+  /// Creates a [_LogControlPanel].
+  const _LogControlPanel({
+    required this.callbacks,
+    required this.inlineFilters,
+    required this.inlineMetadata,
+    required this.snapshot,
   });
 
-  /// Active minimum [LogLevel] filter.
-  final LogLevel minimumLevel;
+  /// Level and subsystem filter callbacks.
+  final _LogFilterCallbacks callbacks;
 
-  /// Callback invoked when the user chooses a new minimum severity threshold.
-  final ValueChanged<LogLevel> onLevelChanged;
+  /// Whether level and subsystem controls render side by side.
+  final bool inlineFilters;
 
-  /// Callback invoked when the user chooses a subsystem tag or `null` for all.
-  final ValueChanged<LogTag?> onTagChanged;
+  /// Whether metadata header and severity counters render on a single row.
+  final bool inlineMetadata;
 
-  /// Active subsystem [LogTag] filter, or `null` for all subsystems.
-  final LogTag? selectedTag;
+  /// Live diagnostic log snapshot.
+  final DiagnosticLogSnapshot snapshot;
 
   @override
   Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460.0),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Expanded(
-              child: _LogLevelFilterField(
-                minimumLevel: minimumLevel,
-                onLevelChanged: onLevelChanged,
-              ),
-            ),
-            SizedBox(width: tokens.spacing.space3),
-            Expanded(
-              child: _LogSubsystemFilterField(
-                selectedTag: selectedTag,
-                onTagChanged: onTagChanged,
-              ),
-            ),
-          ],
-        ),
+    return UiCard.standard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _LogMetadataStrip(inlineMetadata: inlineMetadata, snapshot: snapshot),
+          _LogFilterRow(
+            callbacks: callbacks,
+            inlineFilters: inlineFilters,
+            minimumLevel: snapshot.minimumLevel,
+            selectedTags: snapshot.selectedTags,
+          ),
+        ],
       ),
     );
   }
 }
 
-/// Minimum severity dropdown control for [_LogFilterRow].
+/// Immutable bundle of level and subsystem filter callbacks for [LogViewerView].
+@immutable
+class _LogFilterCallbacks {
+  /// Creates a [_LogFilterCallbacks] bundle.
+  const _LogFilterCallbacks({
+    required this.onClearSelectedTags,
+    required this.onLevelChanged,
+    required this.onSelectAllTags,
+    required this.onToggleTag,
+  });
+
+  /// Callback deselecting all subsystem tags.
+  final VoidCallback onClearSelectedTags;
+
+  /// Callback invoked when the user chooses a new minimum severity threshold.
+  final ValueChanged<LogLevel> onLevelChanged;
+
+  /// Callback selecting every subsystem tag.
+  final VoidCallback onSelectAllTags;
+
+  /// Callback toggling a single subsystem [LogTag].
+  final ValueChanged<LogTag> onToggleTag;
+}
+
+/// Shared muted `meta` label text rendered above log filter controls.
+class _LogFilterLabel extends StatelessWidget {
+  /// Creates a [_LogFilterLabel].
+  const _LogFilterLabel({required this.text});
+
+  /// Localized filter section label.
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    return Text(
+      text,
+      style: tokens.typography.meta.copyWith(
+        color: tokens.colors.muted,
+        fontWeight: FontWeight.w500,
+      ),
+    );
+  }
+}
+
+/// Responsive filter grid combining minimum severity select and multi-select subsystem toggles.
+class _LogFilterRow extends StatelessWidget {
+  /// Creates a [_LogFilterRow].
+  const _LogFilterRow({
+    required this.callbacks,
+    required this.inlineFilters,
+    required this.minimumLevel,
+    required this.selectedTags,
+  });
+
+  /// Level and subsystem filter callbacks.
+  final _LogFilterCallbacks callbacks;
+
+  /// Whether level and subsystem controls render side by side instead of stacked.
+  final bool inlineFilters;
+
+  /// Active minimum [LogLevel] filter.
+  final LogLevel minimumLevel;
+
+  /// Active subsystem [LogTag] filter set.
+  final Set<LogTag> selectedTags;
+
+  @override
+  Widget build(BuildContext context) {
+    final levelField = _LogLevelFilterField(
+      inlineFilters: inlineFilters,
+      minimumLevel: minimumLevel,
+      onLevelChanged: callbacks.onLevelChanged,
+    );
+    final subsystemField = _LogSubsystemFilterField(
+      callbacks: callbacks,
+      selectedTags: selectedTags,
+    );
+
+    if (inlineFilters) {
+      return _LogInlineFilterColumns(
+        levelField: levelField,
+        subsystemField: subsystemField,
+      );
+    }
+    return _LogStackedFilterColumns(
+      levelField: levelField,
+      subsystemField: subsystemField,
+    );
+  }
+}
+
+/// Two-column desktop filter layout placing level and subsystem cells beside a `1px` vertical hairline.
+class _LogInlineFilterColumns extends StatelessWidget {
+  /// Creates a [_LogInlineFilterColumns].
+  const _LogInlineFilterColumns({
+    required this.levelField,
+    required this.subsystemField,
+  });
+
+  /// Internal padding applied to each filter cell.
+  static const EdgeInsets _cellPadding = EdgeInsets.fromLTRB(
+    14.0,
+    10.0,
+    14.0,
+    12.0,
+  );
+
+  /// Minimum severity filter column widget.
+  final Widget levelField;
+
+  /// Multi-select subsystem filter column widget.
+  final Widget subsystemField;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final dividerSide = BorderSide(
+      color: tokens.colors.line,
+      width: tokens.radii.borderWidth,
+    );
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: _levelFilterColumnWidth,
+          child: Padding(padding: _cellPadding, child: levelField),
+        ),
+        Expanded(
+          child: DecoratedBox(
+            decoration: BoxDecoration(border: Border(left: dividerSide)),
+            child: Padding(padding: _cellPadding, child: subsystemField),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Minimum severity dropdown control with aligned section header for [_LogFilterRow].
 class _LogLevelFilterField extends StatelessWidget {
   /// Creates a [_LogLevelFilterField].
   const _LogLevelFilterField({
+    required this.inlineFilters,
     required this.minimumLevel,
     required this.onLevelChanged,
   });
@@ -355,6 +503,9 @@ class _LogLevelFilterField extends StatelessWidget {
           UiSelectOption(value: level.name, label: level.label),
       ]);
 
+  /// Whether this control renders beside [_LogSubsystemFilterField] and matches its header height.
+  final bool inlineFilters;
+
   /// Currently selected minimum log level.
   final LogLevel minimumLevel;
 
@@ -364,20 +515,41 @@ class _LogLevelFilterField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final tokens = UiThemeTokens.of(context);
 
-    return UiField(
-      key: const ValueKey<String>('log_viewer_level_filter'),
-      kind: UiFieldKind.select,
-      label: localizations.logLevelLabel,
-      selectValue: minimumLevel.name,
-      selectOptions: _levelOptions,
-      onSelectChanged: (rawValue) {
-        final parsed = _parseLogLevel(rawValue);
-        if (parsed != null) {
-          onLevelChanged(parsed);
-        }
-      },
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: inlineFilters ? _filterHeaderRowMinHeight : 0.0,
+          ),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _LogFilterLabel(text: localizations.logLevelLabel),
+          ),
+        ),
+        const SizedBox(height: 6.0),
+        UiField(
+          key: const ValueKey<String>('log_viewer_level_filter'),
+          kind: UiFieldKind.select,
+          semanticLabel: localizations.logLevelLabel,
+          height: tokens.spacing.fieldCompactHeight,
+          selectValue: minimumLevel.name,
+          selectOptions: _levelOptions,
+          onSelectChanged: _handleSelectChanged,
+        ),
+      ],
     );
+  }
+
+  /// Parses [rawValue] into a [LogLevel] before forwarding to [onLevelChanged].
+  void _handleSelectChanged(String rawValue) {
+    final parsed = _parseLogLevel(rawValue);
+    if (parsed != null) {
+      onLevelChanged(parsed);
+    }
   }
 }
 
@@ -503,41 +675,284 @@ final class _LogLineSelectionDelegate extends StaticSelectionContainerDelegate {
   }
 }
 
-/// Compact inset card displaying active log session metadata and severity counters.
-class _LogMetadataSummaryCard extends StatelessWidget {
-  /// Creates a [_LogMetadataSummaryCard].
-  const _LogMetadataSummaryCard({required this.snapshot});
+/// Top metadata band inside [_LogControlPanel] displaying session header and severity counters.
+class _LogMetadataStrip extends StatelessWidget {
+  /// Creates a [_LogMetadataStrip].
+  const _LogMetadataStrip({
+    required this.inlineMetadata,
+    required this.snapshot,
+  });
+
+  /// Whether session header and severity counters render side by side.
+  final bool inlineMetadata;
 
   /// Live diagnostic snapshot carrying [DiagnosticLogSnapshot.headerSummary] and counts.
   final DiagnosticLogSnapshot snapshot;
 
   @override
   Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+
+    return DecoratedBox(
+      key: const ValueKey<String>('log_viewer_metadata_card'),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: tokens.colors.line,
+            width: tokens.radii.borderWidth,
+          ),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
+        child: _LogMetadataStripContent(
+          inlineMetadata: inlineMetadata,
+          snapshot: snapshot,
+        ),
+      ),
+    );
+  }
+}
+
+/// Responsive single-row or stacked layout for session summary text and severity counters.
+class _LogMetadataStripContent extends StatelessWidget {
+  /// Creates a [_LogMetadataStripContent].
+  const _LogMetadataStripContent({
+    required this.inlineMetadata,
+    required this.snapshot,
+  });
+
+  /// Whether summary and counters render horizontally.
+  final bool inlineMetadata;
+
+  /// Live diagnostic snapshot.
+  final DiagnosticLogSnapshot snapshot;
+
+  @override
+  Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
+    final summaryText = SelectableText(
+      snapshot.headerSummary,
+      style: tokens.typography.monoSmall.copyWith(color: tokens.colors.ink),
+    );
+    final statsText = Text(
+      localizations.logMetadataStats(
+        snapshot.totalEntries.toString(),
+        snapshot.warningCount.toString(),
+        snapshot.errorCount.toString(),
+      ),
+      style: UiTypographyTokens.tabular(
+        tokens.typography.meta.copyWith(color: tokens.colors.muted),
+      ),
+    );
 
-    return UiCard.inset(
-      key: const ValueKey<String>('log_viewer_metadata_card'),
-      padding: const EdgeInsets.symmetric(horizontal: 13.0, vertical: 10.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
+    if (inlineMetadata) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
-          SelectableText(
-            snapshot.headerSummary,
-            style: tokens.typography.monoSmall.copyWith(color: colors.ink),
+          Expanded(child: summaryText),
+          SizedBox(width: tokens.spacing.space3),
+          statsText,
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        summaryText,
+        SizedBox(height: tokens.spacing.space1),
+        statsText,
+      ],
+    );
+  }
+}
+
+/// Stacked narrow/compact filter layout separating level and subsystem cells by a `1px` horizontal hairline.
+class _LogStackedFilterColumns extends StatelessWidget {
+  /// Creates a [_LogStackedFilterColumns].
+  const _LogStackedFilterColumns({
+    required this.levelField,
+    required this.subsystemField,
+  });
+
+  /// Internal padding applied to each filter cell.
+  static const EdgeInsets _cellPadding = EdgeInsets.fromLTRB(
+    14.0,
+    10.0,
+    14.0,
+    12.0,
+  );
+
+  /// Minimum severity filter column widget.
+  final Widget levelField;
+
+  /// Multi-select subsystem filter column widget.
+  final Widget subsystemField;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final dividerSide = BorderSide(
+      color: tokens.colors.line,
+      width: tokens.radii.borderWidth,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Padding(
+          padding: _cellPadding,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: _stackedLevelFilterMaxWidth,
+              ),
+              child: levelField,
+            ),
           ),
-          SizedBox(height: tokens.spacing.space1),
-          Text(
-            localizations.logMetadataStats(
-              snapshot.totalEntries.toString(),
-              snapshot.warningCount.toString(),
-              snapshot.errorCount.toString(),
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(border: Border(top: dividerSide)),
+          child: Padding(padding: _cellPadding, child: subsystemField),
+        ),
+      ],
+    );
+  }
+}
+
+/// Compact bordered `All` and `None` bulk actions placed in [_LogSubsystemHeaderRow].
+class _LogSubsystemBulkActions extends StatelessWidget {
+  /// Creates a [_LogSubsystemBulkActions].
+  const _LogSubsystemBulkActions({
+    required this.areAllSelected,
+    required this.isNoneSelected,
+    required this.onClearSelectedTags,
+    required this.onSelectAllTags,
+  });
+
+  /// Whether every subsystem tag is currently active.
+  final bool areAllSelected;
+
+  /// Whether zero subsystem tags are currently active.
+  final bool isNoneSelected;
+
+  /// Callback deselecting all subsystem tags.
+  final VoidCallback onClearSelectedTags;
+
+  /// Callback selecting all subsystem tags.
+  final VoidCallback onSelectAllTags;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        UiButton(
+          key: const ValueKey<String>('log_viewer_subsystem_all'),
+          label: localizations.logFilterAllTags,
+          variant: UiButtonVariant.secondary,
+          density: UiButtonDensity.sidebarDesktop,
+          onPressed: areAllSelected ? null : onSelectAllTags,
+        ),
+        const SizedBox(width: 6.0),
+        UiButton(
+          key: const ValueKey<String>('log_viewer_subsystem_none'),
+          label: localizations.logFilterNoTags,
+          variant: UiButtonVariant.secondary,
+          density: UiButtonDensity.sidebarDesktop,
+          onPressed: isNoneSelected ? null : onClearSelectedTags,
+        ),
+      ],
+    );
+  }
+}
+
+/// Multi-select subsystem toggle group with header count pill and right-aligned `All`/`None` actions.
+class _LogSubsystemFilterField extends StatelessWidget {
+  /// Creates a [_LogSubsystemFilterField].
+  const _LogSubsystemFilterField({
+    required this.callbacks,
+    required this.selectedTags,
+  });
+
+  /// Subsystem filter mutation callbacks.
+  final _LogFilterCallbacks callbacks;
+
+  /// Currently active subsystem tags.
+  final Set<LogTag> selectedTags;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      key: const ValueKey<String>('log_viewer_subsystem_filter'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _LogSubsystemHeaderRow(
+          callbacks: callbacks,
+          selectedTags: selectedTags,
+        ),
+        const SizedBox(height: 6.0),
+        _LogSubsystemToggleWrap(
+          onToggleTag: callbacks.onToggleTag,
+          selectedTags: selectedTags,
+        ),
+      ],
+    );
+  }
+}
+
+/// Header row pairing subsystem label and active count pill on the left with `All`/`None` actions on the right.
+class _LogSubsystemHeaderRow extends StatelessWidget {
+  /// Creates a [_LogSubsystemHeaderRow].
+  const _LogSubsystemHeaderRow({
+    required this.callbacks,
+    required this.selectedTags,
+  });
+
+  /// Subsystem filter mutation callbacks.
+  final _LogFilterCallbacks callbacks;
+
+  /// Currently active subsystem tags.
+  final Set<LogTag> selectedTags;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final tokens = UiThemeTokens.of(context);
+
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: _filterHeaderRowMinHeight),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          Expanded(
+            child: Wrap(
+              spacing: 8.0,
+              runSpacing: 4.0,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: <Widget>[
+                _LogFilterLabel(text: localizations.logFilterSubsystemLabel),
+                UiPill(
+                  key: const ValueKey<String>('log_viewer_subsystem_count'),
+                  label: '${selectedTags.length} / ${LogTag.values.length}',
+                  variant: UiPillVariant.count,
+                ),
+              ],
             ),
-            style: UiTypographyTokens.tabular(
-              tokens.typography.meta.copyWith(color: colors.muted),
-            ),
+          ),
+          SizedBox(width: tokens.spacing.space2),
+          _LogSubsystemBulkActions(
+            areAllSelected: selectedTags.length == LogTag.values.length,
+            isNoneSelected: selectedTags.isEmpty,
+            onClearSelectedTags: callbacks.onClearSelectedTags,
+            onSelectAllTags: callbacks.onSelectAllTags,
           ),
         ],
       ),
@@ -545,44 +960,35 @@ class _LogMetadataSummaryCard extends StatelessWidget {
   }
 }
 
-/// Subsystem tag dropdown control for [_LogFilterRow].
-class _LogSubsystemFilterField extends StatelessWidget {
-  /// Creates a [_LogSubsystemFilterField].
-  const _LogSubsystemFilterField({
-    required this.selectedTag,
-    required this.onTagChanged,
+/// Wrapping row of selectable subsystem [UiPill] chips.
+class _LogSubsystemToggleWrap extends StatelessWidget {
+  /// Creates a [_LogSubsystemToggleWrap].
+  const _LogSubsystemToggleWrap({
+    required this.onToggleTag,
+    required this.selectedTags,
   });
 
-  /// Callback invoked on subsystem tag change (`null` for all).
-  final ValueChanged<LogTag?> onTagChanged;
+  /// Callback toggling one subsystem [LogTag].
+  final ValueChanged<LogTag> onToggleTag;
 
-  /// Currently selected subsystem tag, or `null` for all subsystems.
-  final LogTag? selectedTag;
+  /// Currently active subsystem tags.
+  final Set<LogTag> selectedTags;
 
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-
-    return UiField(
-      key: const ValueKey<String>('log_viewer_subsystem_filter'),
-      kind: UiFieldKind.select,
-      label: localizations.logFilterSubsystemLabel,
-      selectValue: selectedTag?.name ?? _allSubsystemsValue,
-      selectOptions: <UiSelectOption>[
-        UiSelectOption(
-          value: _allSubsystemsValue,
-          label: localizations.logFilterAllTags,
-        ),
+    return Wrap(
+      spacing: 6.0,
+      runSpacing: 6.0,
+      children: <Widget>[
         for (final tag in LogTag.values)
-          UiSelectOption(value: tag.name, label: tag.label),
+          UiPill(
+            key: ValueKey<String>('log_viewer_subsystem_${tag.name}'),
+            label: tag.label,
+            variant: UiPillVariant.selectable,
+            isSelected: selectedTags.contains(tag),
+            onPressed: () => onToggleTag(tag),
+          ),
       ],
-      onSelectChanged: (rawValue) {
-        if (rawValue == _allSubsystemsValue) {
-          onTagChanged(null);
-          return;
-        }
-        onTagChanged(_parseLogTag(rawValue));
-      },
     );
   }
 }
@@ -690,29 +1096,33 @@ class _LogUploadToolbarButton extends StatelessWidget {
   }
 }
 
-/// Header, optional wrapped toolbar, metadata card, and filter row above the log console.
+/// Header, optional wrapped toolbar, and unified metadata/filter panel above the log console.
 class _LogViewerHeaderSection extends StatelessWidget {
   /// Creates a [_LogViewerHeaderSection].
   const _LogViewerHeaderSection({
+    required this.filterCallbacks,
+    required this.inlineFilters,
+    required this.inlineMetadata,
     required this.inlineToolbar,
     required this.snapshot,
     required this.toolbar,
     required this.onBack,
-    required this.onLevelChanged,
-    required this.onTagChanged,
   });
+
+  /// Level and subsystem filter callbacks.
+  final _LogFilterCallbacks filterCallbacks;
+
+  /// Whether level and subsystem filter controls render side by side.
+  final bool inlineFilters;
+
+  /// Whether session metadata header and counters render on one row.
+  final bool inlineMetadata;
 
   /// Whether [toolbar] renders inline inside [UiPageHeader.trailing].
   final bool inlineToolbar;
 
   /// Back navigation callback returning to Tasks.
   final VoidCallback onBack;
-
-  /// Minimum log level change callback.
-  final ValueChanged<LogLevel> onLevelChanged;
-
-  /// Subsystem tag change callback.
-  final ValueChanged<LogTag?> onTagChanged;
 
   /// Live diagnostic log snapshot.
   final DiagnosticLogSnapshot snapshot;
@@ -741,13 +1151,11 @@ class _LogViewerHeaderSection extends StatelessWidget {
           toolbar,
         ],
         SizedBox(height: tokens.spacing.space3),
-        _LogMetadataSummaryCard(snapshot: snapshot),
-        SizedBox(height: tokens.spacing.space3),
-        _LogFilterRow(
-          minimumLevel: snapshot.minimumLevel,
-          selectedTag: snapshot.selectedTag,
-          onLevelChanged: onLevelChanged,
-          onTagChanged: onTagChanged,
+        _LogControlPanel(
+          callbacks: filterCallbacks,
+          inlineFilters: inlineFilters,
+          inlineMetadata: inlineMetadata,
+          snapshot: snapshot,
         ),
         SizedBox(height: tokens.spacing.space3),
       ],
@@ -759,25 +1167,21 @@ class _LogViewerHeaderSection extends StatelessWidget {
 class _LogViewerLayout extends StatelessWidget {
   /// Creates a [_LogViewerLayout].
   const _LogViewerLayout({
+    required this.console,
+    required this.filterCallbacks,
+    required this.onBack,
     required this.snapshot,
     required this.toolbar,
-    required this.console,
-    required this.onBack,
-    required this.onLevelChanged,
-    required this.onTagChanged,
   });
 
   /// Console panel widget.
   final Widget console;
 
+  /// Level and subsystem filter callbacks.
+  final _LogFilterCallbacks filterCallbacks;
+
   /// Back navigation callback returning to Tasks.
   final VoidCallback onBack;
-
-  /// Minimum log level change callback.
-  final ValueChanged<LogLevel> onLevelChanged;
-
-  /// Subsystem tag change callback.
-  final ValueChanged<LogTag?> onTagChanged;
 
   /// Live diagnostic log snapshot.
   final DiagnosticLogSnapshot snapshot;
@@ -792,14 +1196,16 @@ class _LogViewerLayout extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final header = _LogViewerHeaderSection(
+          filterCallbacks: filterCallbacks,
+          inlineFilters: constraints.maxWidth >= _inlineFilterBreakpoint,
+          inlineMetadata: constraints.maxWidth >= _inlineMetadataBreakpoint,
           inlineToolbar: constraints.maxWidth >= _inlineToolbarBreakpoint,
           snapshot: snapshot,
           toolbar: toolbar,
           onBack: onBack,
-          onLevelChanged: onLevelChanged,
-          onTagChanged: onTagChanged,
         );
-        if (constraints.maxHeight < _minFlexBodyHeight) {
+        if (constraints.maxHeight <
+            _minFlexBodyHeightForWidth(constraints.maxWidth)) {
           return SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -858,7 +1264,6 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
     final snapshot = ref.watch(logViewerProvider);
-    final notifier = ref.read(logViewerProvider.notifier);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
 
     return Padding(
@@ -866,8 +1271,7 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
       child: _LogViewerLayout(
         snapshot: snapshot,
         onBack: _navigateBackToTasks,
-        onLevelChanged: notifier.setMinimumLevel,
-        onTagChanged: notifier.setSelectedTag,
+        filterCallbacks: _createFilterCallbacks(),
         toolbar: _LogToolbarActions(
           isUploading: _isUploading,
           onClearLog: _clearLog,
@@ -879,7 +1283,9 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
         ),
         console: _LogConsolePanel(
           key: const ValueKey<String>('log_viewer_console'),
-          emptyHint: localizations.emptyLogHint,
+          emptyHint: snapshot.hasEntries
+              ? localizations.emptyFilteredLogHint
+              : localizations.emptyLogHint,
           horizontalController: _horizontalController,
           lines: snapshot.filteredLines,
           onVerticalMetricsChanged: _handleVerticalMetricsNotification,
@@ -938,6 +1344,17 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
         .showNotice(notice, tone: FloatingNoticeTone.success);
   }
 
+  /// Builds the immutable [_LogFilterCallbacks] bound to [logViewerProvider].
+  _LogFilterCallbacks _createFilterCallbacks() {
+    final notifier = ref.read(logViewerProvider.notifier);
+    return _LogFilterCallbacks(
+      onClearSelectedTags: notifier.clearSelectedTags,
+      onLevelChanged: notifier.setMinimumLevel,
+      onSelectAllTags: notifier.selectAllTags,
+      onToggleTag: notifier.toggleTag,
+    );
+  }
+
   /// Triggers [_copyAll] safely from synchronous button tap callbacks.
   void _handleCopyAll() {
     unawaited(_copyAll());
@@ -960,7 +1377,7 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
     final filtersChanged =
         previous != null &&
         (previous.minimumLevel != next.minimumLevel ||
-            previous.selectedTag != next.selectedTag);
+            !setEquals(previous.selectedTags, next.selectedTags));
     final becameNonEmpty = previous == null || previous.filteredLines.isEmpty;
     if (filtersChanged || becameNonEmpty) {
       _followEnd = true;
@@ -1121,21 +1538,25 @@ double _computeLogContentWidth({
   return math.max(viewportWidth, measuredWidth);
 }
 
+/// Returns the minimum body height needed for a flex-expanded console at [availableWidth].
+double _minFlexBodyHeightForWidth(double availableWidth) {
+  if (availableWidth >= _inlineToolbarBreakpoint) {
+    return _minFlexBodyHeight;
+  }
+  if (availableWidth >= _inlineFilterBreakpoint) {
+    return 560.0;
+  }
+  if (availableWidth >= _compactScrollWidthThreshold) {
+    return 640.0;
+  }
+  return 960.0;
+}
+
 /// Maps a serialized [LogLevel.name] string back to its enum value.
 LogLevel? _parseLogLevel(String rawValue) {
   for (final level in LogLevel.values) {
     if (level.name == rawValue) {
       return level;
-    }
-  }
-  return null;
-}
-
-/// Maps a serialized [LogTag.name] string back to its enum value.
-LogTag? _parseLogTag(String rawValue) {
-  for (final tag in LogTag.values) {
-    if (tag.name == rawValue) {
-      return tag;
     }
   }
   return null;

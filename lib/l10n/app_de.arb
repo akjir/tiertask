@@ -540,7 +540,7 @@
   "webDavUrlUserinfoError": "URL darf keine eingebetteten Zugangsdaten (user:pass@) enthalten.",
   "webDavPathInvalidError": "Ungültiger Remote-Dateipfad (\"..\", Backslashes und Steuerzeichen sind nicht erlaubt).",
   "logViewerSubtitle": "Strukturierte Sitzungsereignisse (ohne Zugangsdaten, GPS-Rohdaten oder Notiztexte).",
-  "logFilterSubsystemLabel": "Subsystem",
+  "logFilterSubsystemLabel": "Subsysteme",
   "logActionUpload": "Log hochladen",
   "logActionClear": "Leeren",
   "conflictResolutionTitle": "Löschkonflikte lösen (TDF-DEL-003)",
@@ -561,5 +561,7 @@
   "tooltipCloseApp": "TierTask schließen",
   "tooltipScrollToTop": "Nach oben scrollen",
   "tooltipCopyFilteredLog": "Gefiltert kopieren",
-  "logFilteredCopiedSnackBar": "Gefiltertes Diagnoseprotokoll in die Zwischenablage kopiert."
+  "logFilteredCopiedSnackBar": "Gefiltertes Diagnoseprotokoll in die Zwischenablage kopiert.",
+  "logFilterNoTags": "Keine",
+  "emptyFilteredLogHint": "Keine Einträge im Diagnoseprotokoll entsprechen den aktiven Filtern."
 }

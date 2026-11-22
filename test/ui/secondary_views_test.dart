@@ -14,6 +14,7 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'dart:async';
+import 'dart:ui' show Tristate;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
@@ -34,6 +35,7 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/primitives/ui_pill.dart';
 import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
 import 'package:tiertask/ui/tokens/ui_typography_tokens.dart';
 import 'package:tiertask/ui/views/log_viewer_view.dart';
@@ -62,7 +64,7 @@ class _MetaPreservingLogViewerNotifier extends LogViewerNotifier {
       hasEntries: true,
       headerSummary: 'tiertask_2026-11-21_linux_work.log • v0.4.0 (linux)',
       minimumLevel: LogLevel.debug,
-      selectedTag: null,
+      selectedTags: LogTag.values,
       totalEntries: 1,
       warningCount: 0,
     );
@@ -77,7 +79,7 @@ class _MetaPreservingLogViewerNotifier extends LogViewerNotifier {
       hasEntries: preservedMeta.isNotEmpty,
       headerSummary: state.headerSummary,
       minimumLevel: state.minimumLevel,
-      selectedTag: state.selectedTag,
+      selectedTags: state.selectedTags,
       totalEntries: 0,
       warningCount: 0,
     );
@@ -210,6 +212,7 @@ void main() {
           ),
         );
         AppLogger.debug(LogTag.domain, 'domain debug trace');
+        AppLogger.warn(LogTag.tdf, 'tdf warning line');
         AppLogger.warn(LogTag.sync, 'sync warning line');
         AppLogger.error(LogTag.storage, 'storage error line');
         AppLogger.crash(StateError('fatal crash line'), StackTrace.empty);
@@ -227,7 +230,7 @@ void main() {
           findsOneWidget,
         );
         expect(
-          find.text('Entries: 5 | Warnings: 1 | Errors: 2'),
+          find.text('Entries: 6 | Warnings: 2 | Errors: 2'),
           findsOneWidget,
         );
         expect(
@@ -274,6 +277,58 @@ void main() {
         final crashText = tester.widget<Text>(crashFinder);
         expect(crashText.style?.color, equals(colors.danger));
 
+        // All six subsystem toggle pills start selected, count shows 6 / 6, All is disabled, None is enabled.
+        expect(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_filter')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_count')),
+          findsOneWidget,
+        );
+        expect(find.text('6 / 6'), findsOneWidget);
+        for (final tag in LogTag.values) {
+          final pillFinder = find.byKey(
+            ValueKey<String>('log_viewer_subsystem_${tag.name}'),
+          );
+          expect(
+            pillFinder,
+            findsOneWidget,
+            reason: 'Subsystem toggle pill for ${tag.name} must render',
+          );
+          expect(
+            tester.widget<UiPill>(pillFinder).isSelected,
+            isTrue,
+            reason: 'Subsystem ${tag.name} must start selected by default',
+          );
+        }
+        final allButtonWidget = tester.widget<UiButton>(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_all')),
+        );
+        final noneButtonWidget = tester.widget<UiButton>(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_none')),
+        );
+        expect(
+          allButtonWidget.variant,
+          equals(UiButtonVariant.secondary),
+          reason: 'All bulk action must use flat bordered secondary styling',
+        );
+        expect(
+          noneButtonWidget.variant,
+          equals(UiButtonVariant.secondary),
+          reason: 'None bulk action must use flat bordered secondary styling',
+        );
+        expect(
+          allButtonWidget.onPressed,
+          isNull,
+          reason: 'All button must be disabled when all subsystems are already selected',
+        );
+        expect(
+          noneButtonWidget.onPressed,
+          isNotNull,
+          reason: 'None button must be enabled when subsystems are selected',
+        );
+
         await tester.tap(
           find.byKey(const ValueKey<String>('log_viewer_copy_button')),
         );
@@ -295,56 +350,48 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.textContaining('domain debug trace'), findsNothing);
+        expect(find.textContaining('tdf warning line'), findsOneWidget);
         expect(find.textContaining('sync warning line'), findsOneWidget);
         expect(find.textContaining('storage error line'), findsOneWidget);
 
-        final tagDropdown = find.descendant(
-          of: find.byKey(const ValueKey<String>('log_viewer_subsystem_filter')),
-          matching: find.byType(DropdownButton<String>),
+        // Deselecting SYNC hides only SYNC entries while keeping other subsystems active.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_sync')),
         );
-        await tester.tap(tagDropdown);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('STORAGE').last);
-        await tester.pumpAndSettle();
-
+        expect(
+          tester
+              .widget<UiPill>(
+                find.byKey(const ValueKey<String>('log_viewer_subsystem_sync')),
+              )
+              .isSelected,
+          isFalse,
+        );
+        expect(find.text('5 / 6'), findsOneWidget);
         expect(find.textContaining('sync warning line'), findsNothing);
+        expect(find.textContaining('tdf warning line'), findsOneWidget);
         expect(find.textContaining('storage error line'), findsOneWidget);
 
-        lastCopiedText = null;
+        // Clicking None deselects every subsystem and displays the empty-filter hint.
         await tester.tap(
-          find.byKey(const ValueKey<String>('log_viewer_copy_filtered_button')),
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_none')),
         );
         await tester.pumpAndSettle();
-        expect(lastCopiedText, contains('storage error line'));
-        expect(lastCopiedText, isNot(contains('sync warning line')));
-        expect(lastCopiedText, isNot(contains('domain debug trace')));
-        expect(lastCopiedText, isNot(contains('@meta format=1')));
+        expect(find.text('0 / 6'), findsOneWidget);
         expect(
-          container.read(floatingNoticeProvider)?.message,
-          equals('Filtered diagnostic log copied to clipboard.'),
+          find.text('No diagnostic log entries match the active filters.'),
+          findsOneWidget,
         );
         expect(
-          container.read(floatingNoticeProvider)?.tone,
-          equals(FloatingNoticeTone.success),
+          tester
+              .widget<UiButton>(
+                find.byKey(const ValueKey<String>('log_viewer_subsystem_none')),
+              )
+              .onPressed,
+          isNull,
+          reason:
+              'None button must be disabled when zero subsystems are selected',
         );
-
-        lastCopiedText = null;
-        await tester.tap(
-          find.byKey(const ValueKey<String>('log_viewer_copy_button')),
-        );
-        await tester.pumpAndSettle();
-        expect(lastCopiedText, contains('domain debug trace'));
-        expect(lastCopiedText, contains('sync warning line'));
-        expect(lastCopiedText, contains('storage error line'));
-        expect(
-          container.read(floatingNoticeProvider)?.message,
-          equals('Diagnostic log copied to clipboard.'),
-        );
-
-        await tester.tap(tagDropdown);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('TDF').last);
-        await tester.pumpAndSettle();
         expect(
           tester
               .widget<UiButton>(
@@ -377,11 +424,72 @@ void main() {
           reason: 'Copy All must remain enabled when unfiltered log entries still exist',
         );
 
-        await tester.tap(tagDropdown);
+        // Selecting both TDF and STORAGE shows and copies both subsystems together.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_tdf')),
+        );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('All').last);
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_storage')),
+        );
         await tester.pumpAndSettle();
+
+        expect(find.text('2 / 6'), findsOneWidget);
+        expect(find.textContaining('tdf warning line'), findsOneWidget);
+        expect(find.textContaining('storage error line'), findsOneWidget);
+        expect(find.textContaining('sync warning line'), findsNothing);
+        expect(find.textContaining('domain debug trace'), findsNothing);
+
+        lastCopiedText = null;
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_copy_filtered_button')),
+        );
+        await tester.pumpAndSettle();
+        expect(lastCopiedText, contains('tdf warning line'));
+        expect(lastCopiedText, contains('storage error line'));
+        expect(lastCopiedText, isNot(contains('sync warning line')));
+        expect(lastCopiedText, isNot(contains('domain debug trace')));
+        expect(lastCopiedText, isNot(contains('@meta format=1')));
+        expect(
+          container.read(floatingNoticeProvider)?.message,
+          equals('Filtered diagnostic log copied to clipboard.'),
+        );
+        expect(
+          container.read(floatingNoticeProvider)?.tone,
+          equals(FloatingNoticeTone.success),
+        );
+
+        lastCopiedText = null;
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_copy_button')),
+        );
+        await tester.pumpAndSettle();
+        expect(lastCopiedText, contains('domain debug trace'));
+        expect(lastCopiedText, contains('tdf warning line'));
+        expect(lastCopiedText, contains('sync warning line'));
+        expect(lastCopiedText, contains('storage error line'));
+        expect(
+          container.read(floatingNoticeProvider)?.message,
+          equals('Diagnostic log copied to clipboard.'),
+        );
+
+        // Clicking All restores all six subsystems.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_all')),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('6 / 6'), findsOneWidget);
         expect(find.textContaining('sync warning line'), findsOneWidget);
+        expect(find.textContaining('tdf warning line'), findsOneWidget);
+        expect(find.textContaining('storage error line'), findsOneWidget);
+        expect(
+          tester
+              .widget<UiButton>(
+                find.byKey(const ValueKey<String>('log_viewer_subsystem_all')),
+              )
+              .onPressed,
+          isNull,
+        );
 
         await tester.tap(
           find.byKey(const ValueKey<String>('log_viewer_clear_button')),
@@ -649,19 +757,15 @@ void main() {
         await tester.pumpAndSettle();
         expect(verticalController?.offset, equals(0.0));
 
-        final tagDropdown = find.descendant(
-          of: find.byKey(const ValueKey<String>('log_viewer_subsystem_filter')),
-          matching: find.byType(DropdownButton<String>),
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_sync')),
         );
-        await tester.tap(tagDropdown);
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('TDF').last);
         await tester.pumpAndSettle();
 
         expect(
           verticalController?.offset,
           equals(verticalController?.position.maxScrollExtent),
-          reason: 'Changing subsystem filter must anchor to the end of filtered entries',
+          reason: 'Toggling subsystem filter must anchor to the end of filtered entries',
         );
         expect(find.textContaining('tdf preloaded entry #49'), findsOneWidget);
 
@@ -850,22 +954,33 @@ void main() {
         );
         const viewportSizes = <Size>[
           Size(390, 420),
+          Size(390, 700),
           Size(720, 700),
+          Size(721, 700),
           Size(760, 700),
           Size(820, 700),
+          Size(821, 700),
           Size(960, 700),
           Size(1280, 800),
         ];
+        const themeConfigs = <({String presetId, ThemeMode mode})>[
+          (presetId: 'calm', mode: ThemeMode.light),
+          (presetId: 'calm', mode: ThemeMode.dark),
+          (presetId: 'plum_umber', mode: ThemeMode.light),
+          (presetId: 'plum_umber', mode: ThemeMode.dark),
+        ];
 
-        for (final size in viewportSizes) {
+        for (var i = 0; i < viewportSizes.length; i++) {
+          final size = viewportSizes[i];
+          final theme = themeConfigs[i % themeConfigs.length];
           final container = await pumpLeafWidget(
             tester,
             const Scaffold(body: LogViewerView()),
             config: webDavConfig,
             locale: const Locale('de'),
             surfaceSize: size,
-            presetId: 'plum_umber',
-            themeMode: ThemeMode.dark,
+            presetId: theme.presetId,
+            themeMode: theme.mode,
           );
           container.read(shellProvider.notifier).openView(ShellView.logs);
           await tester.pumpAndSettle();
@@ -873,9 +988,14 @@ void main() {
           expect(
             tester.takeException(),
             isNull,
-            reason: 'LogViewerView must not overflow at viewport $size',
+            reason:
+                'LogViewerView must not overflow at viewport $size (${theme.presetId}/${theme.mode.name})',
           );
           expect(find.text('Diagnoseprotokoll'), findsOneWidget);
+          expect(find.text('Subsysteme'), findsOneWidget);
+          expect(find.text('6 / 6'), findsOneWidget);
+          expect(find.text('Alle'), findsOneWidget);
+          expect(find.text('Keine'), findsOneWidget);
           expect(find.text('Alles kopieren'), findsOneWidget);
           expect(find.text('Gefiltert kopieren'), findsOneWidget);
           expect(find.text('Nach oben scrollen'), findsOneWidget);
@@ -888,6 +1008,193 @@ void main() {
             expect(container.read(shellProvider).view, equals(ShellView.tasks));
           }
         }
+      },
+    );
+
+    testWidgets(
+      'supports keyboard toggling and semantic toggled state on subsystem pills',
+      (tester) async {
+        final semanticsHandle = tester.ensureSemantics();
+        try {
+          AppLogger.setEnabled(
+            true,
+            minimumLevel: LogLevel.debug,
+            persistToDisk: false,
+          );
+          AppLogger.info(LogTag.tdf, 'tdf keyboard entry');
+          AppLogger.info(LogTag.storage, 'storage keyboard entry');
+
+          await pumpLeafWidget(
+            tester,
+            const Scaffold(body: LogViewerView()),
+            config: const WebDavConfig(
+              diagnosticsEnabled: true,
+              logStorageMode: StorageMode.local,
+            ),
+          );
+          await tester.pumpAndSettle();
+
+          final tdfPillFinder = find.byKey(
+            const ValueKey<String>('log_viewer_subsystem_tdf'),
+          );
+          final initialSemantics = tester.getSemantics(tdfPillFinder);
+          expect(initialSemantics.label, contains('TDF'));
+          expect(initialSemantics.flagsCollection.isButton, isTrue);
+          expect(
+            initialSemantics.flagsCollection.isToggled,
+            equals(Tristate.isTrue),
+            reason:
+                'Selected subsystem pill must expose toggled=true semantics',
+          );
+
+          final tdfFocusNode = Focus.of(
+            tester.element(
+              find.descendant(
+                of: tdfPillFinder,
+                matching: find.byType(GestureDetector),
+              ),
+            ),
+          );
+          tdfFocusNode.requestFocus();
+          await tester.pump();
+          await tester.sendKeyEvent(LogicalKeyboardKey.space);
+          await tester.pumpAndSettle();
+
+          expect(find.textContaining('tdf keyboard entry'), findsNothing);
+          expect(find.textContaining('storage keyboard entry'), findsOneWidget);
+          expect(tester.widget<UiPill>(tdfPillFinder).isSelected, isFalse);
+          expect(
+            tester.getSemantics(tdfPillFinder).flagsCollection.isToggled,
+            equals(Tristate.isFalse),
+            reason: 'Space key must toggle subsystem pill to toggled=false',
+          );
+
+          await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+          await tester.pumpAndSettle();
+          expect(find.textContaining('tdf keyboard entry'), findsOneWidget);
+          expect(tester.widget<UiPill>(tdfPillFinder).isSelected, isTrue);
+          expect(
+            tester.getSemantics(tdfPillFinder).flagsCollection.isToggled,
+            equals(Tristate.isTrue),
+            reason: 'Enter key must toggle subsystem pill back to toggled=true',
+          );
+        } finally {
+          semanticsHandle.dispose();
+        }
+      },
+    );
+
+    testWidgets(
+      'places All/None buttons in the subsystem header above aligned single-row pills on desktop and stacks cleanly on compact',
+      (tester) async {
+        AppLogger.setEnabled(
+          true,
+          minimumLevel: LogLevel.debug,
+          persistToDisk: false,
+        );
+        AppLogger.info(LogTag.tdf, 'layout check entry');
+
+        for (final desktopSize in const <Size>[
+          Size(960, 700),
+          Size(1280, 800),
+        ]) {
+          await pumpLeafWidget(
+            tester,
+            const Scaffold(body: LogViewerView()),
+            config: const WebDavConfig(
+              diagnosticsEnabled: true,
+              logStorageMode: StorageMode.local,
+            ),
+            surfaceSize: desktopSize,
+          );
+          await tester.pumpAndSettle();
+
+          final allRect = tester.getRect(
+            find.byKey(const ValueKey<String>('log_viewer_subsystem_all')),
+          );
+          final noneRect = tester.getRect(
+            find.byKey(const ValueKey<String>('log_viewer_subsystem_none')),
+          );
+          final countRect = tester.getRect(
+            find.byKey(const ValueKey<String>('log_viewer_subsystem_count')),
+          );
+          final levelRect = tester.getRect(
+            find.byKey(const ValueKey<String>('log_viewer_level_filter')),
+          );
+          final firstPillRect = tester.getRect(
+            find.byKey(
+              const ValueKey<String>('log_viewer_subsystem_lifecycle'),
+            ),
+          );
+          final lastPillRect = tester.getRect(
+            find.byKey(const ValueKey<String>('log_viewer_subsystem_ui')),
+          );
+
+          expect(
+            allRect.left,
+            greaterThan(countRect.right),
+            reason:
+                'All button must sit to the right of the subsystem header count at $desktopSize',
+          );
+          expect(
+            noneRect.left,
+            greaterThan(allRect.right),
+            reason: 'None button must sit to the right of All at $desktopSize',
+          );
+          expect(
+            allRect.bottom,
+            lessThanOrEqualTo(firstPillRect.top),
+            reason:
+                'All/None buttons must reside in the subsystem header row above the pills at $desktopSize',
+          );
+          expect(
+            (firstPillRect.top - lastPillRect.top).abs(),
+            lessThanOrEqualTo(1.0),
+            reason:
+                'All six subsystem pills must fit on a single row at $desktopSize',
+          );
+          expect(
+            (levelRect.top - firstPillRect.top).abs(),
+            lessThanOrEqualTo(2.0),
+            reason:
+                'Level select ($levelRect) and subsystem pills ($firstPillRect; all=$allRect, count=$countRect) must align vertically at $desktopSize',
+          );
+        }
+
+        await pumpLeafWidget(
+          tester,
+          const Scaffold(body: LogViewerView()),
+          config: const WebDavConfig(
+            diagnosticsEnabled: true,
+            logStorageMode: StorageMode.local,
+          ),
+          surfaceSize: const Size(390, 700),
+        );
+        await tester.pumpAndSettle();
+
+        final compactLevelRect = tester.getRect(
+          find.byKey(const ValueKey<String>('log_viewer_level_filter')),
+        );
+        final compactSubsystemRect = tester.getRect(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_filter')),
+        );
+        final compactAllRect = tester.getRect(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_all')),
+        );
+        final compactFirstPillRect = tester.getRect(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_lifecycle')),
+        );
+
+        expect(
+          compactLevelRect.bottom,
+          lessThan(compactSubsystemRect.top),
+          reason: 'Level filter must stack above subsystem filter on compact viewports',
+        );
+        expect(
+          compactAllRect.bottom,
+          lessThanOrEqualTo(compactFirstPillRect.top),
+          reason: 'All/None buttons must remain in the subsystem header row above the pills on compact viewports',
+        );
       },
     );
   });

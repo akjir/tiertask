@@ -623,14 +623,18 @@ final class AppLogger {
     _log(LogLevel.info, tag, message);
   }
 
-  /// Returns `true` when [line] satisfies the viewer [minimumLevel] and optional [tag] filter.
+  /// Returns `true` when [line] satisfies the viewer [minimumLevel] and optional [tags] filter.
+  ///
+  /// When [tags] is `null` or contains every [LogTag], all subsystems and
+  /// header lines (at [LogLevel.debug]) match. An empty [tags] set matches no lines.
   static bool matchesFilter(
     String line, {
     required LogLevel minimumLevel,
-    LogTag? tag,
+    Set<LogTag>? tags,
   }) {
+    final matchesAllTags = tags == null || tags.length == LogTag.values.length;
     if (line.startsWith('===') || line.startsWith('@meta ')) {
-      return tag == null && minimumLevel == LogLevel.debug;
+      return matchesAllTags && minimumLevel == LogLevel.debug;
     }
     final parsedLevel = _extractLineLevel(line);
     if (parsedLevel != null &&
@@ -638,13 +642,14 @@ final class AppLogger {
         parsedLevel.index < minimumLevel.index) {
       return false;
     }
-    if (tag != null) {
-      final parsedTag = _extractLineTag(line);
-      if (parsedTag != tag) {
-        return false;
-      }
+    if (tags == null || tags.length == LogTag.values.length) {
+      return true;
     }
-    return true;
+    if (tags.isEmpty) {
+      return false;
+    }
+    final parsedTag = _extractLineTag(line);
+    return parsedTag != null && tags.contains(parsedTag);
   }
 
   /// Resets all static logger state for isolated unit and widget tests.

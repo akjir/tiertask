@@ -2578,9 +2578,9 @@
   "@logViewerSubtitle": {
     "description": "Subtitle for the Diagnostic Log view."
   },
-  "logFilterSubsystemLabel": "Subsystem",
+  "logFilterSubsystemLabel": "Subsystems",
   "@logFilterSubsystemLabel": {
-    "description": "Dropdown label for diagnostic log subsystem tag filter."
+    "description": "Label for diagnostic log subsystem toggle filters."
   },
   "logActionUpload": "Upload Log",
   "@logActionUpload": {
@@ -2665,5 +2665,13 @@
   "logFilteredCopiedSnackBar": "Filtered diagnostic log copied to clipboard.",
   "@logFilteredCopiedSnackBar": {
     "description": "Floating notice shown after copying filtered diagnostic log entries to the clipboard."
+  },
+  "logFilterNoTags": "None",
+  "@logFilterNoTags": {
+    "description": "Action button deselecting all diagnostic log subsystem tags."
+  },
+  "emptyFilteredLogHint": "No diagnostic log entries match the active filters.",
+  "@emptyFilteredLogHint": {
+    "description": "Empty state hint shown in the diagnostic log console when entries exist but active filters match none."
   }
 }

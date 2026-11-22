@@ -10,7 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Added desktop keyboard shortcuts for global search, quick task creation, tier navigation, undo, and layered Escape dismissal.
 - Added dedicated views for deletion conflict resolution, history recovery, raw TDF preview, and diagnostic logs.
-- Added filtered log copying, inline text selection, and automatic scroll-to-latest with Scroll to Top in the diagnostic log viewer.
+- Added multi-subsystem filtering, filtered log copying, inline text selection, and automatic scroll-to-latest with Scroll to Top in the diagnostic log viewer.
 - Added uncommitted inline draft cards for creating detailed tasks, labels, and locations without saving premature entries.
 
 ### Changed

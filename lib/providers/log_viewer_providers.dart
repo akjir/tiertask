@@ -152,7 +152,7 @@ class DiagnosticLogLine {
 /// Immutable snapshot driving the diagnostic log viewer.
 @immutable
 class DiagnosticLogSnapshot {
-  /// Creates a [DiagnosticLogSnapshot] with an unmodifiable [filteredLines] view.
+  /// Creates a [DiagnosticLogSnapshot] with unmodifiable [filteredLines] and [selectedTags] views.
   DiagnosticLogSnapshot({
     required this.canSyncWebDav,
     required this.errorCount,
@@ -160,10 +160,11 @@ class DiagnosticLogSnapshot {
     required this.hasEntries,
     required this.headerSummary,
     required this.minimumLevel,
-    required this.selectedTag,
+    required Iterable<LogTag> selectedTags,
     required this.totalEntries,
     required this.warningCount,
-  }) : filteredLines = List<DiagnosticLogLine>.unmodifiable(filteredLines);
+  }) : filteredLines = List<DiagnosticLogLine>.unmodifiable(filteredLines),
+       selectedTags = Set<LogTag>.unmodifiable(selectedTags);
 
   /// Whether manual WebDAV log upload is currently enabled and configured.
   final bool canSyncWebDav;
@@ -171,7 +172,7 @@ class DiagnosticLogSnapshot {
   /// Total count of `[ERROR]` and `[CRASH]` entries across all buffered lines.
   final int errorCount;
 
-  /// Unmodifiable filtered log lines matching [minimumLevel] and [selectedTag].
+  /// Unmodifiable filtered log lines matching [minimumLevel] and [selectedTags].
   final List<DiagnosticLogLine> filteredLines;
 
   /// Whether at least one line exists in the diagnostic log buffer.
@@ -183,14 +184,17 @@ class DiagnosticLogSnapshot {
   /// Currently selected minimum [LogLevel] filter.
   final LogLevel minimumLevel;
 
-  /// Currently selected subsystem [LogTag] filter, or `null` for all subsystems.
-  final LogTag? selectedTag;
+  /// Unmodifiable set of active subsystem [LogTag] filters.
+  final Set<LogTag> selectedTags;
 
   /// Total count of non-header entries across all buffered lines.
   final int totalEntries;
 
   /// Total count of `[WARN]` entries across all buffered lines.
   final int warningCount;
+
+  /// Whether every subsystem [LogTag] is currently selected.
+  bool get areAllTagsSelected => selectedTags.length == LogTag.values.length;
 
   @override
   bool operator ==(Object other) {
@@ -201,9 +205,9 @@ class DiagnosticLogSnapshot {
         other.hasEntries == hasEntries &&
         other.headerSummary == headerSummary &&
         other.minimumLevel == minimumLevel &&
-        other.selectedTag == selectedTag &&
         other.totalEntries == totalEntries &&
         other.warningCount == warningCount &&
+        setEquals(other.selectedTags, selectedTags) &&
         listEquals(other.filteredLines, filteredLines);
   }
 
@@ -214,7 +218,7 @@ class DiagnosticLogSnapshot {
     hasEntries,
     headerSummary,
     minimumLevel,
-    selectedTag,
+    Object.hashAllUnordered(selectedTags),
     totalEntries,
     warningCount,
     Object.hashAll(filteredLines),
@@ -227,7 +231,7 @@ class LogViewerNotifier extends Notifier<DiagnosticLogSnapshot> {
   bool _isDisposed = false;
   LogLevel _minimumLevel = LogLevel.debug;
   bool _refreshScheduled = false;
-  LogTag? _selectedTag;
+  Set<LogTag> _selectedTags = Set<LogTag>.of(LogTag.values);
 
   @override
   DiagnosticLogSnapshot build() {
@@ -254,6 +258,15 @@ class LogViewerNotifier extends Notifier<DiagnosticLogSnapshot> {
     state = _buildSnapshot();
   }
 
+  /// Deselects every subsystem [LogTag] filter and recomputes state.
+  void clearSelectedTags() {
+    if (_selectedTags.isEmpty) {
+      return;
+    }
+    _selectedTags = <LogTag>{};
+    state = _buildSnapshot();
+  }
+
   /// Returns the concatenated filtered diagnostic log text matching active viewer filters.
   String readFilteredLogText() {
     final lines = state.filteredLines;
@@ -273,21 +286,21 @@ class LogViewerNotifier extends Notifier<DiagnosticLogSnapshot> {
   /// Returns the concatenated full diagnostic log text for clipboard export.
   String readFullLogText() => AppLogger.fullLogText;
 
+  /// Selects every subsystem [LogTag] filter and recomputes state.
+  void selectAllTags() {
+    if (_selectedTags.length == LogTag.values.length) {
+      return;
+    }
+    _selectedTags = Set<LogTag>.of(LogTag.values);
+    state = _buildSnapshot();
+  }
+
   /// Updates the active minimum [LogLevel] filter and recomputes state.
   void setMinimumLevel(LogLevel level) {
     if (_minimumLevel == level) {
       return;
     }
     _minimumLevel = level;
-    state = _buildSnapshot();
-  }
-
-  /// Updates the active [LogTag] filter (`null` for all) and recomputes state.
-  void setSelectedTag(LogTag? tag) {
-    if (_selectedTag == tag) {
-      return;
-    }
-    _selectedTag = tag;
     state = _buildSnapshot();
   }
 
@@ -306,11 +319,22 @@ class LogViewerNotifier extends Notifier<DiagnosticLogSnapshot> {
     }
   }
 
+  /// Toggles membership of [tag] in the active subsystem filter set and recomputes state.
+  void toggleTag(LogTag tag) {
+    final nextTags = Set<LogTag>.of(_selectedTags);
+    if (!nextTags.remove(tag)) {
+      nextTags.add(tag);
+    }
+    _selectedTags = nextTags;
+    state = _buildSnapshot();
+  }
+
   /// Computes [DiagnosticLogSnapshot] in a single linear pass over [AppLogger.lines].
   DiagnosticLogSnapshot _buildSnapshot() {
     final allLines = AppLogger.lines;
     final metadata = AppLogger.metadata;
-    final includeAll = _minimumLevel == LogLevel.debug && _selectedTag == null;
+    final allTagsSelected = _selectedTags.length == LogTag.values.length;
+    final includeAll = _minimumLevel == LogLevel.debug && allTagsSelected;
 
     var totalEntries = 0;
     var warningCount = 0;
@@ -327,12 +351,13 @@ class LogViewerNotifier extends Notifier<DiagnosticLogSnapshot> {
           errorCount++;
         }
       }
-      if (includeAll ||
-          AppLogger.matchesFilter(
-            line,
-            minimumLevel: _minimumLevel,
-            tag: _selectedTag,
-          )) {
+      if (_selectedTags.isNotEmpty &&
+          (includeAll ||
+              AppLogger.matchesFilter(
+                line,
+                minimumLevel: _minimumLevel,
+                tags: _selectedTags,
+              ))) {
         filtered.add(
           DiagnosticLogLine(text: line, severity: _classifySeverity(line)),
         );
@@ -350,7 +375,7 @@ class LogViewerNotifier extends Notifier<DiagnosticLogSnapshot> {
       hasEntries: allLines.isNotEmpty,
       headerSummary: headerSummary,
       minimumLevel: _minimumLevel,
-      selectedTag: _selectedTag,
+      selectedTags: _selectedTags,
       totalEntries: totalEntries,
       warningCount: warningCount,
     );

@@ -3338,10 +3338,10 @@ abstract class AppLocalizations {
   /// **'Structured runtime entries (credentials, raw GPS coordinates, and notes redacted).'**
   String get logViewerSubtitle;
 
-  /// Dropdown label for diagnostic log subsystem tag filter.
+  /// Label for diagnostic log subsystem toggle filters.
   ///
   /// In en, this message translates to:
-  /// **'Subsystem'**
+  /// **'Subsystems'**
   String get logFilterSubsystemLabel;
 
   /// Button label uploading diagnostic log to WebDAV.
@@ -3469,6 +3469,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Filtered diagnostic log copied to clipboard.'**
   String get logFilteredCopiedSnackBar;
+
+  /// Action button deselecting all diagnostic log subsystem tags.
+  ///
+  /// In en, this message translates to:
+  /// **'None'**
+  String get logFilterNoTags;
+
+  /// Empty state hint shown in the diagnostic log console when entries exist but active filters match none.
+  ///
+  /// In en, this message translates to:
+  /// **'No diagnostic log entries match the active filters.'**
+  String get emptyFilteredLogHint;
 }
 
 class _AppLocalizationsDelegate
