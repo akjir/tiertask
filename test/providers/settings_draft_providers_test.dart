@@ -920,10 +920,6 @@ void main() {
 
       final invalidServerUrlCases = <({String input, String expectedError})>[
         (
-          input: 'cloud.example.com',
-          expectedError: localizations.errorInvalidServerUrl,
-        ),
-        (
           input: 'ftp://cloud.example.com',
           expectedError: localizations.errorInvalidServerUrl,
         ),
@@ -931,9 +927,41 @@ void main() {
           input: 'file:///etc/passwd',
           expectedError: localizations.errorInvalidServerUrl,
         ),
+        (
+          input: 'file:/etc/passwd',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
+          input: 'http:/cloud.example.com',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
+          input: 'https:/cloud.example.com',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
+          input: 'javascript:alert(1)',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
         (input: 'https://', expectedError: localizations.errorInvalidServerUrl),
         (
           input: 'http:///dav/tasks.tdf',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
+          input: '/dav/tasks.tdf',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
+          input: '//cloud.example.com',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
+          input: 'cloud.example.com:',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
+          input: 'cloud.example.com:65536',
           expectedError: localizations.errorInvalidServerUrl,
         ),
         (
@@ -949,11 +977,23 @@ void main() {
           expectedError: localizations.webDavUrlUserinfoError,
         ),
         (
+          input: 'user:pass@cloud.example.com',
+          expectedError: localizations.webDavUrlUserinfoError,
+        ),
+        (
           input: 'https://cloud.example.com?token=1',
           expectedError: localizations.errorInvalidServerUrl,
         ),
         (
+          input: 'cloud.example.com?token=1',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
           input: 'https://cloud.example.com#section',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
+          input: 'cloud.example.com#section',
           expectedError: localizations.errorInvalidServerUrl,
         ),
         (
@@ -969,13 +1009,26 @@ void main() {
           expectedError: localizations.errorInvalidServerUrl,
         ),
         (
+          input: r'cloud.example.com\dav',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
           input: 'https://cloud.example.com/../secret',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (
+          input: 'cloud.example.com/../secret',
           expectedError: localizations.errorInvalidServerUrl,
         ),
         (
           input: 'https://cloud.example.com/./dav',
           expectedError: localizations.errorInvalidServerUrl,
         ),
+        (
+          input: 'starknet .one',
+          expectedError: localizations.errorInvalidServerUrl,
+        ),
+        (input: '..', expectedError: localizations.errorInvalidServerUrl),
       ];
 
       for (final testCase in invalidServerUrlCases) {
@@ -997,6 +1050,12 @@ void main() {
           draft.serverUrlError,
           equals(testCase.expectedError),
           reason: 'Unexpected serverUrlError for "${testCase.input}"',
+        );
+        expect(
+          draft.endpointPreview,
+          isEmpty,
+          reason:
+              'Invalid serverUrl "${testCase.input}" must not render a resolved endpoint preview',
         );
         expect(
           draft.statusBanner?.tone,
@@ -1140,6 +1199,78 @@ void main() {
           ),
         ),
       );
+
+      // Scheme-less hostnames default to https:// and pass both save and testConnectionAndSync.
+      for (final bareCase
+          in const <
+            ({String input, String expectedTrimmed, String expectedEndpoint})
+          >[
+            (
+              input: '  starknet.one  ',
+              expectedTrimmed: 'starknet.one',
+              expectedEndpoint:
+                  'https://starknet.one/remote.php/dav/files/bob/test.tdf',
+            ),
+            (
+              input: 'cloud.example.com:8443/nextcloud',
+              expectedTrimmed: 'cloud.example.com:8443/nextcloud',
+              expectedEndpoint: 'https://cloud.example.com:8443/nextcloud/remote.php/dav/files/bob/test.tdf',
+            ),
+            (
+              input: '[::1]:8443/dav',
+              expectedTrimmed: '[::1]:8443/dav',
+              expectedEndpoint:
+                  'https://[::1]:8443/dav/remote.php/dav/files/bob/test.tdf',
+            ),
+          ]) {
+        notifier.updateWebDavDraft(
+          serverUrl: bareCase.input,
+          username: 'bob',
+          password: 'app-password',
+          filePath: 'test.tdf',
+        );
+        expect(
+          container.read(settingsDraftProvider).endpointPreview,
+          equals(bareCase.expectedEndpoint),
+          reason: 'Unexpected HTTPS fallback preview for "${bareCase.input}"',
+        );
+        final bareSaveResult = await notifier.saveWebDavDraft();
+        expect(
+          bareSaveResult,
+          equals(
+            ActionSucceeded(
+              noticeMessage: localizations.credentialsSavedBanner,
+            ),
+          ),
+          reason: 'Expected scheme-less save success for "${bareCase.input}"',
+        );
+        final savedDraft = container.read(settingsDraftProvider);
+        expect(
+          savedDraft.serverUrlError,
+          isNull,
+          reason: 'Scheme-less save must not report serverUrlError',
+        );
+        expect(
+          savedDraft.serverUrl,
+          equals(bareCase.expectedTrimmed),
+          reason: 'Saved serverUrl must preserve trimmed host input',
+        );
+        final bareSyncResult = await notifier.testConnectionAndSync();
+        expect(
+          bareSyncResult,
+          equals(
+            ActionSucceeded(
+              noticeMessage: localizations.connectionSuccessBanner,
+            ),
+          ),
+          reason: 'Expected scheme-less sync success for "${bareCase.input}"',
+        );
+        expect(
+          taskNotifier.lastTestedConfig?.resolveEndpointUri()?.toString(),
+          equals(bareCase.expectedEndpoint),
+          reason: 'Sync must target implicit https:// endpoint',
+        );
+      }
 
       // Test connection and sync failure shows sanitized danger banner.
       taskNotifier.testSyncErrorToThrow = const WebDavException(

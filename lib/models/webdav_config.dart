@@ -238,6 +238,18 @@ enum StorageMode {
   }
 }
 
+/// Validation error category for a WebDAV server URL input.
+enum WebDavServerUrlError {
+  /// The server URL is empty or contains only whitespace.
+  empty,
+
+  /// The server URL authority contains embedded credentials (`@`).
+  embeddedUserInfo,
+
+  /// The server URL uses a disallowed scheme or has malformed structure.
+  invalid,
+}
+
 /// Immutable configuration for local TDF file storage, WebDAV synchronization, language, theme, and time zone.
 @immutable
 class WebDavConfig {
@@ -477,34 +489,15 @@ class WebDavConfig {
 
   /// Resolves the full WebDAV endpoint [Uri] for the target `.tdf` file.
   Uri? resolveEndpointUri() {
-    var rawUrl = serverUrl.trim();
-    if (rawUrl.isEmpty || _hasControlCharacters(rawUrl)) {
+    final parsed = _parseServerUrl(serverUrl);
+    final normalizedUrl = parsed.normalizedUrl;
+    if (normalizedUrl == null) {
       return null;
     }
 
-    final lowerUrl = rawUrl.toLowerCase();
-    if (lowerUrl.contains('://') &&
-        !lowerUrl.startsWith('http://') &&
-        !lowerUrl.startsWith('https://')) {
-      return null;
-    }
-    if (!lowerUrl.startsWith('http://') && !lowerUrl.startsWith('https://')) {
-      rawUrl = 'https://$rawUrl';
-    }
-
+    var rawUrl = normalizedUrl;
     while (rawUrl.endsWith('/')) {
       rawUrl = rawUrl.substring(0, rawUrl.length - 1);
-    }
-
-    final baseUri = Uri.tryParse(rawUrl);
-    if (baseUri == null ||
-        (baseUri.scheme != 'http' && baseUri.scheme != 'https') ||
-        baseUri.host.isEmpty ||
-        baseUri.userInfo.isNotEmpty ||
-        baseUri.hasQuery ||
-        baseUri.hasFragment ||
-        _hasInvalidPathSegments(baseUri.pathSegments)) {
-      return null;
     }
 
     final trimmedFile = filePath.trim();
@@ -580,6 +573,50 @@ class WebDavConfig {
     return resolveTimeZoneContext().toLocalWallClock(instant);
   }
 
+  /// Validates [rawServerUrl], assuming `https://` when no scheme is provided, and returns `null` when valid.
+  static WebDavServerUrlError? validateServerUrl(String rawServerUrl) {
+    return _parseServerUrl(rawServerUrl).error;
+  }
+
+  /// Extracts the raw authority segment following `://` in [normalizedUrl].
+  static String _extractAuthority(String normalizedUrl) {
+    final schemeSeparatorIndex = normalizedUrl.indexOf('://');
+    if (schemeSeparatorIndex < 0) {
+      return '';
+    }
+    final authorityStart = schemeSeparatorIndex + 3;
+    var authorityEnd = normalizedUrl.length;
+    for (var i = authorityStart; i < normalizedUrl.length; i++) {
+      final codeUnit = normalizedUrl.codeUnitAt(i);
+      if (codeUnit == 0x2F || codeUnit == 0x3F || codeUnit == 0x23) {
+        authorityEnd = i;
+        break;
+      }
+    }
+    return normalizedUrl.substring(authorityStart, authorityEnd);
+  }
+
+  /// Extracts the raw unnormalized path portion of [normalizedUrl] after the authority segment.
+  static String _extractRawUrlPath(String normalizedUrl) {
+    final schemeSeparatorIndex = normalizedUrl.indexOf('://');
+    if (schemeSeparatorIndex < 0) {
+      return '';
+    }
+    final pathStart = normalizedUrl.indexOf('/', schemeSeparatorIndex + 3);
+    if (pathStart < 0) {
+      return '';
+    }
+    var pathEnd = normalizedUrl.length;
+    for (var i = pathStart; i < normalizedUrl.length; i++) {
+      final codeUnit = normalizedUrl.codeUnitAt(i);
+      if (codeUnit == 0x3F || codeUnit == 0x23) {
+        pathEnd = i;
+        break;
+      }
+    }
+    return normalizedUrl.substring(pathStart, pathEnd);
+  }
+
   /// Returns `true` when [value] contains ASCII control characters or null bytes.
   static bool _hasControlCharacters(String value) {
     for (var i = 0; i < value.length; i++) {
@@ -624,6 +661,65 @@ class WebDavConfig {
       }
     }
     return true;
+  }
+
+  /// Normalizes and validates [rawServerUrl], assuming `https://` when no scheme is present.
+  static ({String? normalizedUrl, WebDavServerUrlError? error}) _parseServerUrl(
+    String rawServerUrl,
+  ) {
+    if (_hasControlCharacters(rawServerUrl)) {
+      return (normalizedUrl: null, error: WebDavServerUrlError.invalid);
+    }
+    final trimmed = rawServerUrl.trim();
+    if (trimmed.isEmpty) {
+      return (normalizedUrl: null, error: WebDavServerUrlError.empty);
+    }
+    if (trimmed.contains(r'\')) {
+      return (normalizedUrl: null, error: WebDavServerUrlError.invalid);
+    }
+    final lower = trimmed.toLowerCase();
+    final hasExplicitHttpScheme =
+        lower.startsWith('http://') || lower.startsWith('https://');
+    if (!hasExplicitHttpScheme && lower.contains('://')) {
+      return (normalizedUrl: null, error: WebDavServerUrlError.invalid);
+    }
+    final normalized = hasExplicitHttpScheme ? trimmed : 'https://$trimmed';
+    final authority = _extractAuthority(normalized);
+    if (authority.contains('@')) {
+      return (
+        normalizedUrl: null,
+        error: WebDavServerUrlError.embeddedUserInfo,
+      );
+    }
+    if (authority.isEmpty ||
+        authority.endsWith(':') ||
+        authority.contains(' ')) {
+      return (normalizedUrl: null, error: WebDavServerUrlError.invalid);
+    }
+    final uri = Uri.tryParse(normalized);
+    if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+      return (normalizedUrl: null, error: WebDavServerUrlError.invalid);
+    }
+    if (uri.userInfo.isNotEmpty) {
+      return (
+        normalizedUrl: null,
+        error: WebDavServerUrlError.embeddedUserInfo,
+      );
+    }
+    if (uri.host.isEmpty ||
+        uri.host == '.' ||
+        uri.host == '..' ||
+        (uri.hasPort && (uri.port < 1 || uri.port > 65535)) ||
+        uri.hasQuery ||
+        uri.hasFragment) {
+      return (normalizedUrl: null, error: WebDavServerUrlError.invalid);
+    }
+    final rawPath = _extractRawUrlPath(normalized);
+    if (_hasInvalidPathSegments(rawPath.split('/')) ||
+        _hasInvalidPathSegments(uri.pathSegments)) {
+      return (normalizedUrl: null, error: WebDavServerUrlError.invalid);
+    }
+    return (normalizedUrl: normalized, error: null);
   }
 
   @override

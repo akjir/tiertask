@@ -609,9 +609,24 @@ void main() {
             of: serverUrlFieldFinder,
             matching: find.byType(TextField),
           ),
-          'https://saved.example.com',
+          'saved.example.com',
         );
         await tester.pumpAndSettle();
+
+        expect(
+          tester
+              .widget<UiField>(
+                find.byKey(
+                  const ValueKey<String>('settings_resolved_endpoint_field'),
+                ),
+              )
+              .displayValue,
+          equals(
+            'https://saved.example.com/remote.php/dav/files/alice/notes/tasks.tdf',
+          ),
+          reason:
+              'Scheme-less host must preview implicit https:// WebDAV endpoint',
+        );
 
         final saveGate = Completer<void>();
         settingsRepository.saveGate = saveGate;
@@ -630,6 +645,12 @@ void main() {
         saveGate.complete();
         settingsRepository.saveGate = null;
         await tester.pumpAndSettle();
+
+        expect(
+          tester.widget<UiField>(serverUrlFieldFinder).errorText,
+          isNull,
+          reason: 'Saving a scheme-less host must not show a server URL validation error',
+        );
 
         expect(
           find.text(localizations.settingsUnsavedChangesBadge),
@@ -683,7 +704,13 @@ void main() {
         expect(spyTaskNotifier.testedConfigs.length, equals(1));
         expect(
           spyTaskNotifier.testedConfigs.single.serverUrl,
-          equals('https://saved.example.com'),
+          equals('saved.example.com'),
+        );
+        expect(
+          spyTaskNotifier.testedConfigs.single.resolveEndpointUri()?.toString(),
+          equals(
+            'https://saved.example.com/remote.php/dav/files/alice/notes/tasks.tdf',
+          ),
         );
         expect(
           find.text(localizations.connectionSuccessBanner),

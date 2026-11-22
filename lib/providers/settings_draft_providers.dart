@@ -902,6 +902,14 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       return null;
     }
 
+    if (AppLogger.shouldLog(LogLevel.debug)) {
+      AppLogger.event(
+        LogLevel.debug,
+        LogTag.ui,
+        'settings.webdav.validation_failed',
+        fields: <String, Object?>{'fields': fieldErrors.keys.join(',')},
+      );
+    }
     state = state.copyWith(
       serverUrlError: serverUrlError,
       clearServerUrlError: serverUrlError == null,
@@ -1128,27 +1136,6 @@ typedef _WebDavConfigSlice = ({
   String username,
 });
 
-/// Extracts the raw unnormalized path portion of [trimmedUrl] after the authority segment.
-String _extractRawUrlPath(String trimmedUrl) {
-  final schemeSeparatorIndex = trimmedUrl.indexOf('://');
-  if (schemeSeparatorIndex < 0) {
-    return '';
-  }
-  final pathStart = trimmedUrl.indexOf('/', schemeSeparatorIndex + 3);
-  if (pathStart < 0) {
-    return '';
-  }
-  var pathEnd = trimmedUrl.length;
-  for (var i = pathStart; i < trimmedUrl.length; i++) {
-    final codeUnit = trimmedUrl.codeUnitAt(i);
-    if (codeUnit == 0x3F || codeUnit == 0x23) {
-      pathEnd = i;
-      break;
-    }
-  }
-  return trimmedUrl.substring(pathStart, pathEnd);
-}
-
 /// Formats a settings storage or workspace [error] into a sanitized localized status message.
 String _formatSettingsError(Object error, AppLocalizations localizations) {
   return switch (error) {
@@ -1176,25 +1163,6 @@ bool _hasControlCharacters(String value) {
     }
   }
   return false;
-}
-
-/// Returns `true` when the authority segment of [trimmedUrl] contains `@` (embedded userinfo).
-bool _hasEmbeddedUserInfo(String trimmedUrl) {
-  final schemeSeparatorIndex = trimmedUrl.indexOf('://');
-  if (schemeSeparatorIndex < 0) {
-    return false;
-  }
-  final authorityStart = schemeSeparatorIndex + 3;
-  var authorityEnd = trimmedUrl.length;
-  for (var i = authorityStart; i < trimmedUrl.length; i++) {
-    final codeUnit = trimmedUrl.codeUnitAt(i);
-    if (codeUnit == 0x2F || codeUnit == 0x3F || codeUnit == 0x23) {
-      authorityEnd = i;
-      break;
-    }
-  }
-  final atIndex = trimmedUrl.indexOf('@', authorityStart);
-  return atIndex >= authorityStart && atIndex < authorityEnd;
 }
 
 /// Returns `true` when [segments] contains `.` or `..` path traversal elements.
@@ -1249,42 +1217,17 @@ String? _validateRemoteFilePath(
   return null;
 }
 
-/// Validates a draft WebDAV [rawServerUrl], returning a localized error or `null` when valid.
+/// Validates a draft WebDAV [rawServerUrl], assuming `https://` when no scheme is provided,
+/// and returns a localized error or `null` when valid.
 String? _validateServerUrl(
   String rawServerUrl,
   AppLocalizations localizations,
 ) {
-  if (_hasControlCharacters(rawServerUrl)) {
-    return localizations.errorInvalidServerUrl;
-  }
-  final trimmed = rawServerUrl.trim();
-  if (trimmed.isEmpty) {
-    return localizations.serverUrlErrorEmpty;
-  }
-  if (trimmed.contains(r'\')) {
-    return localizations.errorInvalidServerUrl;
-  }
-  final lower = trimmed.toLowerCase();
-  if (!lower.startsWith('http://') && !lower.startsWith('https://')) {
-    return localizations.errorInvalidServerUrl;
-  }
-  if (_hasEmbeddedUserInfo(trimmed)) {
-    return localizations.webDavUrlUserinfoError;
-  }
-  final uri = Uri.tryParse(trimmed);
-  if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
-    return localizations.errorInvalidServerUrl;
-  }
-  if (uri.userInfo.isNotEmpty) {
-    return localizations.webDavUrlUserinfoError;
-  }
-  final rawPath = _extractRawUrlPath(trimmed);
-  if (uri.host.isEmpty ||
-      uri.hasQuery ||
-      uri.hasFragment ||
-      _hasInvalidPathSegments(rawPath.split('/')) ||
-      _hasInvalidPathSegments(uri.pathSegments)) {
-    return localizations.errorInvalidServerUrl;
-  }
-  return null;
+  return switch (WebDavConfig.validateServerUrl(rawServerUrl)) {
+    null => null,
+    WebDavServerUrlError.empty => localizations.serverUrlErrorEmpty,
+    WebDavServerUrlError.embeddedUserInfo =>
+      localizations.webDavUrlUserinfoError,
+    WebDavServerUrlError.invalid => localizations.errorInvalidServerUrl,
+  };
 }

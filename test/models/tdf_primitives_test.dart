@@ -498,6 +498,195 @@ void main() {
         }
       }
     });
+
+    test('validates WebDAV server URLs with implicit https:// fallback and enforces exact parity with resolveEndpointUri', () {
+      expect(
+        WebDavServerUrlError.values,
+        containsAll(const <WebDavServerUrlError>[
+          WebDavServerUrlError.empty,
+          WebDavServerUrlError.embeddedUserInfo,
+          WebDavServerUrlError.invalid,
+        ]),
+      );
+
+      const validCases = <({String input, String expectedEndpoint})>[
+        (
+          input: 'starknet.one',
+          expectedEndpoint:
+              'https://starknet.one/remote.php/dav/files/alice/test.tdf',
+        ),
+        (
+          input: '  cloud.example.com  ',
+          expectedEndpoint:
+              'https://cloud.example.com/remote.php/dav/files/alice/test.tdf',
+        ),
+        (
+          input: 'cloud.example.com:8443/nextcloud/',
+          expectedEndpoint: 'https://cloud.example.com:8443/nextcloud/remote.php/dav/files/alice/test.tdf',
+        ),
+        (
+          input: '[::1]:8443/dav',
+          expectedEndpoint:
+              'https://[::1]:8443/dav/remote.php/dav/files/alice/test.tdf',
+        ),
+        (
+          input: '[2001:db8::1]',
+          expectedEndpoint:
+              'https://[2001:db8::1]/remote.php/dav/files/alice/test.tdf',
+        ),
+        (
+          input: 'HTTP://127.0.0.1:8080',
+          expectedEndpoint:
+              'http://127.0.0.1:8080/remote.php/dav/files/alice/test.tdf',
+        ),
+        (
+          input: 'HTTPS://cloud.example.com/remote.php/dav/files/alice/',
+          expectedEndpoint:
+              'https://cloud.example.com/remote.php/dav/files/alice/test.tdf',
+        ),
+      ];
+      for (final testCase in validCases) {
+        expect(
+          WebDavConfig.validateServerUrl(testCase.input),
+          isNull,
+          reason: 'Expected valid serverUrl for "${testCase.input}"',
+        );
+        final config = WebDavConfig(
+          serverUrl: testCase.input,
+          username: 'alice',
+          filePath: 'test.tdf',
+        );
+        expect(
+          config.resolveEndpointUri()?.toString(),
+          equals(testCase.expectedEndpoint),
+          reason: 'Unexpected resolved endpoint for "${testCase.input}"',
+        );
+      }
+
+      const invalidCases = <({String input, WebDavServerUrlError expected})>[
+        (input: '', expected: WebDavServerUrlError.empty),
+        (input: '   ', expected: WebDavServerUrlError.empty),
+        (
+          input: 'https://user:pass@cloud.example.com',
+          expected: WebDavServerUrlError.embeddedUserInfo,
+        ),
+        (
+          input: 'https://user@cloud.example.com',
+          expected: WebDavServerUrlError.embeddedUserInfo,
+        ),
+        (
+          input: 'https://@cloud.example.com',
+          expected: WebDavServerUrlError.embeddedUserInfo,
+        ),
+        (
+          input: 'user:pass@cloud.example.com',
+          expected: WebDavServerUrlError.embeddedUserInfo,
+        ),
+        (
+          input: 'user@cloud.example.com',
+          expected: WebDavServerUrlError.embeddedUserInfo,
+        ),
+        (
+          input: '@cloud.example.com',
+          expected: WebDavServerUrlError.embeddedUserInfo,
+        ),
+        (
+          input: 'ftp://cloud.example.com',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (input: 'file:///etc/passwd', expected: WebDavServerUrlError.invalid),
+        (input: 'file:/etc/passwd', expected: WebDavServerUrlError.invalid),
+        (
+          input: 'http:/cloud.example.com',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'https:/cloud.example.com',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'http:cloud.example.com',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (input: 'javascript:alert(1)', expected: WebDavServerUrlError.invalid),
+        (input: '://missing-scheme', expected: WebDavServerUrlError.invalid),
+        (input: 'https://', expected: WebDavServerUrlError.invalid),
+        (
+          input: 'http:///dav/tasks.tdf',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (input: '/dav/tasks.tdf', expected: WebDavServerUrlError.invalid),
+        (input: '//cloud.example.com', expected: WebDavServerUrlError.invalid),
+        (input: 'cloud.example.com:', expected: WebDavServerUrlError.invalid),
+        (
+          input: 'cloud.example.com:/dav',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'https://cloud.example.com:0',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'https://cloud.example.com:65536',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'cloud.example.com?token=1',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'cloud.example.com#section',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'cloud.example.com/../secret',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'cloud.example.com/./dav',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'https://cloud.example.com/../secret',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: 'https://cloud.example.com/./dav',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: r'cloud.example.com\dav',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (
+          input: r'https://cloud.example.com\dav',
+          expected: WebDavServerUrlError.invalid,
+        ),
+        (input: 'starknet .one', expected: WebDavServerUrlError.invalid),
+        (input: '..', expected: WebDavServerUrlError.invalid),
+        (input: '.', expected: WebDavServerUrlError.invalid),
+        (input: 'starknet.one\n', expected: WebDavServerUrlError.invalid),
+        (input: 'starknet.one/\x00', expected: WebDavServerUrlError.invalid),
+      ];
+      for (final testCase in invalidCases) {
+        expect(
+          WebDavConfig.validateServerUrl(testCase.input),
+          equals(testCase.expected),
+          reason: 'Unexpected validation error for "${testCase.input}"',
+        );
+        final config = WebDavConfig(
+          serverUrl: testCase.input,
+          username: 'alice',
+          filePath: 'test.tdf',
+        );
+        expect(
+          config.resolveEndpointUri(),
+          isNull,
+          reason:
+              'Invalid serverUrl "${testCase.input}" must resolve null endpoint',
+        );
+      }
+    });
   });
 
   group('TDF 0.7.0 Primitives, Bounds, TdfLabel Links, TaskHistoryEntry & TaskItem Ownership', () {

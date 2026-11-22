@@ -323,9 +323,15 @@ void main() {
         '://missing-host',
         'ftp://cloud.example.com',
         'file:///etc/passwd',
+        'file:/etc/passwd',
+        'http:/cloud.example.com',
         'https://user:pass@cloud.example.com',
+        'user:pass@cloud.example.com',
         'https://cloud.example.com/dav?query=1',
         'https://cloud.example.com/dav#fragment',
+        'https://cloud.example.com/../secret',
+        r'https://cloud.example.com\dav',
+        'starknet .one',
       ]) {
         final invalidConfig = WebDavConfig(
           serverUrl: invalidServerUrl,
@@ -339,6 +345,17 @@ void main() {
           reason: 'Malformed serverUrl "$invalidServerUrl" must resolve null',
         );
       }
+
+      expect(
+        const WebDavConfig(
+          serverUrl: 'starknet.one',
+          username: 'stefan',
+          password: secret,
+          filePath: 'tasks.tdf',
+        ).resolveEndpointUri()?.toString(),
+        equals('https://starknet.one/remote.php/dav/files/stefan/tasks.tdf'),
+        reason: 'Scheme-less serverUrl must resolve with implicit https://',
+      );
 
       for (final invalidFilePath in <String>[
         '../tasks.tdf',
