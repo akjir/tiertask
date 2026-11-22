@@ -15,6 +15,7 @@
 
 import 'dart:convert' show Utf8Codec;
 import 'dart:io';
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -194,7 +195,12 @@ class SecureSettingsRepository implements SettingsRepository {
   static const MethodChannel _androidStorageChannel = MethodChannel(
     'de.akjir.tiertask/app_storage',
   );
-  static const Base64Service _base64Service = Base64Service();
+  static const Base64Service _base64Service = Base64Service(
+    maxInputBytes: WorkspaceSyncState.maxSerializedBytes,
+  );
+  static const int _gzipChunkBytes = 4096;
+  static const int _gzipMagicByte0 = 0x1F;
+  static const int _gzipMagicByte1 = 0x8B;
   static const Base64Service _legacyBase64Service = Base64Service(
     maxInputBytes: LegacyTtwV2Converter.maxBinaryBytes,
   );
@@ -352,7 +358,11 @@ class SecureSettingsRepository implements SettingsRepository {
         return WorkspaceSyncState.empty;
       }
       final bytes = _base64Service.decodeBytes(raw.trim());
-      return WorkspaceSyncState.fromBytes(bytes);
+      final wireBytes = _decodeSyncStateWireBytes(bytes);
+      if (wireBytes == null) {
+        return WorkspaceSyncState.empty;
+      }
+      return WorkspaceSyncState.fromBytes(wireBytes);
     } on Object {
       return WorkspaceSyncState.empty;
     }
@@ -417,7 +427,10 @@ class SecureSettingsRepository implements SettingsRepository {
     String workspaceId,
     WorkspaceSyncState state,
   ) async {
-    final encoded = _base64Service.encodeBytes(state.toBytes());
+    final rawBytes = state.toBytes();
+    final compressed = gzip.encode(rawBytes);
+    final payload = compressed.length < rawBytes.length ? compressed : rawBytes;
+    final encoded = _base64Service.encodeBytes(payload);
     await _storage.write(
       key: '${buildProfile.syncStorageKeyPrefix}${workspaceId.trim()}',
       value: encoded,
@@ -429,6 +442,33 @@ class SecureSettingsRepository implements SettingsRepository {
     final notice = _lastRecoveryNotice;
     _lastRecoveryNotice = null;
     return notice;
+  }
+
+  /// Decompresses gzip-wrapped [bytes] with a strict upper output bound, or returns raw `TTS\x04` bytes directly.
+  List<int>? _decodeSyncStateWireBytes(List<int> bytes) {
+    final isGzip =
+        bytes.length >= 2 &&
+        bytes[0] == _gzipMagicByte0 &&
+        bytes[1] == _gzipMagicByte1;
+    if (!isGzip) {
+      return bytes;
+    }
+    final sink = _BoundedBytesSink(WorkspaceSyncState.maxSerializedBytes);
+    final inputSink = gzip.decoder.startChunkedConversion(sink);
+    for (var offset = 0; offset < bytes.length; offset += _gzipChunkBytes) {
+      final end = offset + _gzipChunkBytes < bytes.length
+          ? offset + _gzipChunkBytes
+          : bytes.length;
+      inputSink.add(bytes.sublist(offset, end));
+      if (sink.exceeded) {
+        return null;
+      }
+    }
+    inputSink.close();
+    if (sink.exceeded) {
+      return null;
+    }
+    return sink.takeBytes();
   }
 
   /// Best-effort deletes [key] from [_storage], ignoring unavailable keyring errors.
@@ -1016,6 +1056,40 @@ abstract class SettingsRepository {
 
   /// Returns and clears the most recent one-shot startup recovery notice, if any.
   SettingsRecoveryNotice? takeLastRecoveryNotice();
+}
+
+/// Bounded byte sink aborting decompression as soon as output exceeds [maxBytes].
+class _BoundedBytesSink implements Sink<List<int>> {
+  /// Creates a [_BoundedBytesSink] capped at [maxBytes].
+  _BoundedBytesSink(this.maxBytes);
+
+  /// Maximum allowed cumulative output byte length.
+  final int maxBytes;
+
+  final BytesBuilder _builder = BytesBuilder(copy: false);
+  bool _exceeded = false;
+
+  /// Whether accumulated output exceeded [maxBytes].
+  bool get exceeded => _exceeded;
+
+  @override
+  void add(List<int> data) {
+    if (_exceeded) {
+      return;
+    }
+    if (_builder.length + data.length > maxBytes) {
+      _exceeded = true;
+      _builder.clear();
+      return;
+    }
+    _builder.add(data);
+  }
+
+  @override
+  void close() {}
+
+  /// Returns all buffered bytes and clears the underlying builder.
+  List<int> takeBytes() => _builder.takeBytes();
 }
 
 /// Validates and constructs a new [AppWorkspace] against [existingWorkspaces].

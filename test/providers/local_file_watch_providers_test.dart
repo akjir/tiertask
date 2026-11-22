@@ -79,6 +79,7 @@ class _CountingParseTdfService extends TdfService {
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
+    bool evaluateTiers = true,
   }) {
     onParse();
     return super.parse(
@@ -91,6 +92,7 @@ class _CountingParseTdfService extends TdfService {
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
+      evaluateTiers: evaluateTiers,
     );
   }
 }

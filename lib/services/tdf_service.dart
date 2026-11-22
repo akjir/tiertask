@@ -22,6 +22,7 @@ import '../models/tdf_metadata.dart';
 import '../models/tdf_timezone.dart';
 import 'app_logger.dart';
 import 'tdf_parser.dart';
+import 'tdf_scanner.dart';
 import 'tdf_serializer.dart';
 
 /// Stateless service that scans, parses, validates, and serializes TierTask Data Format (`.tdf`) `0.8.0` documents
@@ -104,7 +105,7 @@ class TdfService {
     allowMalformed: false,
   );
 
-  /// Scans and parses a `tdf 0.8.0` [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime].
+  /// Scans and parses a `tdf 0.8.0` [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime] unless [evaluateTiers] is `false`.
   TaskBoard parse(
     String tdfContent, {
     DateTime? evaluationTime,
@@ -115,12 +116,14 @@ class TdfService {
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
+    bool evaluateTiers = true,
   }) {
     final stopwatch = Stopwatch()..start();
     try {
-      if (tdfContent.length > maxTdfFileBytes ||
-          (tdfContent.length * 4 > maxTdfFileBytes &&
-              utf8.encode(tdfContent).length > maxTdfFileBytes)) {
+      if (!TdfScanner.isUtf8ByteLengthWithinBound(
+        tdfContent,
+        maxTdfFileBytes,
+      )) {
         throw const TdfException(
           kind: TdfErrorKind.limitExceeded,
           line: 1,
@@ -138,6 +141,7 @@ class TdfService {
         currentLatitude: currentLatitude,
         currentLongitude: currentLongitude,
         pruneExpiredCompleted: pruneExpiredCompleted,
+        evaluateTiers: evaluateTiers,
       );
     } on TdfException catch (error) {
       _logParseError(error);
@@ -156,6 +160,7 @@ class TdfService {
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
+    bool evaluateTiers = true,
   }) {
     final stopwatch = Stopwatch()..start();
     try {
@@ -171,6 +176,7 @@ class TdfService {
         currentLatitude: currentLatitude,
         currentLongitude: currentLongitude,
         pruneExpiredCompleted: pruneExpiredCompleted,
+        evaluateTiers: evaluateTiers,
       );
     } on TdfException catch (error) {
       _logParseError(error);
@@ -250,6 +256,7 @@ class TdfService {
     double? currentLatitude,
     double? currentLongitude,
     required bool pruneExpiredCompleted,
+    required bool evaluateTiers,
   }) {
     final board = TdfBlockParser.parseDocument(
       tdfContent,
@@ -262,6 +269,7 @@ class TdfService {
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
       byteLengthVerified: true,
+      evaluateTiers: evaluateTiers,
     );
     AppLogger.event(
       LogLevel.info,

@@ -68,6 +68,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   String? _lastFailedWatchDigest;
   bool _lastMutationCommitted = true;
   String? _lastSelfWipeDigest;
+  TaskBoard? _lastSyncedBoard;
+  String? _lastSyncedLocalFilePath;
   int _mutationEpoch = 0;
   int _nextUndoSequence = 0;
   TaskBoard? _pendingConflictOriginBoard;
@@ -102,6 +104,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     _lastFailedWatchDigest = null;
     _lastMutationCommitted = true;
     _lastSelfWipeDigest = null;
+    _lastSyncedBoard = null;
+    _lastSyncedLocalFilePath = null;
     state = const AsyncLoading();
     final storageBinding = await ref.watch(
       webDavConfigProvider.selectAsync(
@@ -136,7 +140,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final operation = _runSyncWithStatus(config, isInitialLoad: true);
     _inFlightSync = operation;
     try {
-      return await operation;
+      final board = await operation;
+      _recordSyncedLocalBoard(board, config);
+      return board;
     } on TdfSyncOutcomeException {
       await _recordConflictWatchDigestIfLocal(config);
       rethrow;
@@ -711,6 +717,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     _lastFailedWatchDigest = null;
     _lastMutationCommitted = true;
     _lastSelfWipeDigest = null;
+    _lastSyncedBoard = null;
+    _lastSyncedLocalFilePath = null;
     _clearUndoStack('select_local_file');
     await TaskSyncPipeline.resetLocalSyncBaseline(ref, workspace.id);
     await ref.read(webDavConfigProvider.notifier).updateConfig(newConfig);
@@ -719,7 +727,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final operation = _runSyncWithStatus(updatedConfig, isInitialLoad: true);
     _inFlightSync = operation;
     try {
-      state = AsyncData(await operation);
+      final board = await operation;
+      state = AsyncData(board);
+      _recordSyncedLocalBoard(board, updatedConfig);
     } on TdfSyncOutcomeException {
       await _recordConflictWatchDigestIfLocal(updatedConfig);
       rethrow;
@@ -1468,9 +1478,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           mutationEpoch == null || mutationEpoch == _mutationEpoch;
       if (isCurrentEpoch &&
           ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
-        state = AsyncData(
-          _alignBoardWithCurrentLeadWindow(converged, config.dueLeadWindow),
+        final aligned = _alignBoardWithCurrentLeadWindow(
+          converged,
+          config.dueLeadWindow,
         );
+        state = AsyncData(aligned);
+        _recordSyncedLocalBoard(aligned, config);
       }
       _pendingConflictOriginBoard = null;
       _conflictWatchDigest = null;
@@ -1594,6 +1607,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
     final existingBoard = state.asData?.value;
     final epoch = _mutationEpoch;
+    final matchesLastSyncedLocal =
+        existingBoard != null &&
+        identical(existingBoard, _lastSyncedBoard) &&
+        config.localFilePath == _lastSyncedLocalFilePath &&
+        _pendingConflictOriginBoard == null;
     if (existingBoard == null) {
       state = const AsyncLoading();
     }
@@ -1602,6 +1620,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         config,
         candidateBoard: existingBoard,
         candidateOriginBoard: _pendingConflictOriginBoard,
+        candidateMatchesLastSyncedLocal: matchesLastSyncedLocal,
         shouldApplyState: () => epoch == _mutationEpoch,
       );
       if (!ref.mounted) {
@@ -1618,6 +1637,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         if (state.asData?.value != board) {
           state = AsyncData(board);
         }
+        _recordSyncedLocalBoard(state.asData?.value ?? board, config);
       } else if (AppLogger.shouldLog(LogLevel.debug)) {
         AppLogger.event(
           LogLevel.debug,
@@ -1696,6 +1716,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _lastFailedWatchDigest = null;
       _lastSelfWipeDigest = null;
       state = AsyncData(board);
+      _recordSyncedLocalBoard(board, config);
     } on TdfSyncOutcomeException catch (error) {
       if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
         _clearUndoStack('sync_generation_rollback');
@@ -1974,6 +1995,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       );
       if (ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
         state = AsyncData(aligned);
+        _recordSyncedLocalBoard(aligned, config);
       }
       return aligned;
     } on TdfSyncOutcomeException catch (error) {
@@ -2007,6 +2029,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _pendingConflictOriginBoard = null;
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
+      _lastSyncedBoard = null;
+      _lastSyncedLocalFilePath = null;
       _clearUndoStack(isRemote ? 'wipe_remote' : 'wipe_local');
       final WorkspaceSyncState updatedSyncState;
       if (!isRemote) {
@@ -2199,6 +2223,17 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return evicted;
   }
 
+  /// Records [board] as the latest fully converged board for [config]'s local file path.
+  void _recordSyncedLocalBoard(TaskBoard board, WebDavConfig config) {
+    if (config.storageMode.usesLocal && config.isLocalConfigured) {
+      _lastSyncedBoard = board;
+      _lastSyncedLocalFilePath = config.localFilePath;
+    } else {
+      _lastSyncedBoard = null;
+      _lastSyncedLocalFilePath = null;
+    }
+  }
+
   /// Resolves the active workspace [TdfTimeZoneContext] at [utcNow].
   TdfTimeZoneContext _resolveTimeZone(DateTime utcNow) =>
       TaskSyncPipeline.resolveWorkspaceTimeZone(readCurrentConfig(ref), utcNow);
@@ -2304,6 +2339,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         nextBoard: converged,
         evaluatedLeadWindow: config.dueLeadWindow,
       );
+      if (epoch == _mutationEpoch &&
+          ref.read(activeWorkspaceProvider).asData?.value.id == workspaceId) {
+        if (state.asData?.value case final current?) {
+          _recordSyncedLocalBoard(current, config);
+        }
+      }
       _pendingConflictOriginBoard = null;
       _lastFailedWatchDigest = null;
       _conflictWatchDigest = null;
@@ -2349,6 +2390,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     WebDavConfig config, {
     TaskBoard? candidateBoard,
     TaskBoard? candidateOriginBoard,
+    bool candidateMatchesLastSyncedLocal = false,
     bool isInitialLoad = false,
     bool requireTargets = false,
     bool Function()? shouldApplyState,
@@ -2358,6 +2400,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       config,
       candidateBoard: candidateBoard,
       candidateOriginBoard: candidateOriginBoard,
+      candidateMatchesLastSyncedLocal: candidateMatchesLastSyncedLocal,
       isInitialLoad: isInitialLoad,
       requireTargets: requireTargets,
       onLocalStageMerged: (mergedBoard) {

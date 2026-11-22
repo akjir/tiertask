@@ -1203,7 +1203,7 @@ class TaskBoardEvaluator {
     return completedDate == null || !_isTimestampExpired(completedDate, nowUtc);
   }
 
-  /// Emits deduplicated `DEBUG` evaluation summary and blocked-task trace entries.
+  /// Emits deduplicated `DEBUG` evaluation summary and blocked-task trace entries in a single batched log write.
   static void _logDebugEvaluation(
     NormalizedTierSlices slices, {
     required DateTime nowUtc,
@@ -1221,33 +1221,34 @@ class TaskBoardEvaluator {
     if (!AppLogger.deduplicateEvalSummary(signature)) {
       return;
     }
-    for (final task in slices.blocked) {
-      _logSingleBlockedTask(
-        task,
-        nowUtc: nowUtc,
-        taskMap: taskMap,
-        currentLatitude: currentLatitude,
-        currentLongitude: currentLongitude,
-      );
-    }
-    AppLogger.event(
-      LogLevel.debug,
-      LogTag.domain,
-      'eval.summary',
-      fields: <String, Object?>{
-        'label': activeLabelId ?? 'all',
-        'focus': slices.focus.length,
-        'ready': slices.ready.length,
-        'planned': slices.planned.length,
-        'blocked': slices.blocked.length,
-        'someday': slices.someday.length,
-        'completed': slices.completed.length,
-      },
-    );
+    final batch = <({String event, Map<String, Object?> fields})>[
+      for (final task in slices.blocked)
+        _logSingleBlockedTaskEntry(
+          task,
+          nowUtc: nowUtc,
+          taskMap: taskMap,
+          currentLatitude: currentLatitude,
+          currentLongitude: currentLongitude,
+        ),
+      (
+        event: 'eval.summary',
+        fields: <String, Object?>{
+          'label': activeLabelId ?? 'all',
+          'focus': slices.focus.length,
+          'ready': slices.ready.length,
+          'planned': slices.planned.length,
+          'blocked': slices.blocked.length,
+          'someday': slices.someday.length,
+          'completed': slices.completed.length,
+        },
+      ),
+    ];
+    AppLogger.eventBatch(LogLevel.debug, LogTag.domain, batch);
   }
 
-  /// Logs the anonymized blocking reason for a single [task] at `DEBUG` level.
-  static void _logSingleBlockedTask(
+  /// Builds the anonymized `eval.blocked` log entry record for a single [task].
+  static ({String event, Map<String, Object?> fields})
+  _logSingleBlockedTaskEntry(
     TaskItem task, {
     required DateTime nowUtc,
     required Map<String, TaskItem> taskMap,
@@ -1277,10 +1278,8 @@ class TaskBoardEvaluator {
         }
       }
     }
-    AppLogger.event(
-      LogLevel.debug,
-      LogTag.domain,
-      'eval.blocked',
+    return (
+      event: 'eval.blocked',
       fields: <String, Object?>{
         'id': task.id,
         'reason': reason,

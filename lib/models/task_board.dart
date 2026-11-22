@@ -57,9 +57,34 @@ class TaskBoard {
          ),
        );
 
+  /// Creates a lightweight unevaluated [TaskBoard] holding raw document entities for intermediate merge passes without running 6-tier derivation.
+  TaskBoard.unevaluated({
+    required Iterable<TaskItem> tasks,
+    Iterable<TdfLabel> labels = const <TdfLabel>[],
+    Iterable<TdfLocation> locations = const <TdfLocation>[],
+    TdfDeletedBlock? deletedBlock,
+    TdfQueueBlock? queueBlock,
+  }) : allTasks = List<TaskItem>.unmodifiable(tasks),
+       focus = const <TaskItem>[],
+       ready = const <TaskItem>[],
+       planned = const <TaskItem>[],
+       blocked = const <TaskItem>[],
+       someday = const <TaskItem>[],
+       completed = const <TaskItem>[],
+       _scopedHidden = const <TaskItem>[],
+       labels = List<TdfLabel>.unmodifiable(labels),
+       locations = List<TdfLocation>.unmodifiable(locations),
+       deletedBlock = deletedBlock ?? TdfDeletedBlock.empty,
+       queueBlock = queueBlock ?? TdfQueueBlock.empty,
+       openTaskCountsByLabel = const <String, int>{},
+       openTaskCountsByLocation = const <String, int>{},
+       sortedLabels = const <TdfLabel>[],
+       sortedLocations = const <TdfLocation>[];
+
   /// Creates an immutable [TaskBoard] from pre-normalized [slices].
   TaskBoard._normalized(NormalizedTierSlices slices)
-    : focus = List<TaskItem>.unmodifiable(slices.focus),
+    : allTasks = slices.allTasks,
+      focus = List<TaskItem>.unmodifiable(slices.focus),
       ready = List<TaskItem>.unmodifiable(slices.ready),
       planned = List<TaskItem>.unmodifiable(slices.planned),
       blocked = List<TaskItem>.unmodifiable(slices.blocked),
@@ -133,6 +158,9 @@ class TaskBoard {
   /// Soft WIP limit for Tier 2 (`Ready`).
   static const int readySoftLimit = TaskBoardEvaluator.readySoftLimit;
 
+  /// Cached unmodifiable list of all tasks across all 6 tiers (plus any global-view-restricted `scoped` tasks) in canonical document order.
+  final List<TaskItem> allTasks;
+
   /// Tier 4 (`Blocked`) task items.
   final List<TaskItem> blocked;
 
@@ -176,9 +204,6 @@ class TaskBoard {
   final List<TdfLocation> sortedLocations;
 
   final List<TaskItem> _scopedHidden;
-
-  /// Returns all tasks across all 6 tiers (plus any global-view-restricted `scoped` tasks) in canonical document order.
-  List<TaskItem> get allTasks => _slices.allTasks;
 
   /// UTC timestamp of the last shared queue order modification (`queue.modified`).
   DateTime get queueModifiedAt => queueBlock.modifiedAt;
@@ -586,8 +611,15 @@ class TaskBoard {
   TdfLocation? findLocation(String locationId) =>
       _slices.findLocation(locationId);
 
-  /// Finds the [TaskItem] with [taskId], or `null` if not found.
-  TaskItem? findTask(String taskId) => _slices.findTask(taskId);
+  /// Finds the [TaskItem] with [taskId] across [allTasks], or `null` if not found.
+  TaskItem? findTask(String taskId) {
+    for (final task in allTasks) {
+      if (task.id == taskId) {
+        return task;
+      }
+    }
+    return null;
+  }
 
   /// Finds which [TaskTier] currently contains [taskId], or `null` if not found.
   TaskTier? findTierOfTask(String taskId) => _slices.findTierOfTask(taskId);

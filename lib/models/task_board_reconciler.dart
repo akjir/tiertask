@@ -498,12 +498,18 @@ class TaskBoardReconciler {
     };
     final orderedLive = <TaskItem>[];
     final oneSidedById = _indexById(accumulator.live, (task) => task.id);
+    final logDebug = AppLogger.shouldLog(LogLevel.debug);
+    final debugEntries = logDebug
+        ? <({String event, Map<String, Object?> fields})>[]
+        : null;
+    var unchangedTwoSidedCount = 0;
+    var reconciledTwoSidedCount = 0;
 
     for (final id in allTaskIds) {
       final primaryTask = primaryMap[id];
       final secondaryTask = secondaryMap[id];
       if (primaryTask != null && secondaryTask != null) {
-        final mergedTask = _reconcileTwoSidedTask(
+        final step = _reconcileTwoSidedTask(
           id: id,
           local: primaryTask,
           incoming: secondaryTask,
@@ -518,11 +524,30 @@ class TaskBoardReconciler {
           validLabelIds: validLabelIds,
           postCascadeLabelsById: postCascadeLabelsById,
           uncleanedOut: accumulator.uncleanedById,
+          debugEntriesOut: debugEntries,
         );
-        orderedLive.add(mergedTask);
+        orderedLive.add(step.task);
+        if (step.wasUnchanged) {
+          unchangedTwoSidedCount++;
+        } else {
+          reconciledTwoSidedCount++;
+        }
       } else if (oneSidedById[id] case final oneSided?) {
         orderedLive.add(oneSided);
       }
+    }
+
+    if (debugEntries != null &&
+        (unchangedTwoSidedCount > 0 || reconciledTwoSidedCount > 0)) {
+      debugEntries.add((
+        event: 'sync.reconcile.summary',
+        fields: <String, Object?>{
+          'total': unchangedTwoSidedCount + reconciledTwoSidedCount,
+          'unchanged': unchangedTwoSidedCount,
+          'reconciled': reconciledTwoSidedCount,
+        },
+      ));
+      AppLogger.eventBatch(LogLevel.debug, LogTag.sync, debugEntries);
     }
 
     return TaskReconciliationOutcome(
@@ -1724,7 +1749,7 @@ class TaskBoardReconciler {
   }
 
   /// Reconciles a two-sided task [id] present on both boards and records its `uncleaned` counterpart into [uncleanedOut].
-  static TaskItem _reconcileTwoSidedTask({
+  static ({TaskItem task, bool wasUnchanged}) _reconcileTwoSidedTask({
     required String id,
     required TaskItem local,
     required TaskItem incoming,
@@ -1739,8 +1764,9 @@ class TaskBoardReconciler {
     required Set<String>? validLabelIds,
     required Map<String, TdfLabel> postCascadeLabelsById,
     required Map<String, TaskItem> uncleanedOut,
+    List<({String event, Map<String, Object?> fields})>? debugEntriesOut,
   }) {
-    final candidates = TdfPayloadComparison.mergeTaskCandidatesWithBaseline(
+    final mergedResult = TdfPayloadComparison.mergeTaskWithBaselineAndUncleaned(
       local: local,
       incoming: incoming,
       baseline: baseline,
@@ -1754,41 +1780,31 @@ class TaskBoardReconciler {
       validLabelIds: validLabelIds,
       postCascadeLabelsById: postCascadeLabelsById,
     );
-    uncleanedOut[id] = candidates.uncleaned;
-    final mergedTask = TdfPayloadComparison.mergeTaskWithBaseline(
-      local: local,
-      incoming: incoming,
-      baseline: baseline,
-      evaluationTime: now,
-      cleanupMode: cleanupMode,
-      mergedLiveTasksById: mergedLiveTasksById,
-      mergedDeletedTaskIds: mergedDeletedTaskIds,
-      tombstonedLocationIds: tombstonedLocationIds,
-      deletedLabelsLocal: deletedLabelsLocal,
-      deletedLabelsIncoming: deletedLabelsIncoming,
-      validLabelIds: validLabelIds,
-      postCascadeLabelsById: postCascadeLabelsById,
-    );
-    final winner =
-        TdfPayloadComparison.taskPayloadsEqual(mergedTask, local) &&
-            mergedTask.modifiedAt == local.modifiedAt
-        ? 'primary'
-        : (TdfPayloadComparison.taskPayloadsEqual(mergedTask, incoming) &&
-                  mergedTask.modifiedAt == incoming.modifiedAt
-              ? 'secondary'
-              : 'merged');
-    AppLogger.event(
-      LogLevel.debug,
-      LogTag.sync,
-      'sync.reconcile.task',
-      fields: <String, Object?>{
-        'id': id,
-        'winner': winner,
-        'primary_rev': local.effectiveModifiedAt.toIso8601String(),
-        'secondary_rev': incoming.effectiveModifiedAt.toIso8601String(),
-      },
-    );
-    return mergedTask;
+    uncleanedOut[id] = mergedResult.uncleaned;
+    final mergedTask = mergedResult.merged;
+    final isIdenticalUnchanged =
+        mergedResult.wasUnchangedIdentity ||
+        (local == incoming && mergedTask == local);
+    if (debugEntriesOut != null && !isIdenticalUnchanged) {
+      final winner =
+          TdfPayloadComparison.taskPayloadsEqual(mergedTask, local) &&
+              mergedTask.modifiedAt == local.modifiedAt
+          ? 'primary'
+          : (TdfPayloadComparison.taskPayloadsEqual(mergedTask, incoming) &&
+                    mergedTask.modifiedAt == incoming.modifiedAt
+                ? 'secondary'
+                : 'merged');
+      debugEntriesOut.add((
+        event: 'sync.reconcile.task',
+        fields: <String, Object?>{
+          'id': id,
+          'winner': winner,
+          'primary_rev': local.effectiveModifiedAt.toIso8601String(),
+          'secondary_rev': incoming.effectiveModifiedAt.toIso8601String(),
+        },
+      ));
+    }
+    return (task: mergedTask, wasUnchanged: isIdenticalUnchanged);
   }
 
   /// Resolves the verified [TdfDeletionResolution] for [surviving] and [deletedRecord] from [boundDecisions] or [resolutions].

@@ -21,6 +21,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Changed built-in color palettes from Slate and Navy to Calm (default) and Plum Umber in Light and Dark modes, migrating saved palettes automatically.
 - Changed the development build indicator from a corner banner ribbon to an inline pill in the top bar.
 - Changed the application logo and platform launcher icons to the minimal three-bar TierTask mark.
+- Reduced synchronization latency by skipping redundant file reads, re-parsing, serialization, and per-line log disk flushes on large task boards.
+
+### Fixed
+
+- Fixed synchronization state persistence failing in dual local and WebDAV mode when task files exceed 512 KB.
 
 ## [0.4.0] - 2026-11-20
 

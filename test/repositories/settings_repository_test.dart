@@ -1299,5 +1299,94 @@ void main() {
         equals('https://dev.example.com'),
       );
     });
+
+    test('compresses large WorkspaceSyncState payloads exceeding 1 MiB combined raw size, stays backward-compatible with uncompressed TTS\\x04, and rejects oversized gzip decompression bombs', () async {
+      final fakeStorage = _TrackingFakeSecureStorage();
+      final tempDir = await Directory.systemTemp.createTemp(
+        'tiertask_sync_state_large_',
+      );
+      addTearDown(() => tempDir.delete(recursive: true));
+
+      final repo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: '${tempDir.path}/cfg',
+        hostLockDirectoryOverride: '${tempDir.path}/locks',
+      );
+
+      // Build a ~600 KB valid canonical TDF document so combined local + remote raw payload > 1_048_576 bytes:
+      final buffer = StringBuffer('tdf 0.8.0\n');
+      for (var i = 0; i < 10000; i++) {
+        buffer.writeln(
+          '# padded diagnostic baseline comment line number $i ----',
+        );
+      }
+      final largeTdf = buffer.toString();
+      expect(largeTdf.length, greaterThan(550000));
+      const validDigest =
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+      final largeState = WorkspaceSyncState(
+        lastSyncedLocalTdf: largeTdf,
+        lastSyncedRemoteTdf: largeTdf,
+        acknowledgedLocalGeneration: 2,
+        acknowledgedRemoteGeneration: 2,
+        localSourceDigest: validDigest,
+        remoteSourceDigest: validDigest,
+        remoteEtag: '"etag-large"',
+      );
+      final rawBytes = largeState.toBytes();
+      expect(
+        rawBytes.length,
+        greaterThan(Base64Service.defaultMaxInputBytes),
+        reason: 'Combined local+remote payload must exceed 1 MiB to exercise overflow fix',
+      );
+
+      await repo.saveWorkspaceSyncState('tasks', largeState);
+      final storedEncoded = fakeStorage.store['t2_sync_v1_tasks'];
+      expect(storedEncoded, isNotNull);
+      expect(
+        storedEncoded?.length ?? rawBytes.length,
+        lessThan(rawBytes.length ~/ 4),
+        reason: 'Gzip compression must shrink repetitive dual TDF sync state dramatically',
+      );
+      expect(
+        await repo.loadWorkspaceSyncState('tasks'),
+        equals(largeState),
+        reason:
+            'Compressed >1 MiB WorkspaceSyncState must round-trip losslessly',
+      );
+
+      // Backward compatibility: pre-existing uncompressed TTS\x04 entry in storage must still load.
+      final smallState = WorkspaceSyncState(
+        lastSyncedLocalTdf: 'tdf 0.8.0\n',
+        acknowledgedLocalGeneration: 1,
+        localSourceDigest: validDigest,
+      );
+      await fakeStorage.write(
+        key: 't2_sync_v1_legacy_uncompressed',
+        value: const Base64Service().encodeBytes(smallState.toBytes()),
+      );
+      expect(
+        await repo.loadWorkspaceSyncState('legacy_uncompressed'),
+        equals(smallState),
+        reason:
+            'Pre-existing uncompressed TTS\\x04 entries must remain readable',
+      );
+
+      // Bounded decompression guard: gzip payload expanding past WorkspaceSyncState.maxSerializedBytes must return empty cleanly.
+      final oversizedPayload = Uint8List(
+        WorkspaceSyncState.maxSerializedBytes + 4096,
+      );
+      final compressedBomb = gzip.encode(oversizedPayload);
+      await fakeStorage.write(
+        key: 't2_sync_v1_bomb',
+        value: const Base64Service().encodeBytes(compressedBomb),
+      );
+      expect(
+        await repo.loadWorkspaceSyncState('bomb'),
+        equals(WorkspaceSyncState.empty),
+        reason: 'Decompression exceeding maxSerializedBytes must fail safely to empty state',
+      );
+    });
   });
 }

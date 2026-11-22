@@ -114,6 +114,33 @@ class TdfScanner {
   static bool isAsciiDigit(int codeUnit) =>
       codeUnit >= 0x30 && codeUnit <= 0x39;
 
+  /// Returns `true` when the UTF-8 byte length of [content] does not exceed [maxBytes], without allocating a temporary byte buffer.
+  static bool isUtf8ByteLengthWithinBound(String content, int maxBytes) {
+    final length = content.length;
+    if (length > maxBytes) return false;
+    if (length * 3 <= maxBytes) return true;
+    var byteCount = 0;
+    for (var i = 0; i < length; i++) {
+      final unit = content.codeUnitAt(i);
+      if (unit < 0x80) {
+        byteCount += 1;
+      } else if (unit < 0x800) {
+        byteCount += 2;
+      } else if (unit >= 0xD800 &&
+          unit <= 0xDBFF &&
+          i + 1 < length &&
+          content.codeUnitAt(i + 1) >= 0xDC00 &&
+          content.codeUnitAt(i + 1) <= 0xDFFF) {
+        byteCount += 4;
+        i++;
+      } else {
+        byteCount += 3;
+      }
+      if (byteCount > maxBytes) return false;
+    }
+    return true;
+  }
+
   /// Validates that [value] matches the TDF identifier rule (`[a-zA-Z_][a-zA-Z0-9_-]*`).
   static bool isValidIdentifier(String value) {
     if (value.isEmpty || !_isIdStartChar(value.codeUnitAt(0))) {

@@ -708,5 +708,201 @@ void main() {
         reason: 'DEBUG level must emit per-task LWW reconciliation trace',
       );
     });
+
+    test('AppLogger.eventBatch writes all entries in one sink call with flush:false while crash and detached flush synchronously', () {
+      final spySink = _SpyAppLogSink();
+      AppLogger.resetForTesting(clock: () => fixedUtc, sink: spySink);
+      AppLogger.setEnabled(
+        true,
+        sink: spySink,
+        logFilePath: logFilePath,
+        minimumLevel: LogLevel.debug,
+        metadata: const LogMetadata(
+          appVersion: '0.2.3+1',
+          platform: 'linux',
+          osVersion: 'Linux 6.12',
+          locale: 'en',
+          timeZone: 'UTC',
+          workspaceId: 'default',
+          workspaceName: 'Default',
+          storageMode: 'both',
+          logStorageMode: 'local',
+        ),
+      );
+      spySink.writes.clear();
+      final revBeforeBatch = AppLogger.revision.value;
+
+      AppLogger.eventBatch(
+        LogLevel.debug,
+        LogTag.domain,
+        const <({String event, Map<String, Object?> fields})>[
+          (
+            event: 'eval.blocked',
+            fields: <String, Object?>{'id': '000001OkD2', 'reason': 'deferral'},
+          ),
+          (
+            event: 'eval.blocked',
+            fields: <String, Object?>{
+              'id': '000002OkD2',
+              'reason': 'condition',
+            },
+          ),
+          (
+            event: 'eval.summary',
+            fields: <String, Object?>{'blocked': 2, 'focus': 0},
+          ),
+        ],
+      );
+
+      expect(
+        spySink.writes,
+        hasLength(1),
+        reason: 'eventBatch must coalesce all lines into a single disk append',
+      );
+      expect(
+        spySink.writes.single.append,
+        isTrue,
+        reason: 'eventBatch must append without rewriting the whole log file',
+      );
+      expect(
+        spySink.writes.single.flush,
+        isFalse,
+        reason: 'Non-crash debug/info writes must avoid per-line fsync stalls',
+      );
+      expect(
+        AppLogger.revision.value,
+        equals(revBeforeBatch + 1),
+        reason: 'eventBatch must notify revision listeners once per batch',
+      );
+      expect(
+        spySink.writes.single.content,
+        allOf(
+          contains('eval.blocked | id=000001OkD2 reason=deferral'),
+          contains('eval.blocked | id=000002OkD2 reason=condition'),
+          contains('eval.summary | blocked=2 focus=0'),
+        ),
+      );
+
+      spySink.writes.clear();
+      AppLogger.handleAppLifecycleState(AppLifecycleState.detached);
+      expect(
+        spySink.writes.last.flush,
+        isTrue,
+        reason: 'Detached session exit must flush log file durably',
+      );
+
+      spySink.writes.clear();
+      AppLogger.crash(StateError('fatal'), StackTrace.current);
+      expect(
+        spySink.writes.single.flush,
+        isTrue,
+        reason: 'Crash logs must flush synchronously to disk',
+      );
+    });
+
+    test('TaskBoardSync.merge batches DEBUG reconciliation logs and skips per-task lines for identical unchanged tasks', () {
+      final spySink = _SpyAppLogSink();
+      AppLogger.resetForTesting(clock: () => fixedUtc, sink: spySink);
+      AppLogger.setEnabled(
+        true,
+        sink: spySink,
+        logFilePath: logFilePath,
+        minimumLevel: LogLevel.debug,
+        metadata: const LogMetadata(
+          appVersion: '0.2.3+1',
+          platform: 'linux',
+          osVersion: 'Linux 6.12',
+          locale: 'en',
+          timeZone: 'UTC',
+          workspaceId: 'default',
+          workspaceName: 'Default',
+          storageMode: 'both',
+          logStorageMode: 'local',
+        ),
+      );
+
+      final sharedTasks = List<TaskItem>.generate(
+        20,
+        (i) => TaskItem(
+          id: '0000${i.toString().padLeft(2, '0')}OkD2',
+          title: 'Task $i',
+          createdAt: fixedUtc,
+          modifiedAt: fixedUtc,
+        ),
+      );
+      final board = TaskBoard.evaluate(
+        tasks: sharedTasks,
+        evaluationTime: fixedUtc,
+      );
+      spySink.writes.clear();
+
+      TaskBoardSync.merge(
+        primary: board,
+        secondary: board,
+        baseline: board,
+        evaluationTime: fixedUtc,
+      );
+
+      final logOutput = AppLogger.fullLogText;
+      expect(
+        logOutput,
+        isNot(contains('sync.reconcile.task |')),
+        reason:
+            'Identical unchanged tasks must not emit per-task debug log spam',
+      );
+      expect(
+        logOutput,
+        contains('sync.reconcile.summary |'),
+        reason:
+            'DEBUG merge must emit a single summary line for reconciled tasks',
+      );
+      expect(
+        spySink.writes.length,
+        lessThanOrEqualTo(3),
+        reason: '20 identical tasks must not cause 20 separate disk writes',
+      );
+    });
   });
+}
+
+class _SpyAppLogSink implements AppLogSink {
+  final List<({String path, String content, bool append, bool flush})> writes =
+      <({String path, String content, bool append, bool flush})>[];
+
+  @override
+  String defaultLogFilePath({String? baseDirectoryPath, String? fileName}) =>
+      fileName ?? 'tiertask.log';
+
+  @override
+  void deleteLogFileSync(String path) {}
+
+  @override
+  int deleteWorkspaceLogFilesSync({
+    required String directoryPath,
+    required String platform,
+    required String workspaceId,
+  }) => 0;
+
+  @override
+  int pruneExpiredLogFilesSync({
+    required String directoryPath,
+    required String platform,
+    required String workspaceId,
+    required DateTime utcNow,
+    int maxRetainedDays = AppLogger.maxRetainedLogDays,
+    int maxRetainedFiles = AppLogger.maxRetainedLogFiles,
+  }) => 0;
+
+  @override
+  String readLogFileSync(String path, {required int maxBytes}) => '';
+
+  @override
+  void writeLogFileSync(
+    String path,
+    String content, {
+    required bool append,
+    bool flush = false,
+  }) {
+    writes.add((path: path, content: content, append: append, flush: flush));
+  }
 }

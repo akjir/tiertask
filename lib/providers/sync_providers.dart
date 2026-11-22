@@ -307,22 +307,20 @@ class TaskSyncPipeline {
       final (utcNow, localNow) = resolveTimestamps(ref, null);
       final settingsRepo = ref.read(settingsRepositoryProvider);
       final syncState = await settingsRepo.loadWorkspaceSyncState(workspace.id);
-      final baseline = _tryParseBaseline(
-        ref,
-        config,
-        syncState.lastSyncedLocalTdf,
-        utcNow,
-        localNow,
-      );
       final isAuthoritative = !config.storageMode.usesWebDav;
       final published = await _publishLocalWithCasLoop(
         ref,
         config,
         initialDigest: syncState.localSourceDigest,
-        initialBaseline: baseline,
-        initialAckGeneration: baseline != null
-            ? syncState.acknowledgedLocalGeneration
-            : null,
+        initialBaseline: null,
+        loadInitialBaseline: () => _tryParseBaseline(
+          ref,
+          config,
+          syncState.lastSyncedLocalTdf,
+          utcNow,
+          localNow,
+        ),
+        initialAckGeneration: syncState.acknowledgedLocalGeneration,
         initialCanonicalDiskTdf: syncState.lastSyncedLocalTdf,
         preTransactionGeneration: board.deletedBlock.generation,
         candidateBoard: board,
@@ -337,13 +335,16 @@ class TaskSyncPipeline {
         utcNow: utcNow,
         localNow: localNow,
       );
-      await settingsRepo.saveWorkspaceSyncState(
+      final nextSyncState = syncState.copyWith(
+        lastSyncedLocalTdf: published.serialized,
+        acknowledgedLocalGeneration: published.board.deletedBlock.generation,
+        localSourceDigest: published.digest,
+      );
+      await _saveSyncStateIfChanged(
+        ref,
         workspace.id,
-        syncState.copyWith(
-          lastSyncedLocalTdf: published.serialized,
-          acknowledgedLocalGeneration: published.board.deletedBlock.generation,
-          localSourceDigest: published.digest,
-        ),
+        nextSyncState,
+        syncState,
       );
     } on Object catch (error) {
       AppLogger.warn(
@@ -460,6 +461,7 @@ class TaskSyncPipeline {
     Map<String, TdfRecoveryResolution> locationRecoveryResolutions = const {},
     TaskBoard? candidateBoard,
     TaskBoard? candidateOriginBoard,
+    bool candidateMatchesLastSyncedLocal = false,
     bool isInitialLoad = false,
     bool requireTargets = false,
     void Function(TaskBoard mergedBoard)? onLocalStageMerged,
@@ -480,6 +482,7 @@ class TaskSyncPipeline {
         locationRecoveryResolutions: locationRecoveryResolutions,
         candidateBoard: candidateBoard,
         candidateOriginBoard: candidateOriginBoard,
+        candidateMatchesLastSyncedLocal: candidateMatchesLastSyncedLocal,
         isInitialLoad: isInitialLoad,
         requireTargets: requireTargets,
         onLocalStageMerged: onLocalStageMerged,
@@ -538,6 +541,7 @@ class TaskSyncPipeline {
     Map<String, TdfRecoveryResolution> locationRecoveryResolutions = const {},
     TaskBoard? candidateBoard,
     TaskBoard? candidateOriginBoard,
+    bool candidateMatchesLastSyncedLocal = false,
     bool isInitialLoad = false,
     bool requireTargets = false,
     void Function(TaskBoard mergedBoard)? onLocalStageMerged,
@@ -561,6 +565,7 @@ class TaskSyncPipeline {
     var syncState = await settingsRepository.loadWorkspaceSyncState(
       workspace.id,
     );
+    var lastPersistedSyncState = syncState;
     if (!ref.mounted) {
       return candidateBoard ?? TaskBoard.empty();
     }
@@ -590,18 +595,26 @@ class TaskSyncPipeline {
         config.storageMode.usesWebDav &&
         (requireTargets || config.isWebDavConfigured);
     final timeZone = resolveWorkspaceTimeZone(config, utcNow);
+    var localStageBypassedCleanly = false;
 
     if (config.storageMode.usesLocal &&
         (requireTargets || config.isLocalConfigured)) {
       final localCleanupMode = willRunRemoteStage
           ? TdfCleanupMode.deferred
           : TdfCleanupMode.finalStage;
-      (working, hasWorking, syncState) = await _synchronizeLocalStage(
+      (
+        working,
+        hasWorking,
+        syncState,
+        lastPersistedSyncState,
+        localStageBypassedCleanly,
+      ) = await _synchronizeLocalStage(
         ref,
         config,
         workspaceId: workspace.id,
         working: working,
         candidateOriginBoard: candidateOriginBoard,
+        candidateMatchesLastSyncedLocal: candidateMatchesLastSyncedLocal,
         hasWorking: hasWorking,
         hasCandidate: hasCandidate,
         requireTargets: requireTargets,
@@ -609,6 +622,7 @@ class TaskSyncPipeline {
         cleanupMode: localCleanupMode,
         isAuthoritativeSource: !willRunRemoteStage,
         syncState: syncState,
+        lastPersistedSyncState: lastPersistedSyncState,
         resolutions: resolutions,
         utcNow: utcNow,
         localNow: localNow,
@@ -635,7 +649,12 @@ class TaskSyncPipeline {
     }
 
     if (willRunRemoteStage) {
-      (working, hasWorking, syncState) = await _synchronizeRemoteStage(
+      (
+        working,
+        hasWorking,
+        syncState,
+        lastPersistedSyncState,
+      ) = await _synchronizeRemoteStage(
         ref,
         config,
         workspaceId: workspace.id,
@@ -647,8 +666,14 @@ class TaskSyncPipeline {
         hasCandidate: hasCandidate,
         hadLocalBaseline: hadLocalBaseline,
         hadPriorLocalConvergence: hadPriorLocalConvergence,
+        workingMatchesRemoteBaseline:
+            localStageBypassedCleanly &&
+            hadPriorLocalConvergence &&
+            syncState.lastSyncedRemoteTdf != null &&
+            syncState.lastSyncedLocalTdf == syncState.lastSyncedRemoteTdf,
         requireTargets: requireTargets,
         syncState: syncState,
+        lastPersistedSyncState: lastPersistedSyncState,
         resolutions: resolutions,
         utcNow: utcNow,
         localNow: localNow,
@@ -683,7 +708,12 @@ class TaskSyncPipeline {
       );
     }
 
-    await settingsRepository.saveWorkspaceSyncState(workspace.id, syncState);
+    await _saveSyncStateIfChanged(
+      ref,
+      workspace.id,
+      syncState,
+      lastPersistedSyncState,
+    );
     AppLogger.event(
       LogLevel.info,
       LogTag.sync,
@@ -745,27 +775,27 @@ class TaskSyncPipeline {
     WebDavConfig config, {
     required WorkspaceSyncState syncState,
     required TaskBoard candidateBoard,
+    required String serializedCandidate,
     required _SyncResolutions resolutions,
     required bool requireTargets,
     required DateTime utcNow,
     required DateTime localNow,
   }) async {
-    final baseline = _tryParseBaseline(
-      ref,
-      config,
-      syncState.lastSyncedLocalTdf,
-      utcNow,
-      localNow,
-    );
     final published = await _publishLocalWithCasLoop(
       ref,
       config,
       initialDigest: syncState.localSourceDigest,
-      initialBaseline: baseline,
-      initialAckGeneration: baseline != null
-          ? syncState.acknowledgedLocalGeneration
-          : null,
+      initialBaseline: null,
+      loadInitialBaseline: () => _tryParseBaseline(
+        ref,
+        config,
+        syncState.lastSyncedLocalTdf,
+        utcNow,
+        localNow,
+      ),
+      initialAckGeneration: syncState.acknowledgedLocalGeneration,
       initialCanonicalDiskTdf: syncState.lastSyncedLocalTdf,
+      initialSerializedCandidate: serializedCandidate,
       preTransactionGeneration: candidateBoard.deletedBlock.generation,
       candidateBoard: candidateBoard,
       resolutions: resolutions,
@@ -1211,6 +1241,89 @@ class TaskSyncPipeline {
     return result;
   }
 
+  /// Completes Stage 1 without parsing or merging when the local file digest matches the last converged baseline and [working] is unchanged.
+  static Future<(TaskBoard, bool, WorkspaceSyncState, WorkspaceSyncState, bool)>
+  _finishBypassedLocalStage(
+    Ref ref,
+    WebDavConfig config, {
+    required String workspaceId,
+    required TaskBoard working,
+    required String? initialDigest,
+    required bool hasCandidate,
+    required bool requireTargets,
+    required TdfCleanupMode cleanupMode,
+    required bool isAuthoritativeSource,
+    required _LocalReadErrorMode readErrorMode,
+    required WorkspaceSyncState syncState,
+    required WorkspaceSyncState lastPersistedSyncState,
+    required _SyncResolutions resolutions,
+    required DateTime utcNow,
+    required DateTime localNow,
+    required TdfTimeZoneContext timeZone,
+    required void Function(TaskBoard mergedBoard)? onLocalStageMerged,
+  }) async {
+    final normalized = TaskBoardSync.stampAndNormalizeWithStatus(
+      working,
+      evaluationTime: utcNow,
+      localEvaluationTime: localNow,
+      timeZone: timeZone,
+      dueLeadWindow: config.dueLeadWindow.duration,
+      cleanupMode: cleanupMode,
+      pruneExpiredDeleted: isAuthoritativeSource,
+      pruneExpiredCompleted: isAuthoritativeSource,
+      preTransactionGeneration: working.deletedBlock.generation,
+    );
+    if (!normalized.documentChanged) {
+      if (hasCandidate &&
+          onLocalStageMerged != null &&
+          ref.mounted &&
+          ref.read(activeWorkspaceProvider).asData?.value.id == workspaceId) {
+        onLocalStageMerged(normalized.board);
+      }
+      return (normalized.board, true, syncState, lastPersistedSyncState, true);
+    }
+    final published = await _publishLocalWithCasLoop(
+      ref,
+      config,
+      initialDigest: initialDigest,
+      initialBaseline: working,
+      initialAckGeneration: syncState.acknowledgedLocalGeneration,
+      initialCanonicalDiskTdf: syncState.lastSyncedLocalTdf,
+      preTransactionGeneration: working.deletedBlock.generation,
+      candidateBoard: normalized.board,
+      resolutions: resolutions,
+      requireTargets: requireTargets,
+      skipWriteIfUnchanged: true,
+      cleanupMode: cleanupMode,
+      isAuthoritativeSource: isAuthoritativeSource,
+      readErrorMode: readErrorMode,
+      syncStateForRemoteProbe: syncState,
+      utcNow: utcNow,
+      localNow: localNow,
+    );
+    if (!ref.mounted) {
+      return (published.board, true, syncState, lastPersistedSyncState, false);
+    }
+    final nextSyncState = syncState.copyWith(
+      lastSyncedLocalTdf: published.serialized,
+      acknowledgedLocalGeneration: published.board.deletedBlock.generation,
+      localSourceDigest: published.digest,
+    );
+    final persistedState = await _saveSyncStateIfChanged(
+      ref,
+      workspaceId,
+      nextSyncState,
+      lastPersistedSyncState,
+    );
+    if (hasCandidate &&
+        onLocalStageMerged != null &&
+        ref.mounted &&
+        ref.read(activeWorkspaceProvider).asData?.value.id == workspaceId) {
+      onLocalStageMerged(published.board);
+    }
+    return (published.board, true, nextSyncState, persistedState, false);
+  }
+
   /// Extracts the first underlying unsupported-version [TdfException] from [report], if present.
   static TdfException? _firstUnsupportedTdfCause(StorageFileReadReport report) {
     if (report.local?.cause case final TdfException error
@@ -1332,6 +1445,7 @@ class TaskSyncPipeline {
     bool hasWorking,
     String? canonicalRemoteTdf,
     TaskBoard? remoteBoard,
+    bool bypassedMerge,
   })
   _mergeRemoteSnapshot(
     Ref ref,
@@ -1345,6 +1459,7 @@ class TaskSyncPipeline {
     required bool hasWorking,
     required bool hadPriorLocalConvergence,
     required String? storedRemoteBaselineTdf,
+    required TaskBoard? preParsedRemoteBaseline,
     required bool useBaselineBoard,
     required int? acknowledgedGeneration,
     required int preTransactionGeneration,
@@ -1364,6 +1479,7 @@ class TaskSyncPipeline {
           hasWorking: true,
           canonicalRemoteTdf: baselineTdf,
           remoteBoard: null,
+          bypassedMerge: true,
         );
       }
       if (!hasWorking) {
@@ -1379,8 +1495,9 @@ class TaskSyncPipeline {
           return (
             board: parsed,
             hasWorking: true,
-            canonicalRemoteTdf: baselineTdf ?? _serializeTdf(ref, parsed),
+            canonicalRemoteTdf: baselineTdf,
             remoteBoard: parsed,
+            bypassedMerge: false,
           );
         }
         return (
@@ -1388,6 +1505,7 @@ class TaskSyncPipeline {
           hasWorking: false,
           canonicalRemoteTdf: null,
           remoteBoard: null,
+          bypassedMerge: false,
         );
       }
     }
@@ -1420,6 +1538,7 @@ class TaskSyncPipeline {
         hasWorking: hasWorking,
         canonicalRemoteTdf: null,
         remoteBoard: null,
+        bypassedMerge: false,
       );
     }
     final remoteBoard = _parseRemoteOrThrow(
@@ -1430,16 +1549,16 @@ class TaskSyncPipeline {
       utcNow: utcNow,
       localNow: localNow,
     );
-    final canonicalRemote = notModified
-        ? (baselineTdf ?? _serializeTdf(ref, remoteBoard))
-        : _serializeTdf(ref, remoteBoard);
-    final parsedRemoteBaseline = _tryParseBaseline(
-      ref,
-      config,
-      storedRemoteBaselineTdf,
-      utcNow,
-      localNow,
-    );
+    final canonicalRemote = notModified ? baselineTdf : null;
+    final parsedRemoteBaseline =
+        preParsedRemoteBaseline ??
+        _tryParseBaseline(
+          ref,
+          config,
+          storedRemoteBaselineTdf,
+          utcNow,
+          localNow,
+        );
     final rawBaseline = useBaselineBoard ? parsedRemoteBaseline : null;
     final effectiveAckGen = storedRemoteBaselineTdf == null
         ? acknowledgedGeneration
@@ -1487,6 +1606,7 @@ class TaskSyncPipeline {
       hasWorking: true,
       canonicalRemoteTdf: canonicalRemote,
       remoteBoard: remoteBoard,
+      bypassedMerge: false,
     );
   }
 
@@ -1544,7 +1664,7 @@ class TaskSyncPipeline {
     }
   }
 
-  /// Parses [rawTdf] using [utcNow], [localNow], and [config]'s workspace time zone context.
+  /// Parses [rawTdf] without 6-tier evaluation for intermediate merge passes using [utcNow], [localNow], and [config]'s workspace time zone context.
   static TaskBoard _parseTdf(
     Ref ref,
     WebDavConfig config,
@@ -1559,6 +1679,7 @@ class TaskSyncPipeline {
         localEvaluationTime: localNow,
         timeZone: resolveWorkspaceTimeZone(config, utcNow),
         dueLeadWindow: config.dueLeadWindow.duration,
+        evaluateTiers: false,
       );
 
   /// Probes the remote WebDAV `.tdf` file read-only to report whether it is readable or unreadable alongside a local failure.
@@ -1610,8 +1731,11 @@ class TaskSyncPipeline {
     WebDavConfig config, {
     required String? initialDigest,
     required TaskBoard? initialBaseline,
+    TaskBoard? Function()? loadInitialBaseline,
     required int? initialAckGeneration,
     required String? initialCanonicalDiskTdf,
+    String Function()? resolveInitialCanonicalDiskTdf,
+    String? initialSerializedCandidate,
     required int preTransactionGeneration,
     required TaskBoard candidateBoard,
     required _SyncResolutions resolutions,
@@ -1628,6 +1752,8 @@ class TaskSyncPipeline {
     return localRepo.withExclusiveTargetLock(() async {
       var loopDigest = initialDigest;
       var loopB = initialBaseline;
+      var baselineResolved =
+          initialBaseline != null || loadInitialBaseline == null;
       var loopAckGen = initialAckGeneration;
       var loopL = candidateBoard;
       for (var attempt = 0; attempt <= maxCasRetries; attempt++) {
@@ -1647,13 +1773,18 @@ class TaskSyncPipeline {
             (!disk.exists && loopDigest == null) ||
             (disk.exists && disk.digest == loopDigest);
         if (digestMatches) {
-          final serialized = _serializeTdf(ref, loopL);
-          final alreadyMatchesDisk =
-              disk.exists &&
-              (disk.content.trim() == serialized.trim() ||
-                  (attempt == 0 &&
-                      initialCanonicalDiskTdf != null &&
-                      initialCanonicalDiskTdf == serialized));
+          final serialized = attempt == 0 && initialSerializedCandidate != null
+              ? initialSerializedCandidate
+              : _serializeTdf(ref, loopL);
+          var alreadyMatchesDisk =
+              disk.exists && disk.content.trim() == serialized.trim();
+          if (!alreadyMatchesDisk && disk.exists && attempt == 0) {
+            final canonicalDisk =
+                initialCanonicalDiskTdf ??
+                resolveInitialCanonicalDiskTdf?.call();
+            alreadyMatchesDisk =
+                canonicalDisk != null && canonicalDisk == serialized;
+          }
           if (attempt > 0 || !skipWriteIfUnchanged || !alreadyMatchesDisk) {
             await localRepo.saveTdf(serialized);
             final savedDigest = Sha256Service.hashHex(utf8.encode(serialized));
@@ -1665,6 +1796,13 @@ class TaskSyncPipeline {
           throw const LocalFileException(
             'Local file was modified concurrently and exceeded maximum CAS merge retries (3).',
           );
+        }
+        if (!baselineResolved) {
+          baselineResolved = true;
+          loopB = loadInitialBaseline?.call();
+          if (loopB == null) {
+            loopAckGen = null;
+          }
         }
         (loopB, loopAckGen, loopL, loopDigest) = await _retryCasMergeStep(
           ref,
@@ -1701,6 +1839,7 @@ class TaskSyncPipeline {
     required bool hasLocalStage,
     required TaskBoard working,
     required TaskBoard? initialBaseline,
+    TaskBoard? Function()? loadInitialBaseline,
     required int? initialAckGeneration,
     required bool hadExistingRemote,
     required int preTransactionGeneration,
@@ -1711,6 +1850,8 @@ class TaskSyncPipeline {
   }) async {
     var loopWorking = working;
     var loopBaseline = initialBaseline;
+    var baselineResolved =
+        initialBaseline != null || loadInitialBaseline == null;
     var loopAckGeneration = initialAckGeneration;
     var loopHadExistingRemote = hadExistingRemote;
     var currentSerialized = serializedCandidate;
@@ -1722,6 +1863,14 @@ class TaskSyncPipeline {
         if (!error.isPreconditionFailed || attempt >= maxCasRetries) rethrow;
         if (!ref.mounted) {
           return (loopWorking, currentSerialized);
+        }
+        if (!baselineResolved) {
+          baselineResolved = true;
+          loopBaseline = loadInitialBaseline?.call();
+          if (loopBaseline != null) {
+            loopAckGeneration = loopBaseline.deletedBlock.generation;
+            loopHadExistingRemote = true;
+          }
         }
         (
           loopBaseline,
@@ -2166,6 +2315,22 @@ class TaskSyncPipeline {
     return (retryRemote, remoteGen, normalized, _serializeTdf(ref, normalized));
   }
 
+  /// Persists [nextSyncState] for [workspaceId] only when it differs from [lastPersistedSyncState].
+  static Future<WorkspaceSyncState> _saveSyncStateIfChanged(
+    Ref ref,
+    String workspaceId,
+    WorkspaceSyncState nextSyncState,
+    WorkspaceSyncState lastPersistedSyncState,
+  ) async {
+    if (nextSyncState == lastPersistedSyncState) {
+      return lastPersistedSyncState;
+    }
+    await ref
+        .read(settingsRepositoryProvider)
+        .saveWorkspaceSyncState(workspaceId, nextSyncState);
+    return nextSyncState;
+  }
+
   /// Scopes [storedBaseline] to [originTasks], [originLabels], and [originLocations] for a queued optimistic mutation.
   static TaskBoard _scopeBaselineToCandidateOrigin(
     TaskBoard storedBaseline,
@@ -2414,22 +2579,34 @@ class TaskSyncPipeline {
   static String _serializeTdf(Ref ref, TaskBoard board) =>
       ref.read(tdfServiceProvider).serialize(board);
 
-  /// Returns whether [serializedFinal] must be uploaded to WebDAV given [trimmedRemote] and [canonicalRemoteTdf].
+  /// Returns whether [serializedFinal] must be uploaded to WebDAV given [trimmedRemote], [canonicalRemoteTdf], and lazy [remoteBoard] canonicalization.
   static bool _shouldSaveToRemote(
+    Ref ref,
     WebDavConfig config, {
     required String trimmedRemote,
     required String? canonicalRemoteTdf,
+    required TaskBoard? remoteBoard,
     required String serializedFinal,
     required bool requireTargets,
     required bool hasCandidate,
-  }) => trimmedRemote.isEmpty
-      ? (requireTargets ||
-            hasCandidate ||
-            config.storageMode == StorageMode.both ||
-            serializedFinal.trim().isNotEmpty)
-      : (canonicalRemoteTdf != null
-            ? canonicalRemoteTdf != serializedFinal
-            : trimmedRemote != serializedFinal.trim());
+  }) {
+    if (trimmedRemote.isEmpty) {
+      return requireTargets ||
+          hasCandidate ||
+          config.storageMode == StorageMode.both ||
+          serializedFinal.trim().isNotEmpty;
+    }
+    if (canonicalRemoteTdf != null) {
+      return canonicalRemoteTdf != serializedFinal;
+    }
+    if (trimmedRemote == serializedFinal.trim()) {
+      return false;
+    }
+    if (remoteBoard != null) {
+      return _serializeTdf(ref, remoteBoard) != serializedFinal;
+    }
+    return true;
+  }
 
   /// Strips `blocked` references targeting [retiredTaskIds] from surviving open [item] and advances `modifiedAt` when changed.
   static TaskItem _stripRetiredTaskDependencies(
@@ -2460,12 +2637,14 @@ class TaskSyncPipeline {
   }
 
   /// Executes the first-stage local file merge and write-back for [workspaceId].
-  static Future<(TaskBoard, bool, WorkspaceSyncState)> _synchronizeLocalStage(
+  static Future<(TaskBoard, bool, WorkspaceSyncState, WorkspaceSyncState, bool)>
+  _synchronizeLocalStage(
     Ref ref,
     WebDavConfig config, {
     required String workspaceId,
     required TaskBoard working,
     required TaskBoard? candidateOriginBoard,
+    required bool candidateMatchesLastSyncedLocal,
     required bool hasWorking,
     required bool hasCandidate,
     required bool requireTargets,
@@ -2473,13 +2652,13 @@ class TaskSyncPipeline {
     required TdfCleanupMode cleanupMode,
     required bool isAuthoritativeSource,
     required WorkspaceSyncState syncState,
+    required WorkspaceSyncState lastPersistedSyncState,
     required _SyncResolutions resolutions,
     required DateTime utcNow,
     required DateTime localNow,
     required TdfTimeZoneContext timeZone,
     required void Function(TaskBoard mergedBoard)? onLocalStageMerged,
   }) async {
-    final settingsRepository = ref.read(settingsRepositoryProvider);
     final readErrorMode = willRunRemoteStage
         ? _LocalReadErrorMode.probeRemote
         : _LocalReadErrorMode.localOnly;
@@ -2493,8 +2672,42 @@ class TaskSyncPipeline {
       localNow: localNow,
     );
     if (initialRead == null || !ref.mounted) {
-      return (working, hasWorking, syncState);
+      return (working, hasWorking, syncState, lastPersistedSyncState, false);
     }
+    final localDigestMatchesBaseline =
+        initialRead.exists &&
+        initialRead.digest != null &&
+        initialRead.digest == syncState.localSourceDigest &&
+        syncState.lastSyncedLocalTdf != null;
+    final canBypassLocalMerge =
+        localDigestMatchesBaseline &&
+        hasWorking &&
+        !resolutions.hasAny &&
+        candidateOriginBoard == null &&
+        !requireTargets &&
+        candidateMatchesLastSyncedLocal;
+    if (canBypassLocalMerge) {
+      return _finishBypassedLocalStage(
+        ref,
+        config,
+        workspaceId: workspaceId,
+        working: working,
+        initialDigest: initialRead.digest,
+        hasCandidate: hasCandidate,
+        requireTargets: requireTargets,
+        cleanupMode: cleanupMode,
+        isAuthoritativeSource: isAuthoritativeSource,
+        readErrorMode: readErrorMode,
+        syncState: syncState,
+        lastPersistedSyncState: lastPersistedSyncState,
+        resolutions: resolutions,
+        utcNow: utcNow,
+        localNow: localNow,
+        timeZone: timeZone,
+        onLocalStageMerged: onLocalStageMerged,
+      );
+    }
+
     final rawLocal = initialRead.content;
     final trimmedLocal = rawLocal.trim();
     var nextWorking = working;
@@ -2514,19 +2727,23 @@ class TaskSyncPipeline {
         localNow: localNow,
       );
       if (localBoard == null || !ref.mounted) {
-        return (working, hasWorking, syncState);
+        return (working, hasWorking, syncState, lastPersistedSyncState, false);
       }
-      initialCanonicalDiskTdf = _serializeTdf(ref, localBoard);
+      if (localDigestMatchesBaseline) {
+        initialCanonicalDiskTdf = syncState.lastSyncedLocalTdf;
+      }
       if (!nextHasWorking || localBoard.deletedBlock.generation > preStageGen) {
         preStageGen = localBoard.deletedBlock.generation;
       }
-      final rawBaseline = _tryParseBaseline(
-        ref,
-        config,
-        syncState.lastSyncedLocalTdf,
-        utcNow,
-        localNow,
-      );
+      final rawBaseline = localDigestMatchesBaseline
+          ? localBoard
+          : _tryParseBaseline(
+              ref,
+              config,
+              syncState.lastSyncedLocalTdf,
+              utcNow,
+              localNow,
+            );
       final scoped = _scopeCandidateAndBaseline(
         candidate: nextWorking,
         hasCandidate: nextHasWorking,
@@ -2609,7 +2826,13 @@ class TaskSyncPipeline {
     }
 
     if (trimmedLocal.isEmpty && !nextHasWorking && !requireTargets) {
-      return (nextWorking, nextHasWorking, syncState);
+      return (
+        nextWorking,
+        nextHasWorking,
+        syncState,
+        lastPersistedSyncState,
+        false,
+      );
     }
     nextWorking = TaskBoardSync.stampAndNormalize(
       nextWorking,
@@ -2622,13 +2845,17 @@ class TaskSyncPipeline {
       pruneExpiredCompleted: isAuthoritativeSource,
       preTransactionGeneration: preStageGen,
     );
+    final parsedLocalBoard = localBoard;
     final published = await _publishLocalWithCasLoop(
       ref,
       config,
       initialDigest: initialRead.exists ? initialRead.digest : null,
-      initialBaseline: localBoard,
-      initialAckGeneration: localBoard?.deletedBlock.generation,
+      initialBaseline: parsedLocalBoard,
+      initialAckGeneration: parsedLocalBoard?.deletedBlock.generation,
       initialCanonicalDiskTdf: initialCanonicalDiskTdf,
+      resolveInitialCanonicalDiskTdf: parsedLocalBoard != null
+          ? () => _serializeTdf(ref, parsedLocalBoard)
+          : null,
       preTransactionGeneration: preStageGen,
       candidateBoard: nextWorking,
       resolutions: resolutions,
@@ -2642,7 +2869,13 @@ class TaskSyncPipeline {
       localNow: localNow,
     );
     if (!ref.mounted) {
-      return (published.board, nextHasWorking, syncState);
+      return (
+        published.board,
+        nextHasWorking,
+        syncState,
+        lastPersistedSyncState,
+        false,
+      );
     }
     nextWorking = published.board;
     final nextSyncState = syncState.copyWith(
@@ -2650,18 +2883,24 @@ class TaskSyncPipeline {
       acknowledgedLocalGeneration: nextWorking.deletedBlock.generation,
       localSourceDigest: published.digest,
     );
-    await settingsRepository.saveWorkspaceSyncState(workspaceId, nextSyncState);
+    final persistedState = await _saveSyncStateIfChanged(
+      ref,
+      workspaceId,
+      nextSyncState,
+      lastPersistedSyncState,
+    );
     if (hasCandidate &&
         onLocalStageMerged != null &&
         ref.mounted &&
         ref.read(activeWorkspaceProvider).asData?.value.id == workspaceId) {
       onLocalStageMerged(nextWorking);
     }
-    return (nextWorking, nextHasWorking, nextSyncState);
+    return (nextWorking, nextHasWorking, nextSyncState, persistedState, false);
   }
 
   /// Executes the second-stage WebDAV remote merge, write-back, and local convergence.
-  static Future<(TaskBoard, bool, WorkspaceSyncState)> _synchronizeRemoteStage(
+  static Future<(TaskBoard, bool, WorkspaceSyncState, WorkspaceSyncState)>
+  _synchronizeRemoteStage(
     Ref ref,
     WebDavConfig config, {
     required String workspaceId,
@@ -2671,14 +2910,15 @@ class TaskSyncPipeline {
     required bool hasCandidate,
     required bool hadLocalBaseline,
     required bool hadPriorLocalConvergence,
+    required bool workingMatchesRemoteBaseline,
     required bool requireTargets,
     required WorkspaceSyncState syncState,
+    required WorkspaceSyncState lastPersistedSyncState,
     required _SyncResolutions resolutions,
     required DateTime utcNow,
     required DateTime localNow,
     required TdfTimeZoneContext timeZone,
   }) async {
-    final settingsRepository = ref.read(settingsRepositoryProvider);
     final webDavRepo = ref.read(webDavRepositoryProvider);
     final hasLocalStage =
         config.storageMode.usesLocal &&
@@ -2694,7 +2934,7 @@ class TaskSyncPipeline {
       hasLocalStage: hasLocalStage,
     );
     if (!ref.mounted) {
-      return (working, hasWorking, syncState);
+      return (working, hasWorking, syncState, lastPersistedSyncState);
     }
     final notModified = webDavRepo.lastFetchWasNotModified;
     if (notModified) {
@@ -2722,6 +2962,7 @@ class TaskSyncPipeline {
       hasWorking: hasWorking,
       hadPriorLocalConvergence: hadPriorLocalConvergence,
       storedRemoteBaselineTdf: syncState.lastSyncedRemoteTdf,
+      preParsedRemoteBaseline: workingMatchesRemoteBaseline ? working : null,
       useBaselineBoard: hadLocalBaseline,
       acknowledgedGeneration: syncState.acknowledgedRemoteGeneration,
       preTransactionGeneration: preRemoteGen,
@@ -2735,7 +2976,7 @@ class TaskSyncPipeline {
     final canonicalRemoteTdf = mergedRemote.canonicalRemoteTdf;
     final remoteBoard = mergedRemote.remoteBoard;
     if (trimmedRemote.isEmpty && !nextHasWorking && !requireTargets) {
-      return (nextWorking, nextHasWorking, syncState);
+      return (nextWorking, nextHasWorking, syncState, lastPersistedSyncState);
     }
     final remoteFloorGen = switch ((hasWorking, remoteBoard)) {
       (false, _) => nextWorking.deletedBlock.generation,
@@ -2744,7 +2985,7 @@ class TaskSyncPipeline {
         remote.deletedBlock.generation,
       _ => preRemoteGen,
     };
-    nextWorking = TaskBoardSync.stampAndNormalize(
+    final normalized = TaskBoardSync.stampAndNormalizeWithStatus(
       nextWorking,
       evaluationTime: utcNow,
       localEvaluationTime: localNow,
@@ -2755,33 +2996,31 @@ class TaskSyncPipeline {
       pruneExpiredCompleted: true,
       preTransactionGeneration: remoteFloorGen,
     );
-    var serializedFinal = _serializeTdf(ref, nextWorking);
+    nextWorking = normalized.board;
+    final reusableLocalTdf =
+        mergedRemote.bypassedMerge &&
+            !normalized.documentChanged &&
+            hasLocalStage
+        ? syncState.lastSyncedLocalTdf
+        : null;
+    var serializedFinal = reusableLocalTdf ?? _serializeTdf(ref, nextWorking);
     var didSaveRemote = false;
     if (_shouldSaveToRemote(
+      ref,
       config,
       trimmedRemote: trimmedRemote,
       canonicalRemoteTdf: canonicalRemoteTdf,
+      remoteBoard: remoteBoard,
       serializedFinal: serializedFinal,
       requireTargets: requireTargets,
       hasCandidate: hasCandidate,
     )) {
       didSaveRemote = true;
-      final casInitialBaseline =
-          remoteBoard ??
-          (notModified
-              ? _tryParseBaseline(
-                  ref,
-                  config,
-                  syncState.lastSyncedRemoteTdf,
-                  utcNow,
-                  localNow,
-                )
-              : null);
       final casInitialAckGen =
-          casInitialBaseline?.deletedBlock.generation ??
+          remoteBoard?.deletedBlock.generation ??
           (notModified ? syncState.acknowledgedRemoteGeneration : null);
       final hadExistingRemote =
-          casInitialBaseline != null ||
+          remoteBoard != null ||
           trimmedRemote.isNotEmpty ||
           syncState.remoteSourceDigest != null;
       (nextWorking, serializedFinal) = await _publishRemoteWithCasLoop(
@@ -2790,7 +3029,16 @@ class TaskSyncPipeline {
         webDavRepo: webDavRepo,
         hasLocalStage: hasLocalStage,
         working: nextWorking,
-        initialBaseline: casInitialBaseline,
+        initialBaseline: remoteBoard,
+        loadInitialBaseline: remoteBoard == null && notModified
+            ? () => _tryParseBaseline(
+                ref,
+                config,
+                syncState.lastSyncedRemoteTdf,
+                utcNow,
+                localNow,
+              )
+            : null,
         initialAckGeneration: casInitialAckGen,
         hadExistingRemote: hadExistingRemote,
         preTransactionGeneration: remoteFloorGen,
@@ -2800,7 +3048,7 @@ class TaskSyncPipeline {
         localNow: localNow,
       );
       if (!ref.mounted) {
-        return (nextWorking, nextHasWorking, syncState);
+        return (nextWorking, nextHasWorking, syncState, lastPersistedSyncState);
       }
     }
     final remoteDigest = didSaveRemote
@@ -2818,24 +3066,35 @@ class TaskSyncPipeline {
       remoteLastModified: webDavRepo.cachedLastModified,
       clearRemoteLastModified: webDavRepo.cachedLastModified == null,
     );
-    await settingsRepository.saveWorkspaceSyncState(workspaceId, nextSyncState);
+    final persistedAfterRemote = await _saveSyncStateIfChanged(
+      ref,
+      workspaceId,
+      nextSyncState,
+      lastPersistedSyncState,
+    );
     if (!ref.mounted) {
-      return (nextWorking, nextHasWorking, nextSyncState);
+      return (nextWorking, nextHasWorking, nextSyncState, persistedAfterRemote);
     }
-    if (config.storageMode.usesLocal &&
-        (requireTargets || config.isLocalConfigured)) {
+    final needsLocalConvergence =
+        config.storageMode.usesLocal &&
+        (requireTargets || config.isLocalConfigured) &&
+        (requireTargets ||
+            nextSyncState.localSourceDigest == null ||
+            serializedFinal != nextSyncState.lastSyncedLocalTdf);
+    if (needsLocalConvergence) {
       (nextWorking, nextSyncState) = await _convergeLocalAfterRemoteStage(
         ref,
         config,
         syncState: nextSyncState,
         candidateBoard: nextWorking,
+        serializedCandidate: serializedFinal,
         resolutions: resolutions,
         requireTargets: requireTargets,
         utcNow: utcNow,
         localNow: localNow,
       );
     }
-    return (nextWorking, nextHasWorking, nextSyncState);
+    return (nextWorking, nextHasWorking, nextSyncState, persistedAfterRemote);
   }
 
   /// Parses [rawBaselineTdf] into a [TaskBoard], or returns `null` when empty or malformed.

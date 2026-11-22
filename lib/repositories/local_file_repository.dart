@@ -100,8 +100,17 @@ class LocalFileLogSink implements AppLogSink {
       LocalFileRepository.readLogFileSync(path, maxBytes: maxBytes);
 
   @override
-  void writeLogFileSync(String path, String content, {required bool append}) =>
-      LocalFileRepository.writeLogFileSync(path, content, append: append);
+  void writeLogFileSync(
+    String path,
+    String content, {
+    required bool append,
+    bool flush = false,
+  }) => LocalFileRepository.writeLogFileSync(
+    path,
+    content,
+    append: append,
+    flush: flush,
+  );
 }
 
 /// Repository for reading, writing, and locking the task board `.tdf` file on the local filesystem.
@@ -710,12 +719,14 @@ class LocalFileRepository {
     );
   }
 
-  /// Synchronously writes or appends [content] to the diagnostic log file at [path] with `flush: true`.
+  /// Synchronously writes or appends [content] to the diagnostic log file at [path], flushing to stable storage only when [flush] is `true`.
   static void writeLogFileSync(
     String path,
     String content, {
     required bool append,
-  }) => _operations.writeLogFileSync(path, content, append: append);
+    bool flush = false,
+  }) =>
+      _operations.writeLogFileSync(path, content, append: append, flush: flush);
 
   /// Lists sorted `.tdf` file names stored under [dirPath] in [inMemoryStore].
   List<String> _listInMemoryTdfFileNames(String dirPath) {

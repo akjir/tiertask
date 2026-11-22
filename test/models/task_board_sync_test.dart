@@ -3904,5 +3904,168 @@ label 000001OkD2 {
         reason: 'Freshly recovered task at 9999-12-31 23:59:59Z must not falsely overflow',
       );
     });
+
+    test('mergeTaskWithBaselineAndUncleaned matches single-pass and identity fast-path semantics across unchanged, edited, and cleanup cases', () {
+      final baseTask = TaskItem(
+        id: '000001OkD2',
+        title: 'Base Task',
+        note: 'Initial note',
+        createdAt: t(0),
+        modifiedAt: t(10),
+        suspendedAt: t(5),
+      );
+
+      // 1. Identical without suspended/dependencies in finalStage hits identity fast path:
+      final plainTask = TaskItem(
+        id: '000002OkD2',
+        title: 'Plain Task',
+        createdAt: t(0),
+        modifiedAt: t(10),
+      );
+      final fastResult = TdfPayloadComparison.mergeTaskWithBaselineAndUncleaned(
+        local: plainTask,
+        incoming: plainTask,
+        baseline: plainTask,
+        evaluationTime: t(30),
+        cleanupMode: TdfCleanupMode.finalStage,
+      );
+      expect(fastResult.merged, equals(plainTask));
+      expect(fastResult.uncleaned, equals(plainTask));
+      expect(fastResult.wasUnchangedIdentity, isTrue);
+
+      // 2. Identical WITH expired suspended in finalStage must still clean suspended and NOT falsely skip cleanup:
+      final expiredResult =
+          TdfPayloadComparison.mergeTaskWithBaselineAndUncleaned(
+            local: baseTask,
+            incoming: baseTask,
+            baseline: baseTask,
+            evaluationTime: t(30),
+            cleanupMode: TdfCleanupMode.finalStage,
+          );
+      final referenceExpired = TdfPayloadComparison.mergeTaskWithBaseline(
+        local: baseTask,
+        incoming: baseTask,
+        baseline: baseTask,
+        evaluationTime: t(30),
+        cleanupMode: TdfCleanupMode.finalStage,
+      );
+      expect(expiredResult.merged, equals(referenceExpired));
+      expect(expiredResult.merged.suspendedAt, isNull);
+      expect(expiredResult.uncleaned.suspendedAt, equals(t(5)));
+
+      // 3. Diverging concurrent edits match mergeTaskWithBaseline and mergeTaskCandidatesWithBaseline:
+      final localEdit = baseTask.copyWith(
+        title: 'Local Title',
+        modifiedAt: t(20),
+      );
+      final remoteEdit = baseTask.copyWith(
+        note: 'Remote Note',
+        modifiedAt: t(25),
+      );
+      final mergedPair = TdfPayloadComparison.mergeTaskWithBaselineAndUncleaned(
+        local: localEdit,
+        incoming: remoteEdit,
+        baseline: baseTask,
+        evaluationTime: t(30),
+        cleanupMode: TdfCleanupMode.finalStage,
+      );
+      final expectedMerged = TdfPayloadComparison.mergeTaskWithBaseline(
+        local: localEdit,
+        incoming: remoteEdit,
+        baseline: baseTask,
+        evaluationTime: t(30),
+        cleanupMode: TdfCleanupMode.finalStage,
+      );
+      final expectedCandidates =
+          TdfPayloadComparison.mergeTaskCandidatesWithBaseline(
+            local: localEdit,
+            incoming: remoteEdit,
+            baseline: baseTask,
+            evaluationTime: t(30),
+            cleanupMode: TdfCleanupMode.finalStage,
+          );
+      expect(mergedPair.merged, equals(expectedMerged));
+      expect(mergedPair.uncleaned, equals(expectedCandidates.uncleaned));
+      expect(mergedPair.wasUnchangedIdentity, isFalse);
+    });
+
+    test('stampAndNormalizeWithStatus accurately reports documentChanged for no-op vs retention pruning and block cleanup', () {
+      final unchangedBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: '000001OkD2',
+            title: 'Active Task',
+            createdAt: t(0),
+            modifiedAt: t(10),
+          ),
+        ],
+        deletedBlock: TdfDeletedBlock(
+          generation: 0,
+          tasks: <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(taskId: 'del001OkD2', deletedAt: t(0)),
+          ],
+        ),
+        evaluationTime: t(20),
+      );
+
+      final noOpResult = TaskBoardSync.stampAndNormalizeWithStatus(
+        unchangedBoard,
+        evaluationTime: t(30),
+        cleanupMode: TdfCleanupMode.finalStage,
+      );
+      expect(
+        noOpResult.documentChanged,
+        isFalse,
+        reason: 'No expired tombstones, completed tasks, or resolved blocks changed',
+      );
+
+      final deferredResult = TaskBoardSync.stampAndNormalizeWithStatus(
+        unchangedBoard,
+        evaluationTime: t(30).add(const Duration(days: 40)),
+        cleanupMode: TdfCleanupMode.deferred,
+      );
+      expect(
+        deferredResult.documentChanged,
+        isFalse,
+        reason: 'Deferred stage never mutates persisted TDF document content',
+      );
+
+      final expiredTombstoneResult = TaskBoardSync.stampAndNormalizeWithStatus(
+        unchangedBoard,
+        evaluationTime: t(30).add(const Duration(days: 40)),
+        cleanupMode: TdfCleanupMode.finalStage,
+      );
+      expect(
+        expiredTombstoneResult.documentChanged,
+        isTrue,
+        reason: 'Pruning expired deletion record must set documentChanged=true',
+      );
+      expect(expiredTombstoneResult.board.deletedBlock.generation, equals(1));
+
+      final suspendedBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: '000002OkD2',
+            title: 'Suspended Task',
+            createdAt: t(0),
+            modifiedAt: t(10),
+            suspendedAt: t(15),
+          ),
+        ],
+        evaluationTime: t(10),
+      );
+      final cleanedBlockResult = TaskBoardSync.stampAndNormalizeWithStatus(
+        suspendedBoard,
+        evaluationTime: t(30),
+        cleanupMode: TdfCleanupMode.finalStage,
+      );
+      expect(
+        cleanedBlockResult.documentChanged,
+        isTrue,
+        reason:
+            'Cleaning an expired suspended block must set documentChanged=true',
+      );
+      expect(cleanedBlockResult.board.allTasks.single.suspendedAt, isNull);
+    });
   });
 }

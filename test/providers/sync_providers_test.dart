@@ -57,6 +57,7 @@ class _CountingTdfService extends TdfService {
     double? currentLatitude,
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
+    bool evaluateTiers = true,
   }) {
     onParse();
     return super.parse(
@@ -69,6 +70,7 @@ class _CountingTdfService extends TdfService {
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
       pruneExpiredCompleted: pruneExpiredCompleted,
+      evaluateTiers: evaluateTiers,
     );
   }
 }
@@ -3827,6 +3829,324 @@ void main() {
     );
     recSub.close();
   });
+
+  test('StorageMode.both and StorageMode.local eliminate redundant parse, serialize, local read, and sync-state write passes across no-op, local-edit, remote-edit, and expiry syncs', () async {
+    HttpOverrides.global = null;
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+
+    const initialTdf =
+        'tdf 0.8.0\n\n'
+        'queue {\n'
+        '    modified 2026-11-01 08:00:00\n'
+        '    task 000001OkD2\n'
+        '}\n\n'
+        'task 000001OkD2 {\n'
+        '    name      "Initial Task"\n'
+        '    created   2026-11-01 08:00\n'
+        '    modified  2026-11-01 08:00\n'
+        '    suspended 2026-11-02 08:00\n'
+        '}\n';
+    var remoteTdf = initialTdf;
+    var remoteEtag = '"etag-opt-v1"';
+    var localTdf = initialTdf;
+    var currentTime = DateTime.utc(2026, 11, 1, 9, 0);
+
+    server.listen((HttpRequest request) async {
+      if (request.method == 'GET') {
+        final ifNoneMatch = request.headers.value(
+          HttpHeaders.ifNoneMatchHeader,
+        );
+        if (ifNoneMatch == remoteEtag) {
+          request.response.statusCode = HttpStatus.notModified;
+          request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.ok;
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.write(remoteTdf);
+        await request.response.close();
+        return;
+      }
+      if (request.method == 'PUT') {
+        remoteTdf = await utf8.decoder.bind(request).join();
+        remoteEtag = '"etag-opt-put-${remoteTdf.length}"';
+        request.response.headers.set(HttpHeaders.etagHeader, remoteEtag);
+        request.response.statusCode = HttpStatus.noContent;
+        await request.response.close();
+      }
+    });
+
+    var parseCalls = 0;
+    var serializeCalls = 0;
+    var localReadCalls = 0;
+    var localWriteCalls = 0;
+    var syncStateSaveCalls = 0;
+
+    final bothConfig = WebDavConfig(
+      storageMode: StorageMode.both,
+      localFilePath: 'tasks.tdf',
+      serverUrl: 'http://${server.address.host}:${server.port}',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'tasks.tdf',
+    );
+    final settings = _CountingSyncStateSettingsRepository(
+      bothConfig,
+      onSaveSyncState: () => syncStateSaveCalls++,
+    );
+    final localRepo = _CountingReadWriteLocalRepository(
+      config: bothConfig,
+      getTdf: () => localTdf,
+      setTdf: (value) => localTdf = value,
+      onRead: () => localReadCalls++,
+      onWrite: () => localWriteCalls++,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settings),
+        localFileRepositoryProvider.overrideWithValue(localRepo),
+        clockProvider.overrideWithValue(() => currentTime),
+        tdfServiceProvider.overrideWithValue(
+          _CountingParseSerializeTdfService(
+            onParse: () => parseCalls++,
+            onSerialize: () => serializeCalls++,
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    // 1. Initial load converges local and remote.
+    final loaded = await container.read(taskNotifierProvider.future);
+    expect(loaded.allTasks.single.title, equals('Initial Task'));
+
+    // 2. Manual no-op sync in StorageMode.both with 304 Not Modified:
+    //    0 parses, 0 serializes, 0 sync-state saves, 1 local digest read, 0 local writes.
+    parseCalls = 0;
+    serializeCalls = 0;
+    localReadCalls = 0;
+    localWriteCalls = 0;
+    syncStateSaveCalls = 0;
+    await container.read(taskNotifierProvider.notifier).syncFromRemote();
+    expect(
+      parseCalls,
+      equals(0),
+      reason: 'Unchanged StorageMode.both 304 sync must perform 0 TDF parses',
+    );
+    expect(
+      serializeCalls,
+      equals(0),
+      reason:
+          'Unchanged StorageMode.both 304 sync must perform 0 TDF serializes',
+    );
+    expect(
+      syncStateSaveCalls,
+      equals(0),
+      reason: 'Unchanged sync state must not be rewritten to secure storage',
+    );
+    expect(
+      localReadCalls,
+      equals(1),
+      reason: 'Unchanged StorageMode.both sync must read local file once for digest check',
+    );
+    expect(localWriteCalls, equals(0));
+
+    // 3. Local mutation in StorageMode.both when WebDAV returns 304 Not Modified:
+    //    1 parse (local disk reused as baseline), 1 serialize (reused across Stage 1 & 2, Stage 3 skipped).
+    parseCalls = 0;
+    serializeCalls = 0;
+    localWriteCalls = 0;
+    syncStateSaveCalls = 0;
+    currentTime = DateTime.utc(2026, 11, 1, 10, 0);
+    await container
+        .read(taskNotifierProvider.notifier)
+        .addTask('Local Edit Task', targetTier: TaskTier.someday);
+    expect(
+      parseCalls,
+      equals(1),
+      reason: 'Local edit with unchanged disk digest must parse local once and skip baseline parse',
+    );
+    expect(
+      serializeCalls,
+      equals(1),
+      reason: 'Local edit must serialize once and reuse serialized bytes across Stage 2 and Stage 3',
+    );
+    expect(localWriteCalls, equals(1));
+    expect(localTdf, equals(remoteTdf));
+
+    // 4. Remote 200 OK edit when local is unchanged:
+    //    1 parse (remote only, reusing converged working board as baseline) and 1 serialize (reused in Stage 3).
+    remoteTdf = remoteTdf.replaceFirst('"Local Edit Task"', '"Remote Updated"');
+    remoteTdf = remoteTdf.replaceFirst(
+      'modified 2026-11-01 10:00',
+      'modified 2026-11-01 11:00',
+    );
+    remoteEtag = '"etag-opt-remote-edit"';
+    parseCalls = 0;
+    serializeCalls = 0;
+    localWriteCalls = 0;
+    currentTime = DateTime.utc(2026, 11, 1, 11, 30);
+    await container.read(taskNotifierProvider.notifier).syncFromRemote();
+    expect(
+      parseCalls,
+      equals(1),
+      reason: 'Remote 200 OK sync with unchanged local must parse remote once and skip baseline parses',
+    );
+    expect(
+      serializeCalls,
+      equals(1),
+      reason: 'Remote 200 OK sync must serialize converged board once and reuse it in Stage 3',
+    );
+    expect(localWriteCalls, equals(1));
+    expect(localTdf, contains('"Remote Updated"'));
+
+    // 5. StorageMode.local no-op sync performs 0 parses/serializes, and expiry cleanup still fires when time advances.
+    var localOnlyTdf = initialTdf;
+    var localOnlyTime = DateTime.utc(2026, 11, 1, 9, 0);
+    var localOnlyParses = 0;
+    var localOnlySerializes = 0;
+    var localOnlyWrites = 0;
+    const localOnlyConfig = WebDavConfig(
+      storageMode: StorageMode.local,
+      localFilePath: 'tasks.tdf',
+    );
+    final localOnlySettings = InMemorySettingsRepository(localOnlyConfig);
+    final localOnlyRepo = _CountingReadWriteLocalRepository(
+      config: localOnlyConfig,
+      getTdf: () => localOnlyTdf,
+      setTdf: (value) => localOnlyTdf = value,
+      onRead: () {},
+      onWrite: () => localOnlyWrites++,
+    );
+    final localOnlyContainer = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(localOnlySettings),
+        localFileRepositoryProvider.overrideWithValue(localOnlyRepo),
+        clockProvider.overrideWithValue(() => localOnlyTime),
+        tdfServiceProvider.overrideWithValue(
+          _CountingParseSerializeTdfService(
+            onParse: () => localOnlyParses++,
+            onSerialize: () => localOnlySerializes++,
+          ),
+        ),
+      ],
+    );
+    addTearDown(localOnlyContainer.dispose);
+
+    await localOnlyContainer.read(taskNotifierProvider.future);
+    localOnlyParses = 0;
+    localOnlySerializes = 0;
+    localOnlyWrites = 0;
+    await localOnlyContainer
+        .read(taskNotifierProvider.notifier)
+        .syncFromRemote();
+    expect(localOnlyParses, equals(0));
+    expect(localOnlySerializes, equals(0));
+    expect(localOnlyWrites, equals(0));
+
+    // Advance past suspended 2026-11-02 08:00 -> stampAndNormalize must clean suspended and persist to disk!
+    localOnlyTime = DateTime.utc(2026, 11, 2, 9, 0);
+    await localOnlyContainer
+        .read(taskNotifierProvider.notifier)
+        .syncFromRemote();
+    expect(
+      localOnlyWrites,
+      equals(1),
+      reason:
+          'Expired suspended block must still clean up and write to local disk',
+    );
+    expect(localOnlyTdf, isNot(contains('suspended ')));
+  });
+}
+
+class _CountingParseSerializeTdfService extends TdfService {
+  const _CountingParseSerializeTdfService({
+    required this.onParse,
+    required this.onSerialize,
+  });
+
+  final void Function() onParse;
+  final void Function() onSerialize;
+
+  @override
+  TaskBoard parse(
+    String tdfContent, {
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+    bool pruneExpiredCompleted = false,
+    bool evaluateTiers = true,
+  }) {
+    onParse();
+    return super.parse(
+      tdfContent,
+      evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+      pruneExpiredCompleted: pruneExpiredCompleted,
+      evaluateTiers: evaluateTiers,
+    );
+  }
+
+  @override
+  String serialize(TaskBoard board) {
+    onSerialize();
+    return super.serialize(board);
+  }
+}
+
+class _CountingSyncStateSettingsRepository extends InMemorySettingsRepository {
+  _CountingSyncStateSettingsRepository(
+    super.initialConfig, {
+    required this.onSaveSyncState,
+  });
+
+  final void Function() onSaveSyncState;
+
+  @override
+  Future<void> saveWorkspaceSyncState(
+    String workspaceId,
+    WorkspaceSyncState state,
+  ) async {
+    onSaveSyncState();
+    await super.saveWorkspaceSyncState(workspaceId, state);
+  }
+}
+
+class _CountingReadWriteLocalRepository extends _InMemorySyncLocalRepository {
+  _CountingReadWriteLocalRepository({
+    required super.config,
+    required super.getTdf,
+    required super.setTdf,
+    required this.onRead,
+    required this.onWrite,
+  });
+
+  final void Function() onRead;
+  final void Function() onWrite;
+
+  @override
+  Future<({String content, String? digest, bool exists})>
+  readTdfWithDigest() async {
+    onRead();
+    return super.readTdfWithDigest();
+  }
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    onWrite();
+    await super.saveTdf(tdfContent);
+  }
 }
 
 class _FailingReadLocalRepository extends LocalFileRepository {

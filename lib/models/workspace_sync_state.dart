@@ -130,6 +130,9 @@ class WorkspaceSyncState {
   /// Empty synchronization state with no baselines, generations, or validators.
   static const WorkspaceSyncState empty = WorkspaceSyncState._();
 
+  /// Maximum serialized byte size of a `TTS\x04` payload holding two full `maxTdfFileBytes` baselines plus metadata.
+  static const int maxSerializedBytes = (maxTdfFileBytes * 2) + 4096;
+
   static const String _canonicalHeaderPrefix = 'tdf 0.8.0\n';
   static const int _formatVersion = 0x04;
   static const int _magicByte0 = 0x54;

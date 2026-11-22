@@ -293,8 +293,13 @@ abstract interface class AppLogSink {
   /// Reads up to the trailing [maxBytes] of the log file at [path], or returns `''`.
   String readLogFileSync(String path, {required int maxBytes});
 
-  /// Writes or appends [content] synchronously to the log file at [path].
-  void writeLogFileSync(String path, String content, {required bool append});
+  /// Writes or appends [content] synchronously to the log file at [path], flushing to stable storage only when [flush] is `true`.
+  void writeLogFileSync(
+    String path,
+    String content, {
+    required bool append,
+    bool flush = false,
+  });
 }
 
 /// Opt-in structured diagnostic logger with credential sanitization and crash recovery.
@@ -463,7 +468,7 @@ final class AppLogger {
         }
       }
     }
-    _appendLines(batch, forceFullWrite: true);
+    _appendLines(batch, forceFullWrite: true, flush: true);
   }
 
   /// Logs a `DEBUG` message under [tag] when [shouldLog] permits `LogLevel.debug`.
@@ -515,31 +520,34 @@ final class AppLogger {
     StackTrace? stackTrace,
   }) {
     if (!shouldLog(level)) return;
-    final buffer = StringBuffer(event)..write(' |');
-    for (final entry in fields.entries) {
-      final val = entry.value;
-      if (val != null) {
-        buffer
-          ..write(' ')
-          ..write(entry.key)
-          ..write('=')
-          ..write(formatFieldValue(val));
-      }
+    _log(
+      level,
+      tag,
+      _formatEventPayload(
+        event,
+        fields: fields,
+        error: error,
+        stackTrace: stackTrace,
+      ),
+    );
+  }
+
+  /// Logs multiple structured `<event> | <key=value ...>` [entries] at [level] and [tag] in a single buffered write.
+  static void eventBatch(
+    LogLevel level,
+    LogTag tag,
+    Iterable<({String event, Map<String, Object?> fields})> entries,
+  ) {
+    if (!shouldLog(level)) return;
+    final timestamp = formatIsoUtcTimestamp(_clock().toUtc());
+    final prefix = '$timestamp [${level.paddedLabel}] [${tag.paddedLabel}] ';
+    final batch = <String>[];
+    for (final entry in entries) {
+      final payload = _formatEventPayload(entry.event, fields: entry.fields);
+      final sanitizedMessage = _collapseControlChars(sanitize(payload));
+      batch.add('$prefix$sanitizedMessage');
     }
-    if (error != null) {
-      buffer
-        ..write(' error=')
-        ..write(formatFieldValue(error.toString(), alwaysQuote: true));
-    }
-    if (stackTrace != null) {
-      final firstFrame = _firstStackFrame(stackTrace);
-      if (firstFrame.isNotEmpty) {
-        buffer
-          ..write(' trace=')
-          ..write(formatFieldValue(firstFrame, alwaysQuote: true));
-      }
-    }
-    _log(level, tag, buffer.toString());
+    _appendLines(batch);
   }
 
   /// Formats a structured field [value] with secret sanitization and quoting.
@@ -606,7 +614,7 @@ final class AppLogger {
             'crashed': _crashedInCurrentSession,
           },
         );
-        _writeFullFile();
+        _writeFullFile(flush: true);
     }
   }
 
@@ -818,6 +826,7 @@ final class AppLogger {
   static void _appendLines(
     List<String> newLines, {
     bool forceFullWrite = false,
+    bool flush = false,
   }) {
     if (newLines.isEmpty) return;
     _lines.addAll(newLines);
@@ -826,10 +835,10 @@ final class AppLogger {
     final path = _logFilePath;
     if (_persistToDisk && sink != null && path.isNotEmpty) {
       if (trimmed || forceFullWrite) {
-        _writeFullFile();
+        _writeFullFile(flush: flush);
       } else {
         final chunk = '${newLines.join('\n')}\n';
-        sink.writeLogFileSync(path, chunk, append: true);
+        sink.writeLogFileSync(path, chunk, append: true, flush: flush);
       }
     }
     _revision.value++;
@@ -934,6 +943,40 @@ final class AppLogger {
       if (trimmed.isNotEmpty) return trimmed;
     }
     return '';
+  }
+
+  /// Formats a structured `<event> | <key=value ...>` message body with optional [error] and [stackTrace].
+  static String _formatEventPayload(
+    String event, {
+    Map<String, Object?> fields = const <String, Object?>{},
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    final buffer = StringBuffer(event)..write(' |');
+    for (final entry in fields.entries) {
+      final value = entry.value;
+      if (value != null) {
+        buffer
+          ..write(' ')
+          ..write(entry.key)
+          ..write('=')
+          ..write(formatFieldValue(value));
+      }
+    }
+    if (error != null) {
+      buffer
+        ..write(' error=')
+        ..write(formatFieldValue(error.toString(), alwaysQuote: true));
+    }
+    if (stackTrace != null) {
+      final firstFrame = _firstStackFrame(stackTrace);
+      if (firstFrame.isNotEmpty) {
+        buffer
+          ..write(' trace=')
+          ..write(formatFieldValue(firstFrame, alwaysQuote: true));
+      }
+    }
+    return buffer.toString();
   }
 
   /// Returns `true` if [previousBodyLines] ended without a clean `crashed=false` exit.
@@ -1143,12 +1186,12 @@ final class AppLogger {
   }
 
   /// Overwrites the persistent log file with the current contents of [_lines].
-  static void _writeFullFile() {
+  static void _writeFullFile({bool flush = false}) {
     if (!_persistToDisk) return;
     final sink = _sink;
     final path = _logFilePath;
     if (sink == null || path.isEmpty) return;
     final payload = _lines.isEmpty ? '' : '${_lines.join('\n')}\n';
-    sink.writeLogFileSync(path, payload, append: false);
+    sink.writeLogFileSync(path, payload, append: false, flush: flush);
   }
 }

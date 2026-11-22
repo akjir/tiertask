@@ -554,8 +554,13 @@ class LocalFileOperations<E extends Exception> {
     return controller.stream;
   }
 
-  /// Synchronously writes or appends [content] to the diagnostic log file at [path] with `flush: true`.
-  void writeLogFileSync(String path, String content, {required bool append}) {
+  /// Synchronously writes or appends [content] to the diagnostic log file at [path], rejecting symlinks and flushing to stable storage only when [flush] is `true`.
+  void writeLogFileSync(
+    String path,
+    String content, {
+    required bool append,
+    bool flush = false,
+  }) {
     try {
       final type = FileSystemEntity.typeSync(path, followLinks: false);
       if (type != FileSystemEntityType.notFound &&
@@ -563,11 +568,13 @@ class LocalFileOperations<E extends Exception> {
         return;
       }
       final file = File(path);
-      file.parent.createSync(recursive: true);
+      if (type == FileSystemEntityType.notFound) {
+        file.parent.createSync(recursive: true);
+      }
       file.writeAsStringSync(
         content,
         mode: append ? FileMode.append : FileMode.write,
-        flush: true,
+        flush: flush,
       );
       if (Platform.isLinux &&
           (type == FileSystemEntityType.notFound || !append)) {

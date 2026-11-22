@@ -13,8 +13,6 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:convert';
-
 import '../models/task_board.dart';
 import '../models/task_board_evaluator.dart';
 import '../models/task_item.dart';
@@ -249,7 +247,7 @@ abstract final class TdfBlockParser {
     }
   }
 
-  /// Parses a complete `tdf 0.8.0` document [content] and evaluates all 6 tiers at [evaluationTime].
+  /// Parses a complete `tdf 0.8.0` document [content] and optionally evaluates all 6 tiers at [evaluationTime].
   static TaskBoard parseDocument(
     String content, {
     DateTime? evaluationTime,
@@ -261,12 +259,22 @@ abstract final class TdfBlockParser {
     double? currentLongitude,
     bool pruneExpiredCompleted = false,
     bool byteLengthVerified = false,
+    bool evaluateTiers = true,
   }) {
     final state = _scanAndValidateState(
       content,
       byteLengthVerified: byteLengthVerified,
     );
     final tasks = <TaskItem>[for (final item in state.tasksWithMeta) item.task];
+    if (!evaluateTiers) {
+      return TaskBoard.unevaluated(
+        tasks: tasks,
+        labels: state.labels,
+        locations: state.locations,
+        deletedBlock: state.deletedBlock,
+        queueBlock: state.queueBlock,
+      );
+    }
     return TaskBoard.evaluate(
       tasks: tasks,
       labels: state.labels,
@@ -1077,9 +1085,7 @@ abstract final class TdfBlockParser {
     required bool byteLengthVerified,
   }) {
     if (!byteLengthVerified &&
-        (content.length > maxTdfFileBytes ||
-            (content.length * 4 > maxTdfFileBytes &&
-                utf8.encode(content).length > maxTdfFileBytes))) {
+        !TdfScanner.isUtf8ByteLengthWithinBound(content, maxTdfFileBytes)) {
       TdfDirectiveParser.fail(
         TdfErrorKind.limitExceeded,
         1,

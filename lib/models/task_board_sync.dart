@@ -741,28 +741,58 @@ class TaskBoardSync {
     bool pruneExpiredDeleted = true,
     bool pruneExpiredCompleted = true,
     int? preTransactionGeneration,
+  }) => stampAndNormalizeWithStatus(
+    board,
+    evaluationTime: evaluationTime,
+    localEvaluationTime: localEvaluationTime,
+    timeZone: timeZone,
+    dueLeadWindow: dueLeadWindow,
+    cleanupMode: cleanupMode,
+    pruneExpiredDeleted: pruneExpiredDeleted,
+    pruneExpiredCompleted: pruneExpiredCompleted,
+    preTransactionGeneration: preTransactionGeneration,
+  ).board;
+
+  /// Normalizes [board] at [evaluationTime], returning both the evaluated board and whether any persisted TDF document content changed.
+  static ({TaskBoard board, bool documentChanged}) stampAndNormalizeWithStatus(
+    TaskBoard board, {
+    required DateTime evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+    TdfCleanupMode cleanupMode = TdfCleanupMode.finalStage,
+    bool pruneExpiredDeleted = true,
+    bool pruneExpiredCompleted = true,
+    int? preTransactionGeneration,
   }) {
     final normalizedNow = TaskItem.normalizeTimestamp(evaluationTime);
     final isFinalStage = cleanupMode == TdfCleanupMode.finalStage;
     if (!isFinalStage) {
-      return TaskBoard.evaluate(
-        tasks: board.allTasks,
-        evaluationTime: normalizedNow,
-        localEvaluationTime: localEvaluationTime,
-        timeZone: timeZone,
-        dueLeadWindow: dueLeadWindow,
-        labels: board.labels,
-        locations: board.locations,
-        deletedBlock: board.deletedBlock,
-        queueBlock: board.queueBlock,
-        pruneExpiredCompleted: false,
+      return (
+        board: TaskBoard.evaluate(
+          tasks: board.allTasks,
+          evaluationTime: normalizedNow,
+          localEvaluationTime: localEvaluationTime,
+          timeZone: timeZone,
+          dueLeadWindow: dueLeadWindow,
+          labels: board.labels,
+          locations: board.locations,
+          deletedBlock: board.deletedBlock,
+          queueBlock: board.queueBlock,
+          pruneExpiredCompleted: false,
+        ),
+        documentChanged: false,
       );
     }
 
     var finalizedDeleted = board.deletedBlock;
     var tasksAfterRetention = board.allTasks;
+    var documentChanged = false;
     final strippedByRetentionIds = <String>{};
-    if (pruneExpiredDeleted) {
+    if (pruneExpiredDeleted &&
+        (board.deletedBlock.tasks.isNotEmpty ||
+            board.deletedBlock.labels.isNotEmpty ||
+            board.deletedBlock.locations.isNotEmpty)) {
       final deletedTasksById = <String, TdfDeletedTaskRecord>{
         for (final record in board.deletedBlock.tasks) record.taskId: record,
       };
@@ -790,6 +820,10 @@ class TaskBoardSync {
         normalizedNow,
         strippedTaskIdsOut: strippedByRetentionIds,
       );
+      if (finalizedDeleted != board.deletedBlock ||
+          strippedByRetentionIds.isNotEmpty) {
+        documentChanged = true;
+      }
     }
     if (pruneExpiredCompleted) {
       final prunedResult = _pruneExpiredCompletedTasksIntoDeleted(
@@ -797,6 +831,10 @@ class TaskBoardSync {
         finalizedDeleted,
         normalizedNow,
       );
+      if (prunedResult.survivingTasks.length != tasksAfterRetention.length ||
+          prunedResult.deletedBlock != finalizedDeleted) {
+        documentChanged = true;
+      }
       tasksAfterRetention = prunedResult.survivingTasks;
       finalizedDeleted = prunedResult.deletedBlock;
     }
@@ -806,6 +844,9 @@ class TaskBoardSync {
       nowUtc: normalizedNow,
       alreadyStampedTaskIds: strippedByRetentionIds,
     );
+    if (cleaned.cleanedSuspendedCount > 0 || cleaned.cleanedBlockedCount > 0) {
+      documentChanged = true;
+    }
     validateMergedGraphAndBounds(
       cleaned.tasks,
       board.labels,
@@ -813,17 +854,20 @@ class TaskBoardSync {
       finalizedDeleted,
       board.queueBlock,
     );
-    return TaskBoard.evaluate(
-      tasks: cleaned.tasks,
-      evaluationTime: normalizedNow,
-      localEvaluationTime: localEvaluationTime,
-      timeZone: timeZone,
-      dueLeadWindow: dueLeadWindow,
-      labels: board.labels,
-      locations: board.locations,
-      deletedBlock: finalizedDeleted,
-      queueBlock: board.queueBlock,
-      pruneExpiredCompleted: false,
+    return (
+      board: TaskBoard.evaluate(
+        tasks: cleaned.tasks,
+        evaluationTime: normalizedNow,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
+        labels: board.labels,
+        locations: board.locations,
+        deletedBlock: finalizedDeleted,
+        queueBlock: board.queueBlock,
+        pruneExpiredCompleted: false,
+      ),
+      documentChanged: documentChanged,
     );
   }
 

@@ -13,8 +13,6 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:convert';
-
 import '../models/task_board.dart';
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
@@ -24,6 +22,7 @@ import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import 'tdf_directive_parser.dart';
 import 'tdf_parser.dart';
+import 'tdf_scanner.dart';
 
 /// Byte-exact canonical `tdf 0.8.0` serializer (`spec/TDF_SPEC_0.8.0.md` Section 7).
 abstract final class TdfSerializer {
@@ -686,9 +685,7 @@ abstract final class TdfSerializer {
 
   /// Validates that serialized canonical output does not exceed `MAX_FILE_BYTES` or `MAX_LINE_COUNT` (`TDF-SER-001`).
   static void _validateOutputBounds(String output) {
-    if (output.length > maxTdfFileBytes ||
-        (output.length * 4 > maxTdfFileBytes &&
-            utf8.encode(output).length > maxTdfFileBytes)) {
+    if (!TdfScanner.isUtf8ByteLengthWithinBound(output, maxTdfFileBytes)) {
       _failLimitExceeded(
         'Canonical output exceeds maximum of $maxTdfFileBytes bytes.',
       );

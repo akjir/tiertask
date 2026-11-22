@@ -596,7 +596,49 @@ class TdfPayloadComparison {
     Set<String> deletedLabelsIncoming = const <String>{},
     Set<String>? validLabelIds,
     Map<String, TdfLabel> postCascadeLabelsById = const <String, TdfLabel>{},
+  }) => mergeTaskWithBaselineAndUncleaned(
+    local: local,
+    incoming: incoming,
+    baseline: baseline,
+    evaluationTime: evaluationTime,
+    cleanupMode: cleanupMode,
+    mergedLiveTasksById: mergedLiveTasksById,
+    mergedDeletedTaskIds: mergedDeletedTaskIds,
+    tombstonedLocationIds: tombstonedLocationIds,
+    deletedLabelsLocal: deletedLabelsLocal,
+    deletedLabelsIncoming: deletedLabelsIncoming,
+    validLabelIds: validLabelIds,
+    postCascadeLabelsById: postCascadeLabelsById,
+  ).merged;
+
+  /// Merges [local] and [incoming] in a single pass, returning the finalized task, its uncleaned candidate, and whether an unchanged identity fast path applied.
+  static ({TaskItem merged, TaskItem uncleaned, bool wasUnchangedIdentity})
+  mergeTaskWithBaselineAndUncleaned({
+    required TaskItem local,
+    required TaskItem incoming,
+    required TaskItem? baseline,
+    DateTime? evaluationTime,
+    TdfCleanupMode cleanupMode = TdfCleanupMode.finalStage,
+    Map<String, TaskItem> mergedLiveTasksById = const <String, TaskItem>{},
+    Set<String> mergedDeletedTaskIds = const <String>{},
+    Set<String> tombstonedLocationIds = const <String>{},
+    Set<String> deletedLabelsLocal = const <String>{},
+    Set<String> deletedLabelsIncoming = const <String>{},
+    Set<String>? validLabelIds,
+    Map<String, TdfLabel> postCascadeLabelsById = const <String, TdfLabel>{},
   }) {
+    final canIdentityFastPath =
+        local == incoming &&
+        (baseline == null || local == baseline) &&
+        deletedLabelsLocal.isEmpty &&
+        deletedLabelsIncoming.isEmpty &&
+        tombstonedLocationIds.isEmpty &&
+        (cleanupMode == TdfCleanupMode.deferred ||
+            (local.suspendedAt == null && local.dependencies.isEmpty));
+    if (canIdentityFastPath) {
+      return (merged: local, uncleaned: local, wasUnchangedIdentity: true);
+    }
+
     final normalizedNow = evaluationTime != null
         ? TaskItem.normalizeTimestamp(evaluationTime)
         : null;
@@ -621,9 +663,14 @@ class TdfPayloadComparison {
         : winner;
     if (referenceExisting.completions == candidates.cleaned.completions &&
         compareTaskPayloads(referenceExisting, candidates.cleaned) == 0) {
-      return candidates.cleaned.copyWith(
+      final merged = candidates.cleaned.copyWith(
         modifiedAt: referenceExisting.modifiedAt,
         clearModifiedAt: referenceExisting.modifiedAt == null,
+      );
+      return (
+        merged: merged,
+        uncleaned: candidates.uncleaned,
+        wasUnchangedIdentity: false,
       );
     }
     final bumped = _nextMergedTaskRevision(
@@ -634,7 +681,11 @@ class TdfPayloadComparison {
     if (cleanupMode == TdfCleanupMode.deferred ||
         normalizedNow == null ||
         compareTaskPayloads(candidates.cleaned, candidates.uncleaned) == 0) {
-      return candidates.cleaned.copyWith(modifiedAt: bumped);
+      return (
+        merged: candidates.cleaned.copyWith(modifiedAt: bumped),
+        uncleaned: candidates.uncleaned,
+        wasUnchangedIdentity: false,
+      );
     }
     final withNow = normalizedNow.isAfter(bumped) ? normalizedNow : bumped;
     if (!TdfCalendar.isWithinTimestampBounds(withNow)) {
@@ -644,7 +695,11 @@ class TdfPayloadComparison {
         message: 'Merged revision exceeds maximum supported timestamp.',
       );
     }
-    return candidates.cleaned.copyWith(modifiedAt: withNow);
+    return (
+      merged: candidates.cleaned.copyWith(modifiedAt: withNow),
+      uncleaned: candidates.uncleaned,
+      wasUnchangedIdentity: false,
+    );
   }
 
   /// Computes the merged `(completions, isCompleted, completedAt, repeatRule)` header of [local] and [incoming] for prerequisite pre-normalization.

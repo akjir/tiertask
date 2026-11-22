@@ -1907,5 +1907,73 @@ void main() {
         'Block label condition day with 65 tokens must fail on serialize',
       );
     });
+
+    test('supports unevaluated parsing for sync inputs while preserving exact multi-byte UTF-8 byte-length bounds', () {
+      const sampleDoc =
+          'tdf 0.8.0\n\n'
+          'queue {\n'
+          '    modified 2026-11-01 08:00:00\n'
+          '    task 000003OkD2\n'
+          '}\n\n'
+          'label 000001OkD2 {\n'
+          '    name "Work"\n'
+          '}\n\n'
+          'location 000002OkD2 {\n'
+          '    name        "Office"\n'
+          '    coordinates 48.137154 11.576124\n'
+          '    radius      250\n'
+          '}\n\n'
+          'task 000003OkD2 {\n'
+          '    name     "Scheduled Task"\n'
+          '    created  2026-11-01 08:00\n'
+          '    modified 2026-11-01 08:00\n'
+          '    labels   000001OkD2\n'
+          '}\n';
+      final unevaluated = tdfService.parse(
+        sampleDoc,
+        evaluationTime: fixedDate,
+        evaluateTiers: false,
+      );
+      expect(unevaluated.allTasks, hasLength(1));
+      expect(unevaluated.allTasks.single.id, equals('000003OkD2'));
+      expect(unevaluated.labels, hasLength(1));
+      expect(unevaluated.locations, hasLength(1));
+      expect(unevaluated.queueBlock.taskIds, equals(<String>['000003OkD2']));
+      expect(
+        unevaluated.focus,
+        isEmpty,
+        reason: 'evaluateTiers: false must skip 6-tier evaluation',
+      );
+      expect(tdfService.serialize(unevaluated), equals(sampleDoc));
+
+      // Exact UTF-8 byte boundary with 3-byte BMP and 4-byte astral scalar (surrogate pair):
+      const headerPrefix = 'tdf 0.8.0\n#';
+      const threeByteChar =
+          '\u{20AC}'; // EUR sign: 1 UTF-16 unit, 3 UTF-8 bytes
+      const exactThreeByteCount = (maxTdfFileBytes - headerPrefix.length) ~/ 3;
+      const threeByteRemainder = (maxTdfFileBytes - headerPrefix.length) % 3;
+      final exactThreeByteDoc =
+          '$headerPrefix${threeByteChar * exactThreeByteCount}${'a' * threeByteRemainder}';
+      expect(utf8.encode(exactThreeByteDoc).length, equals(maxTdfFileBytes));
+      expect(
+        tdfService.parse(exactThreeByteDoc, evaluateTiers: false).allTasks,
+        isEmpty,
+        reason: 'Exact 1 MiB 3-byte UTF-8 document must be accepted',
+      );
+      expectRawTdfError('${exactThreeByteDoc}a', TdfErrorKind.limitExceeded);
+
+      const fourByteChar = '\u{1F600}'; // 2 UTF-16 units, 4 UTF-8 bytes
+      const exactFourByteCount = (maxTdfFileBytes - headerPrefix.length) ~/ 4;
+      const fourByteRemainder = (maxTdfFileBytes - headerPrefix.length) % 4;
+      final exactFourByteDoc =
+          '$headerPrefix${fourByteChar * exactFourByteCount}${'a' * fourByteRemainder}';
+      expect(utf8.encode(exactFourByteDoc).length, equals(maxTdfFileBytes));
+      expect(
+        tdfService.parse(exactFourByteDoc, evaluateTiers: false).allTasks,
+        isEmpty,
+        reason: 'Exact 1 MiB 4-byte astral UTF-8 document must be accepted',
+      );
+      expectRawTdfError('${exactFourByteDoc}a', TdfErrorKind.limitExceeded);
+    });
   });
 }
