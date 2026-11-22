@@ -63,6 +63,29 @@ class _CompleterTaskNotifier extends FakeTaskNotifier {
   Future<TaskBoard> build() => completer.future;
 }
 
+/// Task notifier double that suspends [completeTask] on a [Completer] to test mid-flight busy state.
+class _DelayedCompletionTaskNotifier extends FakeTaskNotifier {
+  /// Creates a [_DelayedCompletionTaskNotifier].
+  _DelayedCompletionTaskNotifier(super.initialBoard, this.completionCompleter);
+
+  /// Completer holding [completeTask] open while verifying busy UI state.
+  final Completer<void> completionCompleter;
+
+  @override
+  Future<bool> completeTask(
+    String taskId, {
+    int? expectedCompletions,
+    DateTime? currentDate,
+  }) async {
+    await completionCompleter.future;
+    return super.completeTask(
+      taskId,
+      expectedCompletions: expectedCompletions,
+      currentDate: currentDate,
+    );
+  }
+}
+
 /// Task notifier double that throws an error on initial load and records retry invocations.
 class _FailingTaskNotifier extends FakeTaskNotifier {
   /// Creates a [_FailingTaskNotifier].
@@ -2913,6 +2936,239 @@ void main() {
           closeTo(6.0, 0.5),
           reason: 'First subtask row must follow Auto-finish caption with 6px spacing',
         );
+      },
+    );
+  });
+
+  group('TaskCard collapsed background expansion & exceptions', () {
+    testWidgets(
+      'expands collapsed task card on background click across desktop and compact while preserving complete, downgrade, label pill, and header-only collapse behavior',
+      (tester) async {
+        const label = TdfLabel(id: 'lbl_ops', name: 'Ops', color: '#2196F3');
+        final primaryTask = TaskItem(
+          id: 'tsk_bg',
+          title: 'Ship update',
+          labelIds: const <String>['lbl_ops'],
+          note: 'Release checklist',
+          dueAt: DateTime.utc(2026, 11, 20, 12),
+        );
+        final downgradeTask = TaskItem(
+          id: 'tsk_down',
+          title: 'Downgrade target',
+        );
+        final completeTask = TaskItem(id: 'tsk_done', title: 'Complete target');
+        final board = _buildBoard(
+          tasks: <TaskItem>[primaryTask, downgradeTask, completeTask],
+          labels: const <TdfLabel>[label],
+          queueIds: const <String>['tsk_bg', 'tsk_down', 'tsk_done'],
+        );
+
+        final container = await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: board,
+          nowUtc: _fixedNowUtc,
+        );
+
+        final primaryCardFinder = find.byKey(
+          const ValueKey<String>('task_card_tsk_bg'),
+        );
+        final collapsedRect = tester.getRect(primaryCardFinder);
+
+        // Clicking empty collapsed background beside metadata pills expands the task.
+        await tester.tapAt(
+          Offset(collapsedRect.right - 8.0, collapsedRect.bottom - 6.0),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.task, id: 'tsk_bg')),
+          reason: 'Clicking collapsed task card background beside pills must expand the task',
+        );
+
+        // Once expanded, clicking card padding or expanded body must NOT collapse.
+        final expandedRect = tester.getRect(primaryCardFinder);
+        await tester.tapAt(expandedRect.topLeft + const Offset(4.0, 4.0));
+        await tester.pump();
+        await tester.tapAt(expandedRect.bottomRight - const Offset(6.0, 6.0));
+        await tester.pump();
+        await tester.tap(find.text('Release checklist'));
+        await tester.pump();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.task, id: 'tsk_bg')),
+          reason: 'Clicking expanded task card background or body must keep the card expanded',
+        );
+
+        // Clicking the expanded header title collapses the task as before.
+        await tester.tap(find.text('Ship update'));
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          isNull,
+          reason: 'Clicking expanded task title must still collapse the task',
+        );
+
+        // Clicking outer top padding of a collapsed task expands it.
+        final recollapsedRect = tester.getRect(primaryCardFinder);
+        await tester.tapAt(recollapsedRect.topLeft + const Offset(4.0, 4.0));
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.task, id: 'tsk_bg')),
+          reason: 'Clicking collapsed task card top-left padding must expand the task',
+        );
+        await tester.tap(find.text('Ship update'));
+        await tester.pumpAndSettle();
+
+        // Exception 1: label pill opens Labels manager instead of expanding the task.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_label_chip_tsk_bg_lbl_ops')),
+        );
+        await tester.pumpAndSettle();
+        expect(container.read(shellProvider).view, equals(ShellView.labels));
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.label, id: 'lbl_ops')),
+        );
+        container.read(shellProvider.notifier).navigateBackFromReturnContext();
+        await tester.pumpAndSettle();
+        expect(container.read(shellProvider).expandedEntity, isNull);
+
+        // Metadata pill still expands the task cleanly once.
+        await tester.tap(find.text('Note'));
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.task, id: 'tsk_bg')),
+          reason: 'Clicking collapsed metadata pill must still expand the task',
+        );
+        await tester.tap(find.text('Ship update'));
+        await tester.pumpAndSettle();
+
+        // Exception 2: downgrade button downgrades the task without expanding it.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_downgrade_tsk_down')),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          isNull,
+          reason: 'Clicking downgrade button must not expand the task',
+        );
+
+        // Exception 3: complete button completes the task without expanding it.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_complete_tsk_done')),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          isNull,
+          reason: 'Clicking complete button must not expand the task',
+        );
+        final completedBoard = container.read(taskNotifierProvider).value;
+        expect(
+          completedBoard?.completed.any((task) => task.id == 'tsk_done'),
+          isTrue,
+        );
+
+        // Global Search tier badge (passive pill) also expands via the collapsed card surface.
+        container.read(shellProvider.notifier).openSearch();
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(of: primaryCardFinder, matching: find.text('Focus')),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.task, id: 'tsk_bg')),
+          reason: 'Clicking passive tier pill in Global Search must expand the collapsed task',
+        );
+
+        // Compact viewport (390px) preserves collapsed background expand and header-only collapse.
+        final compactContainer = await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: _buildBoard(
+            tasks: <TaskItem>[primaryTask],
+            labels: const <TdfLabel>[label],
+          ),
+          nowUtc: _fixedNowUtc,
+          surfaceSize: const Size(390, 800),
+        );
+        final compactCardFinder = find.byKey(
+          const ValueKey<String>('task_card_tsk_bg'),
+        );
+        final compactRect = tester.getRect(compactCardFinder);
+        await tester.tapAt(
+          Offset(compactRect.right - 8.0, compactRect.bottom - 6.0),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          compactContainer.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.task, id: 'tsk_bg')),
+          reason:
+              'Compact collapsed task card background tap must expand the task',
+        );
+
+        final compactExpandedRect = tester.getRect(compactCardFinder);
+        await tester.tapAt(
+          compactExpandedRect.bottomRight - const Offset(6.0, 6.0),
+        );
+        await tester.pump();
+        expect(
+          compactContainer.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.task, id: 'tsk_bg')),
+          reason: 'Compact expanded task card background tap must not collapse the task',
+        );
+      },
+    );
+
+    testWidgets(
+      'disabled complete and downgrade buttons absorb taps during in-flight board mutation without expanding collapsed task card',
+      (tester) async {
+        final taskA = TaskItem(id: 'tsk_busy_a', title: 'In-flight task');
+        final taskB = TaskItem(id: 'tsk_busy_b', title: 'Waiting task');
+        final board = _buildBoard(
+          tasks: <TaskItem>[taskA, taskB],
+          queueIds: const <String>['tsk_busy_a', 'tsk_busy_b'],
+        );
+        final completer = Completer<void>();
+        final notifier = _DelayedCompletionTaskNotifier(board, completer);
+
+        final container = await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: board,
+          nowUtc: _fixedNowUtc,
+          taskNotifierFactory: () => notifier,
+        );
+
+        // Start an async completion so boardActionsProvider enters isBusy == true.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_complete_tsk_busy_a')),
+        );
+        await tester.pump();
+
+        // Tap disabled complete and downgrade controls on collapsed taskB mid-flight.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_complete_tsk_busy_b')),
+        );
+        await tester.pump();
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_downgrade_tsk_busy_b')),
+        );
+        await tester.pump();
+
+        expect(
+          container.read(shellProvider).expandedEntity,
+          isNull,
+          reason: 'Disabled complete and downgrade buttons during in-flight save must not leak taps to expand the task card',
+        );
+
+        completer.complete();
+        await tester.pumpAndSettle();
       },
     );
   });

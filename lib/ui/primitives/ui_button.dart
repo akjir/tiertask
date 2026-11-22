@@ -223,7 +223,8 @@ class _UiButtonState extends State<UiButton> {
       },
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: widget.onPressed,
+        excludeFromSemantics: !enabled,
+        onTap: enabled ? widget.onPressed : _ignoreDisabledButtonTap,
         child: Opacity(
           opacity: enabled ? 1.0 : tokens.focus.disabledOpacity,
           child: content,
@@ -667,3 +668,6 @@ class _UiButtonContent extends StatelessWidget {
     );
   }
 }
+
+/// Absorbs pointer taps on disabled [UiButton] instances so they do not bubble to clickable ancestors.
+void _ignoreDisabledButtonTap() {}

@@ -1228,5 +1228,57 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'expands collapsed label card when tapping card background while keeping collapse on header only',
+      (tester) async {
+        final container = await pumpLeafWidget(
+          tester,
+          const Scaffold(body: LabelsView()),
+          board: TaskBoard(
+            labels: const <TdfLabel>[
+              TdfLabel(
+                id: 'lbl_surface',
+                name: 'Backend',
+                color: '#2196F3',
+                note: 'Service endpoints',
+              ),
+            ],
+          ),
+        );
+
+        final cardFinder = find.byKey(
+          const ValueKey<String>('label_card_lbl_surface'),
+        );
+        final collapsedRect = tester.getRect(cardFinder);
+
+        await tester.tapAt(collapsedRect.topRight + const Offset(-4.0, 4.0));
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.label, id: 'lbl_surface')),
+          reason: 'Tapping collapsed label card background padding must expand the card',
+        );
+
+        final expandedRect = tester.getRect(cardFinder);
+        await tester.tapAt(expandedRect.topRight + const Offset(-4.0, 4.0));
+        await tester.pump();
+        await tester.tapAt(expandedRect.bottomRight + const Offset(-8.0, -8.0));
+        await tester.pump();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.label, id: 'lbl_surface')),
+          reason: 'Tapping expanded label card background must not collapse the card',
+        );
+
+        await tester.tap(find.text('Backend'));
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          isNull,
+          reason: 'Tapping expanded label title must still collapse the card',
+        );
+      },
+    );
   });
 }

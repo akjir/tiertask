@@ -14,8 +14,10 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'package:flutter/gestures.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
+import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/primitives/ui_card.dart';
 import 'package:tiertask/ui/primitives/ui_pill.dart';
 import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
@@ -539,6 +541,256 @@ void main() {
           closeTo(stdBodyRight, 0.5),
           reason: 'Standard card header trailing control must align flush with body right edge',
         );
+      },
+    );
+
+    testWidgets(
+      'expands when tapping collapsed card background while excluding interactive controls and keeping collapse on header only',
+      (tester) async {
+        final semanticsHandle = tester.ensureSemantics();
+        try {
+          var expanded = false;
+          var toggleCount = 0;
+          var leadingTapCount = 0;
+          var trailingTapCount = 0;
+          var chipTapCount = 0;
+          var editingTitle = false;
+          var disableControls = false;
+          late StateSetter setOuterState;
+
+          await pumpUiWidget(
+            tester,
+            StatefulBuilder(
+              builder: (context, setState) {
+                setOuterState = setState;
+                return SizedBox(
+                  width: 600.0,
+                  child: UiCard.expandable(
+                    key: const ValueKey<String>('surface_expand_card'),
+                    title: 'Review release checklist',
+                    isExpanded: expanded,
+                    isEditingTitle: editingTitle,
+                    titleEditor: const Text('Title input'),
+                    leading: UiButton(
+                      key: const ValueKey<String>('leading_action_button'),
+                      leadingIcon: Icons.check_circle_outline,
+                      variant: UiButtonVariant.icon,
+                      density: UiButtonDensity.compact,
+                      onPressed: disableControls
+                          ? null
+                          : () => leadingTapCount++,
+                    ),
+                    trailingActions: <Widget>[
+                      UiButton(
+                        key: const ValueKey<String>('trailing_action_button'),
+                        leadingIcon: Icons.chevron_right_rounded,
+                        variant: UiButtonVariant.icon,
+                        density: UiButtonDensity.compact,
+                        onPressed: disableControls
+                            ? null
+                            : () => trailingTapCount++,
+                      ),
+                    ],
+                    collapsedMetadata: Wrap(
+                      spacing: 6.0,
+                      children: <Widget>[
+                        UiPill(
+                          key: const ValueKey<String>('interactive_chip'),
+                          label: 'Label Chip',
+                          variant: UiPillVariant.tag,
+                          onPressed: () => chipTapCount++,
+                        ),
+                        const UiPill(
+                          key: ValueKey<String>('passive_meta_pill'),
+                          label: 'Focus',
+                          variant: UiPillVariant.meta,
+                          tone: UiPillTone.soft,
+                        ),
+                      ],
+                    ),
+                    expandedChild: const SizedBox(
+                      key: ValueKey<String>('expanded_body_area'),
+                      height: 80.0,
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text('Expanded content'),
+                      ),
+                    ),
+                    onToggleExpand: () {
+                      toggleCount++;
+                      setState(() => expanded = !expanded);
+                    },
+                  ),
+                );
+              },
+            ),
+          );
+
+          final cardFinder = find.byKey(
+            const ValueKey<String>('surface_expand_card'),
+          );
+          final cardRect = tester.getRect(cardFinder);
+
+          final collapsedRegion = tester.widget<MouseRegion>(
+            find
+                .descendant(of: cardFinder, matching: find.byType(MouseRegion))
+                .first,
+          );
+          expect(
+            collapsedRegion.cursor,
+            equals(SystemMouseCursors.click),
+            reason:
+                'Collapsed expandable card surface must show clickable cursor',
+          );
+
+          // Enabled leading, trailing, and interactive metadata controls keep their own actions.
+          await tester.tap(
+            find.byKey(const ValueKey<String>('leading_action_button')),
+          );
+          await tester.pump();
+          expect(leadingTapCount, equals(1));
+          expect(expanded, isFalse);
+
+          await tester.tap(
+            find.byKey(const ValueKey<String>('trailing_action_button')),
+          );
+          await tester.pump();
+          expect(trailingTapCount, equals(1));
+          expect(expanded, isFalse);
+
+          await tester.tap(
+            find.byKey(const ValueKey<String>('interactive_chip')),
+          );
+          await tester.pump();
+          expect(chipTapCount, equals(1));
+          expect(expanded, isFalse);
+
+          // Disabled leading and trailing buttons must not leak taps to expand the card.
+          setOuterState(() => disableControls = true);
+          await tester.pump();
+
+          await tester.tap(
+            find.byKey(const ValueKey<String>('leading_action_button')),
+          );
+          await tester.pump();
+          await tester.tap(
+            find.byKey(const ValueKey<String>('trailing_action_button')),
+          );
+          await tester.pump();
+          expect(
+            expanded,
+            isFalse,
+            reason: 'Disabled leading and trailing controls must not bubble taps to card expansion',
+          );
+          expect(toggleCount, equals(0));
+
+          // Tapping passive metadata pill expands via the card surface once.
+          await tester.tap(
+            find.byKey(const ValueKey<String>('passive_meta_pill')),
+          );
+          await tester.pumpAndSettle();
+          expect(expanded, isTrue);
+          expect(toggleCount, equals(1));
+
+          // Expanded card restores default cursor and ignores background/body clicks.
+          final expandedRegion = tester.widget<MouseRegion>(
+            find
+                .descendant(of: cardFinder, matching: find.byType(MouseRegion))
+                .first,
+          );
+          expect(
+            expandedRegion.cursor,
+            equals(MouseCursor.defer),
+            reason: 'Expanded card surface must not advertise a clickable card cursor',
+          );
+
+          final expandedCardRect = tester.getRect(cardFinder);
+          await tester.tapAt(expandedCardRect.topLeft + const Offset(4.0, 4.0));
+          await tester.pump();
+          await tester.tapAt(
+            expandedCardRect.bottomRight - const Offset(4.0, 4.0),
+          );
+          await tester.pump();
+          await tester.tap(find.text('Expanded content'));
+          await tester.pump();
+          await tester.tapAt(
+            tester.getCenter(
+              find.byKey(const ValueKey<String>('expanded_body_area')),
+            ),
+          );
+          await tester.pump();
+          expect(
+            expanded,
+            isTrue,
+            reason: 'Tapping expanded card padding or expanded body must not collapse the card',
+          );
+          expect(toggleCount, equals(1));
+
+          // Header title still collapses the expanded card.
+          await tester.tap(find.text('Review release checklist'));
+          await tester.pumpAndSettle();
+          expect(expanded, isFalse);
+          expect(toggleCount, equals(2));
+
+          // Tapping collapsed card padding corner expands the card.
+          await tester.tapAt(cardRect.topLeft + const Offset(4.0, 4.0));
+          await tester.pumpAndSettle();
+          expect(
+            expanded,
+            isTrue,
+            reason: 'Tapping collapsed card outer padding must expand the card',
+          );
+          expect(toggleCount, equals(3));
+
+          // Collapse again and verify whitespace beside collapsed metadata expands the card.
+          await tester.tap(find.text('Review release checklist'));
+          await tester.pumpAndSettle();
+          expect(expanded, isFalse);
+
+          final refreshedCollapsedRect = tester.getRect(cardFinder);
+          await tester.tapAt(
+            Offset(
+              refreshedCollapsedRect.right - 8.0,
+              refreshedCollapsedRect.bottom - 8.0,
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            expanded,
+            isTrue,
+            reason: 'Tapping collapsed card background next to metadata pills must expand the card',
+          );
+          expect(toggleCount, equals(5));
+
+          // Collapse and verify isEditingTitle suppresses surface expansion.
+          setOuterState(() {
+            expanded = false;
+            editingTitle = true;
+          });
+          await tester.pumpAndSettle();
+          await tester.tapAt(cardRect.topLeft + const Offset(4.0, 4.0));
+          await tester.pump();
+          expect(
+            expanded,
+            isFalse,
+            reason: 'Card surface tap must be disabled while isEditingTitle is true',
+          );
+
+          // Verify outer card semantics does not add a duplicate tap action over child controls.
+          setOuterState(() {
+            expanded = false;
+            editingTitle = false;
+          });
+          await tester.pump();
+          final cardSemantics = tester.getSemantics(cardFinder);
+          expect(
+            cardSemantics.getSemanticsData().hasAction(SemanticsAction.tap),
+            isFalse,
+            reason: 'Card surface GestureDetector must stay excluded from semantics so header and child buttons remain distinct',
+          );
+        } finally {
+          semanticsHandle.dispose();
+        }
       },
     );
   });

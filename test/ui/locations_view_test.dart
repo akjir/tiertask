@@ -1360,5 +1360,62 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'expands collapsed location card when tapping card background while keeping collapse on header only',
+      (tester) async {
+        final container = await pumpLeafWidget(
+          tester,
+          const Scaffold(body: LocationsView()),
+          board: TaskBoard(
+            locations: const <TdfLocation>[
+              TdfLocation(
+                id: 'loc_surface',
+                name: 'Studio',
+                latitude: 52.5200,
+                longitude: 13.4050,
+                radius: 200.0,
+              ),
+            ],
+          ),
+        );
+
+        final cardFinder = find.byKey(
+          const ValueKey<String>('location_card_loc_surface'),
+        );
+        final collapsedRect = tester.getRect(cardFinder);
+
+        await tester.tapAt(
+          collapsedRect.bottomRight + const Offset(-6.0, -6.0),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.location, id: 'loc_surface')),
+          reason:
+              'Tapping collapsed location card background must expand the card',
+        );
+
+        final expandedRect = tester.getRect(cardFinder);
+        await tester.tapAt(expandedRect.topRight + const Offset(-4.0, 4.0));
+        await tester.pump();
+        await tester.tapAt(expandedRect.bottomRight + const Offset(-8.0, -8.0));
+        await tester.pump();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          equals(const EntityRef(kind: EntityKind.location, id: 'loc_surface')),
+          reason: 'Tapping expanded location card background must not collapse the card',
+        );
+
+        await tester.tap(find.text('Studio'));
+        await tester.pumpAndSettle();
+        expect(
+          container.read(shellProvider).expandedEntity,
+          isNull,
+          reason:
+              'Tapping expanded location title must still collapse the card',
+        );
+      },
+    );
   });
 }

@@ -904,7 +904,8 @@ class _TaskCompleteCircleTarget extends StatelessWidget {
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: onTap,
+      excludeFromSemantics: !enabled,
+      onTap: enabled ? onTap : _ignoreDisabledCompleteTap,
       child: Opacity(
         opacity: enabled ? 1.0 : tokens.focus.disabledOpacity,
         child: SizedBox(
@@ -1893,6 +1894,9 @@ Future<ActionResult> _createAndAssignLabelForSheet(
   }
   return result;
 }
+
+/// Absorbs pointer taps on disabled task completion buttons so they do not bubble to collapsed card expansion.
+void _ignoreDisabledCompleteTap() {}
 
 /// Navigates to [entity] in its manager view while preserving Tasks/Search `returnContext`.
 void _openEntityInManager(WidgetRef ref, EntityRef entity) {

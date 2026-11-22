@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Changed external local TDF file watching to desktop platforms only and hid its Settings toggle on Android.
 - Changed expanded entity cards to move delete into the header with a full-width confirmation bar and right-aligned Copy ID.
+- Changed collapsed task, label, and location cards to expand when clicking the card background while keeping collapse on the header.
 
 ### Removed
 

@@ -765,11 +765,18 @@ class _UiExpandableCardState extends State<_UiExpandableCard> {
     final colors = tokens.colors;
     final viewportWidth = MediaQuery.sizeOf(context).width;
     final isCompact = UiBreakpoints.isCompact(viewportWidth);
+    final canExpandFromSurface =
+        !widget.isExpanded &&
+        !widget.isEditingTitle &&
+        widget.onToggleExpand != null;
     final borderColor = !widget.isExpanded && _isHovered
         ? colors.accent
         : colors.line;
 
     return MouseRegion(
+      cursor: canExpandFromSurface
+          ? SystemMouseCursors.click
+          : MouseCursor.defer,
       onEnter: (_) {
         if (!widget.isExpanded && !_isHovered) {
           setState(() => _isHovered = true);
@@ -784,60 +791,67 @@ class _UiExpandableCardState extends State<_UiExpandableCard> {
           _isHovered = false;
         }
       },
-      child: AnimatedContainer(
-        duration: tokens.focus.hoverDuration,
-        padding: widget.padding,
-        decoration: BoxDecoration(
-          color: colors.panel,
-          borderRadius: BorderRadius.circular(tokens.radii.card),
-          border: Border.all(
-            color: borderColor,
-            width: tokens.radii.borderWidth,
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _UiExpandableHeader(
-              title: widget.title,
-              leading: widget.leading,
-              titleEditor: widget.titleEditor,
-              isEditingTitle: widget.isEditingTitle,
-              isExpanded: widget.isExpanded,
-              isCompleted: widget.isCompleted,
-              trailingActions: widget.trailingActions,
-              onToggleExpand: widget.onToggleExpand,
-              showFocusRing: _showFocusRing,
-              toggleSemanticLabel: widget.toggleSemanticLabel,
-              onFocusHighlightChanged: (focused) {
-                if (_showFocusRing != focused) {
-                  setState(() => _showFocusRing = focused);
-                }
-              },
+      child: GestureDetector(
+        behavior: canExpandFromSurface
+            ? HitTestBehavior.opaque
+            : HitTestBehavior.deferToChild,
+        excludeFromSemantics: true,
+        onTap: canExpandFromSurface ? widget.onToggleExpand : null,
+        child: AnimatedContainer(
+          duration: tokens.focus.hoverDuration,
+          padding: widget.padding,
+          decoration: BoxDecoration(
+            color: colors.panel,
+            borderRadius: BorderRadius.circular(tokens.radii.card),
+            border: Border.all(
+              color: borderColor,
+              width: tokens.radii.borderWidth,
             ),
-            if (!widget.isExpanded && widget.collapsedMetadata != null)
-              Padding(
-                padding: EdgeInsets.only(
-                  left: isCompact ? 0.0 : 36.0,
-                  top: 6.0,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              _UiExpandableHeader(
+                title: widget.title,
+                leading: widget.leading,
+                titleEditor: widget.titleEditor,
+                isEditingTitle: widget.isEditingTitle,
+                isExpanded: widget.isExpanded,
+                isCompleted: widget.isCompleted,
+                trailingActions: widget.trailingActions,
+                onToggleExpand: widget.onToggleExpand,
+                showFocusRing: _showFocusRing,
+                toggleSemanticLabel: widget.toggleSemanticLabel,
+                onFocusHighlightChanged: (focused) {
+                  if (_showFocusRing != focused) {
+                    setState(() => _showFocusRing = focused);
+                  }
+                },
+              ),
+              if (!widget.isExpanded && widget.collapsedMetadata != null)
+                Padding(
+                  padding: EdgeInsets.only(
+                    left: isCompact ? 0.0 : 36.0,
+                    top: 6.0,
+                  ),
+                  child: widget.collapsedMetadata,
                 ),
-                child: widget.collapsedMetadata,
-              ),
-            if (_mountAnimatedSize)
-              AnimatedSize(
-                duration: tokens.focus.expandDuration,
-                curve: Curves.easeOut,
-                alignment: Alignment.topCenter,
-                onEnd: _handleExpandAnimationEnd,
-                child: widget.isExpanded && widget.expandedChild != null
-                    ? Padding(
-                        padding: const EdgeInsets.only(top: 10.0),
-                        child: widget.expandedChild,
-                      )
-                    : const SizedBox.shrink(),
-              ),
-          ],
+              if (_mountAnimatedSize)
+                AnimatedSize(
+                  duration: tokens.focus.expandDuration,
+                  curve: Curves.easeOut,
+                  alignment: Alignment.topCenter,
+                  onEnd: _handleExpandAnimationEnd,
+                  child: widget.isExpanded && widget.expandedChild != null
+                      ? Padding(
+                          padding: const EdgeInsets.only(top: 10.0),
+                          child: widget.expandedChild,
+                        )
+                      : const SizedBox.shrink(),
+                ),
+            ],
+          ),
         ),
       ),
     );

@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
@@ -589,6 +590,53 @@ void main() {
             closeTo(600.0, 0.5),
             reason: 'isFullWidth button must span full parent width',
           );
+        }
+      },
+    );
+
+    testWidgets(
+      'absorbs pointer taps when disabled inside a clickable parent without exposing a semantic tap action',
+      (tester) async {
+        final semanticsHandle = tester.ensureSemantics();
+        try {
+          var parentTapCount = 0;
+          await pumpUiWidget(
+            tester,
+            GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              excludeFromSemantics: true,
+              onTap: () => parentTapCount++,
+              child: const Padding(
+                padding: EdgeInsets.all(24.0),
+                child: UiButton(
+                  key: ValueKey<String>('disabled_inside_clickable_parent'),
+                  label: 'Disabled',
+                  onPressed: null,
+                ),
+              ),
+            ),
+          );
+
+          final disabledButtonFinder = find.byKey(
+            const ValueKey<String>('disabled_inside_clickable_parent'),
+          );
+          await tester.tap(disabledButtonFinder);
+          await tester.pump();
+          expect(
+            parentTapCount,
+            equals(0),
+            reason: 'Tapping a disabled UiButton must not bubble through to a clickable ancestor',
+          );
+
+          final buttonSemantics = tester.getSemantics(disabledButtonFinder);
+          expect(
+            buttonSemantics.getSemanticsData().hasAction(SemanticsAction.tap),
+            isFalse,
+            reason:
+                'Disabled UiButton must not advertise a semantic tap action',
+          );
+        } finally {
+          semanticsHandle.dispose();
         }
       },
     );
