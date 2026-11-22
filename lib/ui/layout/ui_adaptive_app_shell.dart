@@ -93,7 +93,7 @@ class UiAdaptiveAppShell extends StatelessWidget {
   /// Scrollable sidebar navigation content.
   final Widget sidebarBody;
 
-  /// Optional top-bordered pinned sidebar footer (e.g. SemVer build string).
+  /// Optional top-bordered scrollable sidebar footer (e.g. SemVer build string).
   final Widget? sidebarFooter;
 
   /// Optional compact-only header placed at the top of the slide-over drawer (e.g. Workspace card).
@@ -413,7 +413,7 @@ class _UiShellBodyStack extends StatelessWidget {
   /// Scrollable sidebar navigation body.
   final Widget sidebarBody;
 
-  /// Pinned sidebar footer.
+  /// Optional scrollable sidebar footer.
   final Widget? sidebarFooter;
 
   /// Compact-only sidebar top header.
@@ -492,7 +492,7 @@ class _UiShellBodyStack extends StatelessWidget {
   }
 }
 
-/// Independent scrollable sidebar surface with optional compact header and pinned top-bordered footer.
+/// Independent scrollable sidebar surface with optional compact header and scrollable bottom footer (`U-LAYOUT-002`).
 class _UiSidebarContainer extends StatelessWidget {
   /// Creates a [_UiSidebarContainer].
   const _UiSidebarContainer({
@@ -505,7 +505,7 @@ class _UiSidebarContainer extends StatelessWidget {
   /// Scrollable navigation sections.
   final Widget body;
 
-  /// Optional bottom-pinned footer.
+  /// Optional scrollable footer aligned to the bottom when navigation content fits.
   final Widget? footer;
 
   /// Optional compact header.
@@ -529,47 +529,109 @@ class _UiSidebarContainer extends StatelessWidget {
           ),
         ),
       ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final minContentHeight = constraints.maxHeight.isFinite
+              ? math.max(0.0, constraints.maxHeight - 28.0)
+              : 0.0;
+          return SingleChildScrollView(
+            controller: scrollController,
+            padding: const EdgeInsets.symmetric(
+              horizontal: 10.0,
+              vertical: 14.0,
+            ),
+            child: _UiSidebarScrollContent(
+              header: header,
+              body: body,
+              footer: footer,
+              minContentHeight: minContentHeight,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Flex column inside the sidebar scroll view pushing [footer] to the bottom when space permits (`margin-top: auto`).
+class _UiSidebarScrollContent extends StatelessWidget {
+  /// Creates a [_UiSidebarScrollContent].
+  const _UiSidebarScrollContent({
+    required this.header,
+    required this.body,
+    required this.footer,
+    required this.minContentHeight,
+  });
+
+  /// Scrollable navigation sections.
+  final Widget body;
+
+  /// Optional scrollable bottom footer.
+  final Widget? footer;
+
+  /// Optional compact header.
+  final Widget? header;
+
+  /// Minimum viewport height excluding vertical scroll padding.
+  final double minContentHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(minHeight: minContentHeight),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: <Widget>[
-          Expanded(
-            child: SingleChildScrollView(
-              controller: scrollController,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10.0,
-                vertical: 14.0,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  if (header case final topHeader?) ...<Widget>[
-                    topHeader,
-                    SizedBox(height: tokens.spacing.space3),
-                  ],
-                  body,
-                ],
-              ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (header case final topHeader?) ...<Widget>[
+                topHeader,
+                SizedBox(height: tokens.spacing.space3),
+              ],
+              body,
+            ],
+          ),
+          if (footer case final scrollFooter?)
+            _UiSidebarFooterBox(child: scrollFooter),
+        ],
+      ),
+    );
+  }
+}
+
+/// Top-bordered scrollable sidebar footer matching `.sidebar-footer` spacing (`16px` top gap, `10px 8px 0` padding).
+class _UiSidebarFooterBox extends StatelessWidget {
+  /// Creates a [_UiSidebarFooterBox].
+  const _UiSidebarFooterBox({required this.child});
+
+  /// Footer content widget.
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+
+    return Padding(
+      padding: EdgeInsets.only(top: tokens.spacing.space4),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(
+              color: colors.line,
+              width: tokens.radii.borderWidth,
             ),
           ),
-          if (footer case final pinnedFooter?)
-            DecoratedBox(
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(
-                    color: colors.line,
-                    width: tokens.radii.borderWidth,
-                  ),
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14.0,
-                  vertical: 10.0,
-                ),
-                child: pinnedFooter,
-              ),
-            ),
-        ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8.0, 10.0, 8.0, 0.0),
+          child: child,
+        ),
       ),
     );
   }

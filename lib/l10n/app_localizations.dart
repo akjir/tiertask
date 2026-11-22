@@ -176,12 +176,6 @@ abstract class AppLocalizations {
   /// **'No completed tasks from the last 30 days.'**
   String get emptyCompletedHint;
 
-  /// Tooltip for the WebDAV synchronization button in the app bar.
-  ///
-  /// In en, this message translates to:
-  /// **'Synchronize with WebDAV'**
-  String get tooltipSyncWebDav;
-
   /// Button label to close a dialog.
   ///
   /// In en, this message translates to:
@@ -2678,16 +2672,16 @@ abstract class AppLocalizations {
   /// **'Sync error'**
   String get syncStatusError;
 
-  /// Title for the Raw TDF 0.8.0 preview view.
+  /// Title and sidebar label for the serialized TDF source preview view.
   ///
   /// In en, this message translates to:
-  /// **'Raw TDF 0.8.0'**
+  /// **'TDF Source'**
   String get rawTdfPreviewTitle;
 
-  /// Subtitle for the Raw TDF 0.8.0 preview view.
+  /// Subtitle for the serialized TDF source preview view.
   ///
   /// In en, this message translates to:
-  /// **'Canonical LF-terminated TDF 0.8.0 serialization of the current workspace board.'**
+  /// **'Canonical LF-terminated TDF serialization of the current workspace board.'**
   String get rawTdfPreviewSubtitle;
 
   /// Telemetry summary showing byte and line counts of the serialized TDF document.

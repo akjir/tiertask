@@ -36,7 +36,7 @@ import '../tokens/ui_typography_tokens.dart';
 /// Minimum body height for flex-expanded layout before falling back to outer vertical scrolling.
 const double _minFlexBodyHeight = 440.0;
 
-/// Full-height canonical Raw `TDF 0.8.0` preview view with byte/line telemetry,
+/// Full-height canonical TDF source preview view with byte/line telemetry,
 /// clipboard copy action, and Section 6.2 limit-exceeded alert (`U-UX-007`).
 class RawTdfView extends ConsumerWidget {
   /// Creates a [RawTdfView].

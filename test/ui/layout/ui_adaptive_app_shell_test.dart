@@ -436,5 +436,137 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'scrolls sidebarFooter inside sidebar when content overflows and aligns it to the bottom when content fits',
+      (tester) async {
+        const cases = <(String, Size, bool)>[
+          ('desktop persistent sidebar', Size(1280, 500), false),
+          ('compact slide-over drawer', Size(390, 500), true),
+        ];
+
+        for (final (label, size, isCompact) in cases) {
+          final overflowingController = ScrollController();
+          addTearDown(overflowingController.dispose);
+
+          await pumpUiWidget(
+            tester,
+            UiAdaptiveAppShell(
+              brand: const Text('TierTask'),
+              sidebarHeader: const Text('Compact Workspace'),
+              sidebarScrollController: overflowingController,
+              isDrawerOpen: isCompact,
+              sidebarBody: Column(
+                children: <Widget>[
+                  for (var i = 0; i < 24; i++)
+                    SizedBox(height: 36.0, child: Text('Nav item $i')),
+                ],
+              ),
+              sidebarFooter: const Text(
+                'Version 0.4.0',
+                key: ValueKey<String>('test_sidebar_footer'),
+              ),
+              body: const Text('Main'),
+            ),
+            surfaceSize: size,
+            wrapInScaffold: false,
+          );
+
+          final footerFinder = find.byKey(
+            const ValueKey<String>('test_sidebar_footer'),
+          );
+          final initialFooterTop = tester.getTopLeft(footerFinder).dy;
+          expect(
+            overflowingController.position.maxScrollExtent,
+            greaterThan(0.0),
+            reason: '$label with 24 nav items must scroll vertically',
+          );
+          expect(
+            initialFooterTop,
+            greaterThan(size.height),
+            reason:
+                '$label sidebarFooter must not be sticky above overflowing content at scroll offset 0',
+          );
+
+          final maxExtent = overflowingController.position.maxScrollExtent;
+          overflowingController.jumpTo(maxExtent);
+          await tester.pump();
+
+          final scrolledFooterRect = tester.getRect(footerFinder);
+          expect(
+            initialFooterTop - scrolledFooterRect.top,
+            closeTo(maxExtent, 0.5),
+            reason: '$label sidebarFooter must move with sidebar scroll offset',
+          );
+          expect(
+            scrolledFooterRect.bottom,
+            closeTo(size.height - 14.0, 0.5),
+            reason:
+                '$label sidebarFooter must rest on the 14px bottom scroll padding at max scroll',
+          );
+
+          // Short content: footer aligns to the bottom (CSS margin-top: auto) without scrolling.
+          final fittingController = ScrollController();
+          addTearDown(fittingController.dispose);
+
+          await pumpUiWidget(
+            tester,
+            UiAdaptiveAppShell(
+              brand: const Text('TierTask'),
+              sidebarHeader: const Text('Compact Workspace'),
+              sidebarScrollController: fittingController,
+              isDrawerOpen: isCompact,
+              sidebarBody: const SizedBox(height: 80.0, child: Text('Short')),
+              sidebarFooter: const Text(
+                'Version 0.4.0',
+                key: ValueKey<String>('test_sidebar_footer'),
+              ),
+              body: const Text('Main'),
+            ),
+            surfaceSize: size,
+            wrapInScaffold: false,
+          );
+
+          expect(
+            fittingController.position.maxScrollExtent,
+            equals(0.0),
+            reason: '$label with short content must not overflow vertically',
+          );
+          expect(
+            tester.getRect(footerFinder).bottom,
+            closeTo(size.height - 14.0, 0.5),
+            reason:
+                '$label with short content must push sidebarFooter to the bottom (margin-top: auto)',
+          );
+
+          // Omitting sidebarFooter keeps top content anchored at the top padding.
+          await pumpUiWidget(
+            tester,
+            UiAdaptiveAppShell(
+              brand: const Text('TierTask'),
+              isDrawerOpen: isCompact,
+              sidebarBody: const SizedBox(
+                key: ValueKey<String>('test_sidebar_top_only'),
+                height: 40.0,
+                child: Text('Top Only'),
+              ),
+              body: const Text('Main'),
+            ),
+            surfaceSize: size,
+            wrapInScaffold: false,
+          );
+          expect(
+            tester
+                .getTopLeft(
+                  find.byKey(const ValueKey<String>('test_sidebar_top_only')),
+                )
+                .dy,
+            closeTo(76.0, 1.0),
+            reason:
+                '$label without sidebarFooter must keep sidebarBody aligned at top padding below 62px chrome',
+          );
+        }
+      },
+    );
   });
 }

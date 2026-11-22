@@ -123,7 +123,7 @@ Use one canonical, non-overlapping viewport width partition (`UiBreakpoints`):
 - **`expanded`:** `width > 820`
 
 ### `U-LAYOUT-002` Persistent Sidebar vs Compact Slide-Over Drawer
-- **`medium` and `expanded` (`> 720`):** Render a persistent `244px` left sidebar with independent vertical scrolling and a bottom-pinned version footer.
+- **`medium` and `expanded` (`> 720`):** Render a persistent `244px` left sidebar with independent vertical scrolling and a scrollable bottom version footer aligned to the bottom when navigation content fits.
 - **`compact` (`<= 720`):** Hide the persistent rail and present the sidebar as a slide-over drawer (`width = min(300, 92% viewport)`) anchored below the `62px` top chrome bar over a translucent `scrim` backdrop. Selecting any navigation item or tapping the scrim closes the drawer.
 
 ### `U-LAYOUT-003` Top Chrome Bar & Compact Adaptations
@@ -160,7 +160,7 @@ Render the in-app TierTask mark exclusively as three left-aligned stepped horizo
 
 ### `U-BRAND-002` Build Profile & Version Chrome
 - Display an inline `DEV` pill (`10px` bold mono, `warningBg`/`warning`/`warningBorder`, `radiusTag`) immediately after the Workspace switcher pill on desktop (`> 720px`) and beside the `TierTask` brand wordmark on compact (`<= 720px`) whenever `AppBuildProfile.isDev` is true.
-- Pin the monospace SemVer build string (`Version X.Y.Z` at full opacity + `+<hash>` at `0.65` opacity) to the bottom of the sidebar/drawer separated by a top `1px` `line` border.
+- Render the monospace SemVer build string (`Version X.Y.Z` at full opacity + `+<hash>` at `0.65` opacity) as a non-sticky footer inside the scrollable sidebar/drawer separated by a top `1px` `line` border, aligned to the bottom when navigation content fits and scrolling naturally below `Tools` when navigation overflows.
 
 ### `U-BRAND-003` Offline Stroke Icon Standard
 Use crisp, uniform outline stroke icons (`1.75` stroke weight, rounded caps and joins, zero external network assets) in four standard sizes: `13px` (badges, compact buttons, add chips, row controls), `15px` (standard buttons, section titles, banners, toasts, chrome pills, card actions), `18px` (sidebar navigation, primary chrome icons, modal close, location lead), and `34px` (full-screen error hero icon).
@@ -288,7 +288,7 @@ Collapsed Label cards show Scope -> `<N> open` -> Note -> Links -> Conditions. C
 - **Labels & Locations Sections:** Eyebrow header shows total count (and active label color dot for Labels) ONLY while collapsed. Right-aligned 3-icon action cluster (`26px` desktop, `34px` compact): `Filter`, `Manage` (pencil), and `Collapse/Expand` (chevron).
 - **Filter Interaction:** Toggling `Filter` while collapsed auto-expands the section, reveals the inline search input, and focuses it. Toggling `Filter` off or collapsing the section closes and clears the filter query.
 - **Row Layout:** Labels always lead with `All Tasks`, followed by alphabetically sorted rows split into primary filter selection (dot, name, `Scoped Queue` subtitle, open count) and trailing `info` hub link. Locations sort alphabetically with single-button hub navigation and open task count.
-- **Tools Section:** Conditionally show `Sync with WebDAV` (only when `storageMode` includes WebDAV) and `Diagnostic Log` (only when `diagnosticsEnabled`), alongside `Raw TDF 0.8.0` and `Settings`.
+- **Tools Section:** Conditionally show `Diagnostic Log` (only when `diagnosticsEnabled`), alongside `TDF Source` and `Settings` (manual synchronization is triggered from the top chrome Sync button or Settings).
 
 ### `U-UX-002` Context-Preserving Back Navigation (`returnContext`)
 Navigating to a Label or Location card from Tasks or Search (via task chips, expanded chips, sidebar info buttons, picker info buttons, or condition location chips) MUST save `{ view, tier, label, searchOpen, searchQuery, expandedEntity }`. The destination view renders `Back to search` (when `searchOpen` was true) or `Back to tasks`, restoring full context and scrolling back to the previously expanded task. Direct top-level chrome or sidebar navigation clears `returnContext`.

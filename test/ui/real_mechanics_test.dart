@@ -2264,7 +2264,7 @@ task loc100OkD2 priority {
         );
 
         // Open RawTdfView via the sidebar navigation link.
-        await tester.tap(find.text('Raw TDF 0.8.0'));
+        await tester.tap(find.text('TDF Source'));
         await tester.pumpAndSettle();
 
         expect(find.byType(RawTdfView), findsOneWidget);
@@ -2326,7 +2326,7 @@ task loc100OkD2 priority {
         );
 
         // Re-opening RawTdfView recomputes fresh serialized output once.
-        await tester.tap(find.text('Raw TDF 0.8.0'));
+        await tester.tap(find.text('TDF Source'));
         await tester.pumpAndSettle();
         expect(
           countingTdfService.serializeCalls,

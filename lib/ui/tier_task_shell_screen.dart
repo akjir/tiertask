@@ -1118,7 +1118,7 @@ class _SidebarLocationsSection extends ConsumerWidget {
   }
 }
 
-/// Tools sidebar section with conditional WebDAV sync and Diagnostic Log entries (`U-UX-001`).
+/// Tools sidebar section with conditional Diagnostic Log, Raw TDF, and Settings entries (`U-UX-001`).
 class _SidebarToolsSection extends ConsumerWidget {
   /// Creates a [_SidebarToolsSection].
   const _SidebarToolsSection();
@@ -1127,11 +1127,6 @@ class _SidebarToolsSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final view = ref.watch(shellProvider.select((shell) => shell.view));
-    final showSyncWebDav = ref.watch(
-      webDavConfigProvider.select(
-        (config) => config.asData?.value.storageMode.usesWebDav ?? false,
-      ),
-    );
     final showDiagnosticLog = ref.watch(diagnosticsEnabledProvider);
 
     return UiSidebarSection(
@@ -1139,16 +1134,15 @@ class _SidebarToolsSection extends ConsumerWidget {
       showTopDivider: true,
       items: _buildToolItems(
         view: view,
-        showSyncWebDav: showSyncWebDav,
         showDiagnosticLog: showDiagnosticLog,
         localizations: localizations,
-        ref: ref,
+        notifier: ref.read(shellProvider.notifier),
       ),
     );
   }
 }
 
-/// Pinned SemVer build string footer at the bottom of the sidebar/drawer (`U-BRAND-002`).
+/// Scrollable SemVer build string footer inside the sidebar/drawer (`U-BRAND-002`).
 class _ShellSidebarFooter extends ConsumerWidget {
   /// Creates a [_ShellSidebarFooter].
   const _ShellSidebarFooter();
@@ -1336,26 +1330,14 @@ List<UiSidebarNavItem> _buildLocationItems({
   return items;
 }
 
-/// Builds conditional sync, log, raw TDF, and settings navigation items.
+/// Builds conditional Diagnostic Log, Raw TDF, and Settings navigation items.
 List<UiSidebarNavItem> _buildToolItems({
   required ShellView view,
-  required bool showSyncWebDav,
   required bool showDiagnosticLog,
   required AppLocalizations localizations,
-  required WidgetRef ref,
+  required ShellNotifier notifier,
 }) {
-  final notifier = ref.read(shellProvider.notifier);
   return <UiSidebarNavItem>[
-    if (showSyncWebDav)
-      UiSidebarNavItem(
-        id: 'tool_sync_webdav',
-        label: localizations.tooltipSyncWebDav,
-        icon: Icons.sync_rounded,
-        onTap: () {
-          notifier.setCompactDrawerOpen(false);
-          unawaited(ref.read(syncActionsProvider.notifier).syncNow());
-        },
-      ),
     if (showDiagnosticLog)
       UiSidebarNavItem(
         id: 'tool_diagnostic_log',

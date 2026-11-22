@@ -912,7 +912,14 @@ void main() {
           board: board,
         );
 
-        expect(find.text('Raw TDF 0.8.0'), findsOneWidget);
+        expect(find.text('TDF Source'), findsOneWidget);
+        expect(find.text('Raw TDF 0.8.0'), findsNothing);
+        expect(
+          find.text(
+            'Canonical LF-terminated TDF serialization of the current workspace board.',
+          ),
+          findsOneWidget,
+        );
         expect(
           find.byKey(const ValueKey<String>('raw_tdf_stats_card')),
           findsOneWidget,

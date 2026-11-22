@@ -51,9 +51,6 @@ class AppLocalizationsDe extends AppLocalizations {
       'Keine erledigten Aufgaben der letzten 30 Tage.';
 
   @override
-  String get tooltipSyncWebDav => 'Mit WebDAV synchronisieren';
-
-  @override
   String get actionClose => 'Schließen';
 
   @override
@@ -1504,7 +1501,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get syncStatusError => 'Sync-Fehler';
 
   @override
-  String get rawTdfPreviewTitle => 'Raw TDF 0.8.0';
+  String get rawTdfPreviewTitle => 'TDF-Quelltext';
 
   @override
   String get rawTdfPreviewSubtitle =>

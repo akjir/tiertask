@@ -120,8 +120,8 @@ void main() {
         expect(find.text('+4.abc1234'), findsOneWidget);
         expect(find.text('Write Phase 3 Shell'), findsOneWidget);
 
-        // Route via Tools sidebar to Raw TDF, Diagnostic Log, and Settings.
-        await tester.tap(find.text('Raw TDF 0.8.0'));
+        // Route via Tools sidebar to TDF Source, Diagnostic Log, and Settings.
+        await tester.tap(find.text('TDF Source'));
         await tester.pumpAndSettle();
         expect(container.read(shellProvider).view, equals(ShellView.rawTdf));
 
@@ -266,7 +266,16 @@ void main() {
 
         expect(find.text('Alle Aufgaben'), findsWidgets);
         expect(find.text('Einstellungen'), findsWidgets);
-        expect(find.text('Raw TDF 0.8.0'), findsOneWidget);
+        expect(find.text('TDF-Quelltext'), findsOneWidget);
+
+        await tester.tap(find.text('TDF-Quelltext'));
+        await tester.pumpAndSettle();
+        expect(container.read(shellProvider).view, equals(ShellView.rawTdf));
+        expect(
+          find.text('TDF-Quelltext'),
+          findsNWidgets(2),
+          reason: 'German TDF-Quelltext must appear in both the sidebar and page title',
+        );
 
         // Open Settings and trigger system back via PopScope -> returns to Tasks.
         container.read(shellProvider.notifier).openView(ShellView.settings);
@@ -567,6 +576,110 @@ void main() {
             findsNothing,
             reason: 'Android size $size must omit desktop chrome drag gestures',
           );
+        }
+      },
+    );
+
+    testWidgets(
+      'omits sidebar WebDAV sync button across all storage modes and scrolls version footer inside sidebar',
+      (tester) async {
+        final boardWithManyLabels = TaskBoard.evaluate(
+          tasks: const <TaskItem>[],
+          labels: <TdfLabel>[
+            for (var i = 0; i < 16; i++)
+              TdfLabel(
+                id: 'lbl${i.toString().padLeft(7, '0')}',
+                name: 'Label ${i.toString().padLeft(2, '0')}',
+                modifiedAt: fixedNow,
+              ),
+          ],
+          locations: const <TdfLocation>[],
+          queueBlock: TdfQueueBlock(
+            modifiedAt: fixedNow,
+            taskIds: const <String>[],
+          ),
+          evaluationTime: fixedNow,
+          localEvaluationTime: fixedNow,
+        );
+
+        for (final mode in StorageMode.values) {
+          for (final isCompact in const <bool>[false, true]) {
+            final size = isCompact
+                ? const Size(390, 560)
+                : const Size(1280, 560);
+            await pumpLeafWidget(
+              tester,
+              const TierTaskShellScreen(),
+              board: boardWithManyLabels,
+              config: WebDavConfig(
+                language: AppLanguage.english,
+                diagnosticsEnabled: true,
+                storageMode: mode,
+                serverUrl: 'https://cloud.example.com',
+                username: 'alice',
+                password: 'secret',
+              ),
+              surfaceSize: size,
+            );
+
+            if (isCompact) {
+              await tester.tap(find.byTooltip('Open menu'));
+              await tester.pumpAndSettle();
+            }
+
+            expect(
+              find.byKey(const ValueKey<String>('tool_sync_webdav')),
+              findsNothing,
+              reason:
+                  'StorageMode.$mode (compact=$isCompact) must not render a sync button in the sidebar',
+            );
+            expect(
+              find.text('Synchronize with WebDAV'),
+              findsNothing,
+              reason:
+                  'StorageMode.$mode (compact=$isCompact) must omit sidebar WebDAV sync label',
+            );
+            expect(
+              find.byKey(const ValueKey<String>('chrome_sync_button')),
+              findsOneWidget,
+              reason:
+                  'StorageMode.$mode (compact=$isCompact) keeps top chrome Sync button',
+            );
+            expect(
+              find.byKey(const ValueKey<String>('tool_diagnostic_log')),
+              findsOneWidget,
+              reason:
+                  'StorageMode.$mode (compact=$isCompact) keeps Diagnostic Log tool row',
+            );
+            expect(
+              find.byKey(const ValueKey<String>('tool_raw_tdf')),
+              findsOneWidget,
+              reason:
+                  'StorageMode.$mode (compact=$isCompact) keeps Raw TDF tool row',
+            );
+            expect(
+              find.byKey(const ValueKey<String>('tool_settings')),
+              findsOneWidget,
+              reason:
+                  'StorageMode.$mode (compact=$isCompact) keeps Settings tool row',
+            );
+
+            final versionFinder = find.text('Version 0.4.0');
+            expect(
+              tester.getTopLeft(versionFinder).dy,
+              greaterThan(size.height),
+              reason:
+                  'StorageMode.$mode (compact=$isCompact) version footer must not be sticky when sidebar overflows',
+            );
+            await tester.ensureVisible(versionFinder);
+            await tester.pumpAndSettle();
+            expect(
+              tester.getRect(versionFinder).bottom,
+              lessThanOrEqualTo(size.height),
+              reason:
+                  'StorageMode.$mode (compact=$isCompact) version footer must scroll into view',
+            );
+          }
         }
       },
     );

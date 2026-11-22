@@ -52,10 +52,6 @@
   "@emptyCompletedHint": {
     "description": "Empty-state hint shown when tier 6 (Completed) contains no tasks."
   },
-  "tooltipSyncWebDav": "Synchronize with WebDAV",
-  "@tooltipSyncWebDav": {
-    "description": "Tooltip for the WebDAV synchronization button in the app bar."
-  },
   "actionClose": "Close",
   "@actionClose": {
     "description": "Button label to close a dialog."
@@ -2009,13 +2005,13 @@
   "@syncStatusError": {
     "description": "Chrome sync status label on sync failure."
   },
-  "rawTdfPreviewTitle": "Raw TDF 0.8.0",
+  "rawTdfPreviewTitle": "TDF Source",
   "@rawTdfPreviewTitle": {
-    "description": "Title for the Raw TDF 0.8.0 preview view."
+    "description": "Title and sidebar label for the serialized TDF source preview view."
   },
-  "rawTdfPreviewSubtitle": "Canonical LF-terminated TDF 0.8.0 serialization of the current workspace board.",
+  "rawTdfPreviewSubtitle": "Canonical LF-terminated TDF serialization of the current workspace board.",
   "@rawTdfPreviewSubtitle": {
-    "description": "Subtitle for the Raw TDF 0.8.0 preview view."
+    "description": "Subtitle for the serialized TDF source preview view."
   },
   "rawTdfStatsSummary": "{bytes} bytes / 1 MiB · {lines} lines / 16,384 max",
   "@rawTdfStatsSummary": {

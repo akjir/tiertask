@@ -50,9 +50,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get emptyCompletedHint => 'No completed tasks from the last 30 days.';
 
   @override
-  String get tooltipSyncWebDav => 'Synchronize with WebDAV';
-
-  @override
   String get actionClose => 'Close';
 
   @override
@@ -1474,11 +1471,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get syncStatusError => 'Sync error';
 
   @override
-  String get rawTdfPreviewTitle => 'Raw TDF 0.8.0';
+  String get rawTdfPreviewTitle => 'TDF Source';
 
   @override
   String get rawTdfPreviewSubtitle =>
-      'Canonical LF-terminated TDF 0.8.0 serialization of the current workspace board.';
+      'Canonical LF-terminated TDF serialization of the current workspace board.';
 
   @override
   String rawTdfStatsSummary(String bytes, String lines) {
