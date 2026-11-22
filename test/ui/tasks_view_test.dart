@@ -2739,5 +2739,181 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'omits progress bar in read-only Subtasks section and matches Note/Links header-to-body spacing',
+      (tester) async {
+        final standardTask = TaskItem(
+          id: 'tsk_sub_std',
+          title: 'Subtasks spacing task',
+          note: 'Reference note body',
+          links: const <TaskLink>[
+            TaskLink(title: 'Docs', uri: 'https://example.com/docs'),
+          ],
+          subtasks: const <SubtaskItem>[
+            SubtaskItem(title: 'Step one', isCompleted: true),
+            SubtaskItem(title: 'Step two', isCompleted: true),
+            SubtaskItem(title: 'Step three', isCompleted: true),
+            SubtaskItem(title: 'Step four'),
+            SubtaskItem(title: 'Step five'),
+          ],
+        );
+        final autoFinishTask = TaskItem(
+          id: 'tsk_sub_auto',
+          title: 'Auto-finish subtasks task',
+          subtasksAutoFinish: true,
+          subtasks: const <SubtaskItem>[
+            SubtaskItem(title: 'Auto step one', isCompleted: true),
+            SubtaskItem(title: 'Auto step two'),
+          ],
+        );
+        final board = _buildBoard(
+          tasks: <TaskItem>[standardTask, autoFinishTask],
+          queueIds: const <String>['tsk_sub_std', 'tsk_sub_auto'],
+        );
+
+        await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: board,
+          nowUtc: _fixedNowUtc,
+        );
+
+        await tester.tap(find.text('Subtasks spacing task'));
+        await tester.pumpAndSettle();
+
+        final noteSection = find.byKey(
+          const ValueKey<String>('task_section_note_tsk_sub_std'),
+        );
+        final linksSection = find.byKey(
+          const ValueKey<String>('task_section_links_tsk_sub_std'),
+        );
+        final subtasksReadCard = find.byKey(
+          const ValueKey<String>('task_subtasks_read_tsk_sub_std'),
+        );
+
+        expect(subtasksReadCard, findsOneWidget);
+        expect(find.text('3 of 5 completed'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: subtasksReadCard,
+            matching: find.byType(FractionallySizedBox),
+          ),
+          findsNothing,
+          reason: 'Read-only Subtasks card must not render a progress bar line',
+        );
+
+        final tokens = UiThemePresets.calm.light;
+        final noteHeaderBottom = tester
+            .getRect(
+              find
+                  .descendant(of: noteSection, matching: find.byType(Row))
+                  .first,
+            )
+            .bottom;
+        final noteBodyTop = tester
+            .getRect(find.text('Reference note body'))
+            .top;
+        final noteGap = noteBodyTop - noteHeaderBottom;
+
+        final linksHeaderBottom = tester
+            .getRect(
+              find
+                  .descendant(of: linksSection, matching: find.byType(Row))
+                  .first,
+            )
+            .bottom;
+        final firstLinkTop = tester
+            .getRect(
+              find
+                  .ancestor(
+                    of: find.text('Docs'),
+                    matching: find.byType(AnimatedContainer),
+                  )
+                  .first,
+            )
+            .top;
+        final linksGap = firstLinkTop - linksHeaderBottom;
+
+        final subtasksHeaderBottom = tester
+            .getRect(
+              find
+                  .descendant(of: subtasksReadCard, matching: find.byType(Row))
+                  .first,
+            )
+            .bottom;
+        final firstSubtaskTop = tester
+            .getRect(
+              find.byKey(
+                const ValueKey<String>('task_subtask_toggle_tsk_sub_std_0'),
+              ),
+            )
+            .top;
+        final subtasksGap = firstSubtaskTop - subtasksHeaderBottom;
+
+        expect(
+          subtasksGap,
+          closeTo(tokens.spacing.space2, 0.5),
+          reason: 'Subtasks header-to-first-row gap must match UiCard.inset space2 token',
+        );
+        expect(
+          subtasksGap,
+          closeTo(noteGap, 0.5),
+          reason: 'Subtasks header-to-body gap must match Note section gap',
+        );
+        expect(
+          subtasksGap,
+          closeTo(linksGap, 0.5),
+          reason: 'Subtasks header-to-body gap must match Links section gap',
+        );
+
+        // Collapse standard task so the lazy list brings auto-finish task into view.
+        await tester.tap(find.text('Subtasks spacing task'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Auto-finish subtasks task'));
+        await tester.pumpAndSettle();
+
+        final autoReadCard = find.byKey(
+          const ValueKey<String>('task_subtasks_read_tsk_sub_auto'),
+        );
+        expect(autoReadCard, findsOneWidget);
+        expect(
+          find.descendant(
+            of: autoReadCard,
+            matching: find.byType(FractionallySizedBox),
+          ),
+          findsNothing,
+          reason:
+              'Auto-finish Subtasks card must not render a progress bar line',
+        );
+        final autoHeaderBottom = tester
+            .getRect(
+              find
+                  .descendant(of: autoReadCard, matching: find.byType(Row))
+                  .first,
+            )
+            .bottom;
+        final autoCaptionRect = tester.getRect(
+          find.text('Auto-finish enabled'),
+        );
+        final autoFirstToggleTop = tester
+            .getRect(
+              find.byKey(
+                const ValueKey<String>('task_subtask_toggle_tsk_sub_auto_0'),
+              ),
+            )
+            .top;
+        expect(
+          autoCaptionRect.top - autoHeaderBottom,
+          closeTo(tokens.spacing.space2, 0.5),
+          reason: 'Auto-finish caption must sit directly below header by space2 without extra top gap',
+        );
+        expect(
+          autoFirstToggleTop - autoCaptionRect.bottom,
+          closeTo(6.0, 0.5),
+          reason: 'First subtask row must follow Auto-finish caption with 6px spacing',
+        );
+      },
+    );
   });
 }

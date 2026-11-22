@@ -1006,33 +1006,6 @@ class _SubtaskEditRow extends StatelessWidget {
   }
 }
 
-/// Horizontal `6px` accent progress bar displayed inside read-only [TaskSubtasksSection].
-class _SubtaskProgressBar extends StatelessWidget {
-  /// Creates a [_SubtaskProgressBar].
-  const _SubtaskProgressBar({required this.ratio});
-
-  /// Normalized completion ratio (`0.0..1.0`).
-  final double ratio;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(tokens.radii.pill),
-      child: Container(
-        height: 6.0,
-        color: colors.line,
-        alignment: Alignment.centerLeft,
-        child: FractionallySizedBox(
-          widthFactor: ratio.clamp(0.0, 1.0),
-          child: ColoredBox(color: colors.accent),
-        ),
-      ),
-    );
-  }
-}
-
 /// Inset card frame and count header for [TaskHistorySection].
 class _TaskHistoryCardShell extends StatelessWidget {
   /// Creates a [_TaskHistoryCardShell].
@@ -1979,18 +1952,14 @@ class _TaskSubtasksEditShell extends StatelessWidget {
   }
 }
 
-/// Progress bar, auto-finish note, and live subtask checkboxes inside [_TaskSubtasksReadCard].
+/// Auto-finish note and live subtask checkboxes inside [_TaskSubtasksReadCard].
 class _TaskSubtasksReadBody extends StatelessWidget {
   /// Creates a [_TaskSubtasksReadBody].
   const _TaskSubtasksReadBody({
     required this.task,
-    required this.completedCount,
     required this.isBusy,
     required this.onToggleSubtask,
   });
-
-  /// Number of completed subtask steps on [task].
-  final int completedCount;
 
   /// Whether a task mutation is in flight.
   final bool isBusy;
@@ -2005,23 +1974,18 @@ class _TaskSubtasksReadBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final ratio = task.subtasks.isEmpty
-        ? 0.0
-        : completedCount / task.subtasks.length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        _SubtaskProgressBar(ratio: ratio),
         if (task.subtasksAutoFinish) ...<Widget>[
-          const SizedBox(height: 6.0),
           Text(
             localizations.taskInfoSubtasksAutoFinishSuffix,
             style: tokens.typography.meta.copyWith(color: tokens.colors.muted),
           ),
+          const SizedBox(height: 6.0),
         ],
-        const SizedBox(height: 6.0),
         for (var i = 0; i < task.subtasks.length; i++)
           UiToggleRow(
             key: ValueKey<String>('task_subtask_toggle_${task.id}_$i'),
@@ -2038,7 +2002,7 @@ class _TaskSubtasksReadBody extends StatelessWidget {
   }
 }
 
-/// Read-only display card with live checkboxes and `6px` progress bar for [TaskSubtasksSection].
+/// Read-only display card with live checkboxes for [TaskSubtasksSection].
 class _TaskSubtasksReadCard extends StatelessWidget {
   /// Creates a [_TaskSubtasksReadCard].
   const _TaskSubtasksReadCard({
@@ -2089,7 +2053,6 @@ class _TaskSubtasksReadCard extends StatelessWidget {
             ),
       child: _TaskSubtasksReadBody(
         task: task,
-        completedCount: completedCount,
         isBusy: isBusy,
         onToggleSubtask: onToggleSubtask,
       ),

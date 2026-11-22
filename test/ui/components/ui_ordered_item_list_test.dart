@@ -22,7 +22,7 @@ import '../test_helpers.dart';
 void main() {
   group('UiOrderedItemList', () {
     testWidgets(
-      'renders progress bar, boundary-disabled reorder buttons, editing highlight, and edit/delete callbacks',
+      'renders header, boundary-disabled reorder buttons, editing highlight, and edit/delete callbacks',
       (tester) async {
         final items = <String>['Alpha', 'Beta', 'Gamma'];
         (int, int)? lastReorder;
@@ -36,7 +36,6 @@ void main() {
             child: UiOrderedItemList<String>(
               title: 'Subtasks',
               countLabel: '1 / 3',
-              progressValue: 1 / 3,
               items: items,
               editingIndex: 1,
               itemKey: (item, index) => ValueKey<String>('item_$item'),

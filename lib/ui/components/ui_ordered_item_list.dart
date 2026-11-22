@@ -53,7 +53,6 @@ class UiOrderedItemList<T> extends StatelessWidget {
     this.title,
     this.countLabel,
     this.headerTrailing,
-    this.progressValue,
     this.editingIndex,
     this.onReorder,
     this.moveUpTooltip,
@@ -119,9 +118,6 @@ class UiOrderedItemList<T> extends StatelessWidget {
   /// Optional reorder callback; move-up/move-down buttons render ONLY when non-null.
   final UiOrderedItemReorderCallback? onReorder;
 
-  /// Optional progress ratio (`0.0..1.0`) rendering a `6px` `accent` bar on `radiusPill` track.
-  final double? progressValue;
-
   /// Optional list header title.
   final String? title;
 
@@ -167,10 +163,6 @@ class UiOrderedItemList<T> extends StatelessWidget {
               ],
             ],
           ),
-          SizedBox(height: tokens.spacing.space2),
-        ],
-        if (progressValue case final ratio?) ...<Widget>[
-          _UiProgressTrack(value: ratio.clamp(0.0, 1.0)),
           SizedBox(height: tokens.spacing.space2),
         ],
         if (items.isEmpty)
@@ -238,33 +230,6 @@ class UiOrderedItemList<T> extends StatelessWidget {
       );
     }
     return listView;
-  }
-}
-
-/// Horizontal `6px` progress track rendered for subtask completion ratios (`U-CARD-002`).
-class _UiProgressTrack extends StatelessWidget {
-  /// Creates a [_UiProgressTrack].
-  const _UiProgressTrack({required this.value});
-
-  /// Normalized completion ratio (`0.0..1.0`).
-  final double value;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(tokens.radii.pill),
-      child: Container(
-        height: 6.0,
-        color: colors.line,
-        alignment: Alignment.centerLeft,
-        child: FractionallySizedBox(
-          widthFactor: value,
-          child: ColoredBox(color: colors.accent),
-        ),
-      ),
-    );
   }
 }
 

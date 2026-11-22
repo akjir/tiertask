@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Changed external local TDF file watching to desktop platforms only and hid its Settings toggle on Android.
 - Changed expanded entity cards to move delete into the header with a full-width confirmation bar and right-aligned Copy ID.
 
+### Removed
+
+- Removed the subtask progress bar from expanded task cards so spacing matches other sections.
+
 ### Fixed
 
 - Fixed Android system status bar, navigation bar, and on-screen keyboard overlapping the top bar, bottom actions, drawers, and dialogs.
