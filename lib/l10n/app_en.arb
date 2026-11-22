@@ -971,10 +971,6 @@
   "@tooltipCopyLog": {
     "description": "Tooltip for the Copy All button in the diagnostic log viewer."
   },
-  "tooltipScrollToBottom": "Scroll to Bottom",
-  "@tooltipScrollToBottom": {
-    "description": "Tooltip for the Scroll to Bottom button in the diagnostic log viewer."
-  },
   "logCopiedSnackBar": "Diagnostic log copied to clipboard.",
   "@logCopiedSnackBar": {
     "description": "SnackBar confirmation message shown after copying the diagnostic log to the clipboard."
@@ -2661,5 +2657,17 @@
   "tooltipCloseApp": "Close TierTask",
   "@tooltipCloseApp": {
     "description": "Tooltip for the desktop top chrome window close button"
+  },
+  "tooltipScrollToTop": "Scroll to Top",
+  "@tooltipScrollToTop": {
+    "description": "Tooltip and label for the Scroll to Top button in the diagnostic log viewer."
+  },
+  "tooltipCopyFilteredLog": "Copy Filtered",
+  "@tooltipCopyFilteredLog": {
+    "description": "Tooltip and label for the Copy Filtered button in the diagnostic log viewer."
+  },
+  "logFilteredCopiedSnackBar": "Filtered diagnostic log copied to clipboard.",
+  "@logFilteredCopiedSnackBar": {
+    "description": "Floating notice shown after copying filtered diagnostic log entries to the clipboard."
   }
 }

@@ -214,7 +214,6 @@
   "diagnosticLogTitle": "Diagnoseprotokoll",
   "emptyLogHint": "Noch keine Einträge im Diagnoseprotokoll vorhanden.",
   "tooltipCopyLog": "Alles kopieren",
-  "tooltipScrollToBottom": "Nach unten scrollen",
   "logCopiedSnackBar": "Diagnoseprotokoll in die Zwischenablage kopiert.",
   "logClearedSnackBar": "Diagnoseprotokoll geleert.",
   "actionWipeLocalFile": "Lokale TDF-Datei zurücksetzen",
@@ -560,5 +559,8 @@
   "entityKindTaskBadge": "AUFGABE",
   "entityKindLabelBadge": "LABEL",
   "entityKindLocationBadge": "ORT",
-  "tooltipCloseApp": "TierTask schließen"
+  "tooltipCloseApp": "TierTask schließen",
+  "tooltipScrollToTop": "Nach oben scrollen",
+  "tooltipCopyFilteredLog": "Gefiltert kopieren",
+  "logFilteredCopiedSnackBar": "Gefiltertes Diagnoseprotokoll in die Zwischenablage kopiert."
 }

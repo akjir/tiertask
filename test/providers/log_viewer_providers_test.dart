@@ -274,6 +274,75 @@ void main() {
       expect(afterClear.filteredLines, isEmpty);
     });
 
+    test('readFilteredLogText returns only entries matching active level and subsystem filters', () async {
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.debug,
+        persistToDisk: false,
+      );
+      AppLogger.debug(LogTag.tdf, 'tdf debug event');
+      AppLogger.info(LogTag.tdf, 'tdf info event');
+      AppLogger.warn(LogTag.tdf, 'tdf warn event');
+      AppLogger.error(LogTag.sync, 'sync error event');
+
+      final container = ProviderContainer(
+        overrides: [
+          webDavConfigProvider.overrideWith(
+            () => _TestWebDavConfigNotifier(
+              initialConfig: const WebDavConfig(
+                logStorageMode: StorageMode.local,
+              ),
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(webDavConfigProvider.future);
+      final subscription = container.listen(logViewerProvider, (_, _) {});
+      addTearDown(subscription.close);
+
+      final notifier = container.read(logViewerProvider.notifier);
+
+      expect(
+        notifier.readFilteredLogText(),
+        equals(notifier.readFullLogText()),
+        reason: 'Unfiltered readFilteredLogText must match readFullLogText verbatim',
+      );
+
+      notifier.setSelectedTag(LogTag.tdf);
+      final tdfOnly = notifier.readFilteredLogText();
+      expect(tdfOnly, contains('tdf debug event'));
+      expect(tdfOnly, contains('tdf info event'));
+      expect(tdfOnly, contains('tdf warn event'));
+      expect(tdfOnly, isNot(contains('sync error event')));
+      expect(tdfOnly, isNot(contains('@meta ')));
+      expect(tdfOnly.split('\n').length, equals(3));
+
+      notifier.setMinimumLevel(LogLevel.warn);
+      final tdfWarnOnly = notifier.readFilteredLogText();
+      expect(tdfWarnOnly, contains('tdf warn event'));
+      expect(tdfWarnOnly, isNot(contains('tdf debug event')));
+      expect(tdfWarnOnly, isNot(contains('tdf info event')));
+      expect(tdfWarnOnly, isNot(contains('sync error event')));
+      expect(tdfWarnOnly.split('\n').length, equals(1));
+
+      notifier.setMinimumLevel(LogLevel.error);
+      expect(
+        notifier.readFilteredLogText(),
+        isEmpty,
+        reason: 'Zero matching lines must produce an empty string',
+      );
+      expect(
+        notifier.readFullLogText(),
+        contains('sync error event'),
+        reason: 'readFullLogText must remain unfiltered when filters exclude all rows',
+      );
+
+      notifier.clearLog();
+      expect(notifier.readFilteredLogText(), isEmpty);
+    });
+
     test(
       'maps WebDAV log sync success and failure into LogSyncResult',
       () async {

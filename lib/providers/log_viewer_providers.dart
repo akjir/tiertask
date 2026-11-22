@@ -254,6 +254,22 @@ class LogViewerNotifier extends Notifier<DiagnosticLogSnapshot> {
     state = _buildSnapshot();
   }
 
+  /// Returns the concatenated filtered diagnostic log text matching active viewer filters.
+  String readFilteredLogText() {
+    final lines = state.filteredLines;
+    if (lines.isEmpty) {
+      return '';
+    }
+    final buffer = StringBuffer();
+    for (var i = 0; i < lines.length; i++) {
+      if (i > 0) {
+        buffer.write('\n');
+      }
+      buffer.write(lines[i].text);
+    }
+    return buffer.toString();
+  }
+
   /// Returns the concatenated full diagnostic log text for clipboard export.
   String readFullLogText() => AppLogger.fullLogText;
 

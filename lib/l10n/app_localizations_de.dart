@@ -744,9 +744,6 @@ class AppLocalizationsDe extends AppLocalizations {
   String get tooltipCopyLog => 'Alles kopieren';
 
   @override
-  String get tooltipScrollToBottom => 'Nach unten scrollen';
-
-  @override
   String get logCopiedSnackBar =>
       'Diagnoseprotokoll in die Zwischenablage kopiert.';
 
@@ -1970,4 +1967,14 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get tooltipCloseApp => 'TierTask schließen';
+
+  @override
+  String get tooltipScrollToTop => 'Nach oben scrollen';
+
+  @override
+  String get tooltipCopyFilteredLog => 'Gefiltert kopieren';
+
+  @override
+  String get logFilteredCopiedSnackBar =>
+      'Gefiltertes Diagnoseprotokoll in die Zwischenablage kopiert.';
 }

@@ -730,9 +730,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get tooltipCopyLog => 'Copy All';
 
   @override
-  String get tooltipScrollToBottom => 'Scroll to Bottom';
-
-  @override
   String get logCopiedSnackBar => 'Diagnostic log copied to clipboard.';
 
   @override
@@ -1935,4 +1932,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get tooltipCloseApp => 'Close TierTask';
+
+  @override
+  String get tooltipScrollToTop => 'Scroll to Top';
+
+  @override
+  String get tooltipCopyFilteredLog => 'Copy Filtered';
+
+  @override
+  String get logFilteredCopiedSnackBar =>
+      'Filtered diagnostic log copied to clipboard.';
 }

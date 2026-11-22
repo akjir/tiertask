@@ -16,6 +16,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
@@ -37,14 +38,17 @@ import '../tokens/ui_typography_tokens.dart';
 /// Sentinel dropdown option value matching all diagnostic subsystems.
 const String _allSubsystemsValue = '__all__';
 
+/// Pixel distance from the end of the log console within which auto-follow stays engaged.
+const double _endProximityThreshold = 4.0;
+
 /// Minimum available body width required to place the log toolbar inline with the page heading.
-const double _inlineToolbarBreakpoint = 760.0;
+const double _inlineToolbarBreakpoint = 960.0;
 
 /// Minimum body height for flex-expanded layout before falling back to outer vertical scrolling.
 const double _minFlexBodyHeight = 520.0;
 
 /// Full-height diagnostic log view with metadata summary, level/subsystem filters,
-/// severity-tinted monospace console, and WebDAV/clipboard/scroll/clear actions (`U-UX-007`).
+/// selectable severity-tinted monospace console, auto-scroll to end, and WebDAV/clipboard/scroll/clear actions (`U-UX-007`).
 class LogViewerView extends ConsumerStatefulWidget {
   /// Creates a [LogViewerView].
   const LogViewerView({super.key});
@@ -53,13 +57,16 @@ class LogViewerView extends ConsumerStatefulWidget {
   ConsumerState<LogViewerView> createState() => _LogViewerViewState();
 }
 
-/// Wraps a fixed-width vertically scrolling child in pinned vertical and horizontal [Scrollbar]s.
+/// Wraps a fixed-width vertically scrolling child in pinned vertical/horizontal [Scrollbar]s and a multi-line [SelectionArea].
 class _DualAxisScrollRegion extends StatelessWidget {
   /// Creates a [_DualAxisScrollRegion].
   const _DualAxisScrollRegion({
-    required this.horizontalController,
-    required this.verticalController,
     required this.contentWidth,
+    required this.horizontalController,
+    required this.onVerticalMetricsChanged,
+    required this.onVerticalScroll,
+    required this.selectionDelegate,
+    required this.verticalController,
     required this.child,
   });
 
@@ -72,23 +79,47 @@ class _DualAxisScrollRegion extends StatelessWidget {
   /// Horizontal scroll controller.
   final ScrollController horizontalController;
 
+  /// Notification callback observing vertical scroll extent changes.
+  final NotificationListenerCallback<ScrollMetricsNotification>
+  onVerticalMetricsChanged;
+
+  /// Notification callback observing vertical user scroll updates.
+  final NotificationListenerCallback<ScrollNotification> onVerticalScroll;
+
+  /// Delegate joining multi-line console text selections with newline separators.
+  final SelectionContainerDelegate selectionDelegate;
+
   /// Vertical scroll controller.
   final ScrollController verticalController;
 
   @override
   Widget build(BuildContext context) {
-    return Scrollbar(
-      controller: verticalController,
-      notificationPredicate: (notification) =>
-          notification.metrics.axis == Axis.vertical,
-      child: Scrollbar(
-        controller: horizontalController,
-        notificationPredicate: (notification) =>
-            notification.metrics.axis == Axis.horizontal,
-        child: SingleChildScrollView(
-          controller: horizontalController,
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(width: contentWidth, child: child),
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: onVerticalMetricsChanged,
+      child: NotificationListener<ScrollNotification>(
+        onNotification: onVerticalScroll,
+        child: Scrollbar(
+          controller: verticalController,
+          notificationPredicate: (notification) =>
+              notification.metrics.axis == Axis.vertical,
+          child: Scrollbar(
+            controller: horizontalController,
+            notificationPredicate: (notification) =>
+                notification.metrics.axis == Axis.horizontal,
+            child: SelectionArea(
+              child: SingleChildScrollView(
+                controller: horizontalController,
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: contentWidth,
+                  child: SelectionContainer(
+                    delegate: selectionDelegate,
+                    child: child,
+                  ),
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -117,14 +148,16 @@ class _LogClearToolbarButton extends StatelessWidget {
   }
 }
 
-/// Bidirectionally scrollable flat monospace console rendering filtered diagnostic log rows.
+/// Bidirectionally scrollable selectable flat monospace console rendering filtered diagnostic log rows.
 class _LogConsolePanel extends StatelessWidget {
   /// Creates a [_LogConsolePanel].
   const _LogConsolePanel({
     super.key,
-    required this.lines,
     required this.emptyHint,
     required this.horizontalController,
+    required this.lines,
+    required this.onVerticalMetricsChanged,
+    required this.onVerticalScroll,
     required this.verticalController,
   });
 
@@ -137,7 +170,14 @@ class _LogConsolePanel extends StatelessWidget {
   /// Filtered diagnostic log rows to display.
   final List<DiagnosticLogLine> lines;
 
-  /// Vertical scroll controller shared by the lazy list and `Scroll to Bottom` action.
+  /// Notification callback observing vertical scroll extent changes.
+  final NotificationListenerCallback<ScrollMetricsNotification>
+  onVerticalMetricsChanged;
+
+  /// Notification callback observing vertical user scroll updates.
+  final NotificationListenerCallback<ScrollNotification> onVerticalScroll;
+
+  /// Vertical scroll controller shared by the lazy list and `Scroll to Top` action.
   final ScrollController verticalController;
 
   @override
@@ -156,8 +196,10 @@ class _LogConsolePanel extends StatelessWidget {
         child: lines.isEmpty
             ? UiBanner(variant: UiBannerVariant.emptyState, message: emptyHint)
             : _LogConsoleScrollView(
-                lines: lines,
                 horizontalController: horizontalController,
+                lines: lines,
+                onVerticalMetricsChanged: onVerticalMetricsChanged,
+                onVerticalScroll: onVerticalScroll,
                 verticalController: verticalController,
               ),
       ),
@@ -165,12 +207,14 @@ class _LogConsolePanel extends StatelessWidget {
   }
 }
 
-/// Inner horizontal and vertical scrollable list for [_LogConsolePanel].
-class _LogConsoleScrollView extends StatelessWidget {
+/// Inner horizontal and vertical scrollable selectable list for [_LogConsolePanel].
+class _LogConsoleScrollView extends StatefulWidget {
   /// Creates a [_LogConsoleScrollView].
   const _LogConsoleScrollView({
-    required this.lines,
     required this.horizontalController,
+    required this.lines,
+    required this.onVerticalMetricsChanged,
+    required this.onVerticalScroll,
     required this.verticalController,
   });
 
@@ -180,8 +224,30 @@ class _LogConsoleScrollView extends StatelessWidget {
   /// Non-empty filtered diagnostic log entries.
   final List<DiagnosticLogLine> lines;
 
+  /// Notification callback observing vertical scroll extent changes.
+  final NotificationListenerCallback<ScrollMetricsNotification>
+  onVerticalMetricsChanged;
+
+  /// Notification callback observing vertical user scroll updates.
+  final NotificationListenerCallback<ScrollNotification> onVerticalScroll;
+
   /// Vertical scroll controller for the lazy `ListView.builder`.
   final ScrollController verticalController;
+
+  @override
+  State<_LogConsoleScrollView> createState() => _LogConsoleScrollViewState();
+}
+
+/// Owns the newline-preserving selection delegate for [_LogConsoleScrollView].
+class _LogConsoleScrollViewState extends State<_LogConsoleScrollView> {
+  final _LogLineSelectionDelegate _selectionDelegate =
+      _LogLineSelectionDelegate();
+
+  @override
+  void dispose() {
+    _selectionDelegate.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -194,22 +260,25 @@ class _LogConsoleScrollView extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final contentWidth = _computeLogContentWidth(
-          lines: lines,
+          lines: widget.lines,
           style: baseStyle,
           textScaler: textScaler,
           viewportWidth: constraints.maxWidth,
         );
         return _DualAxisScrollRegion(
-          horizontalController: horizontalController,
-          verticalController: verticalController,
           contentWidth: contentWidth,
+          horizontalController: widget.horizontalController,
+          onVerticalMetricsChanged: widget.onVerticalMetricsChanged,
+          onVerticalScroll: widget.onVerticalScroll,
+          selectionDelegate: _selectionDelegate,
+          verticalController: widget.verticalController,
           child: ListView.builder(
-            controller: verticalController,
+            controller: widget.verticalController,
             padding: const EdgeInsets.all(10.0),
-            itemCount: lines.length,
+            itemCount: widget.lines.length,
             itemBuilder: (context, index) => _LogLineRow(
               key: ValueKey<String>('log_line_$index'),
-              line: lines[index],
+              line: widget.lines[index],
             ),
           ),
         );
@@ -313,7 +382,7 @@ class _LogLevelFilterField extends StatelessWidget {
 }
 
 /// Single severity-tinted monospace diagnostic log line inside [_LogConsoleScrollView].
-class _LogLineRow extends StatelessWidget {
+class _LogLineRow extends StatefulWidget {
   /// Creates a [_LogLineRow].
   const _LogLineRow({super.key, required this.line});
 
@@ -321,28 +390,64 @@ class _LogLineRow extends StatelessWidget {
   final DiagnosticLogLine line;
 
   @override
+  State<_LogLineRow> createState() => _LogLineRowState();
+}
+
+/// Row-level selection delegate appending a newline when selection reaches the end of a log line.
+final class _LogLineRowSelectionDelegate
+    extends StaticSelectionContainerDelegate {
+  @override
+  SelectedContent? getSelectedContent() {
+    final content = super.getSelectedContent();
+    if (content == null || content.plainText.isEmpty) {
+      return null;
+    }
+    final range = getSelection();
+    if (range != null &&
+        math.max(range.startOffset, range.endOffset) >= contentLength) {
+      return SelectedContent(plainText: '${content.plainText}\n');
+    }
+    return content;
+  }
+}
+
+/// Owns the per-row selection delegate and severity styling for [_LogLineRow].
+class _LogLineRowState extends State<_LogLineRow> {
+  final _LogLineRowSelectionDelegate _selectionDelegate =
+      _LogLineRowSelectionDelegate();
+
+  @override
+  void dispose() {
+    _selectionDelegate.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
     final styleSpec = _resolveStyle(tokens);
 
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 3.0),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
-        decoration: styleSpec.backgroundColor != null
-            ? BoxDecoration(
-                color: styleSpec.backgroundColor,
-                borderRadius: BorderRadius.circular(tokens.radii.dotLg),
-              )
-            : null,
-        child: Text(
-          line.text,
-          softWrap: false,
-          style: UiTypographyTokens.mono(
-            tokens.typography.meta.copyWith(
-              height: 1.5,
-              color: styleSpec.foregroundColor,
-              fontWeight: styleSpec.fontWeight,
+    return SelectionContainer(
+      delegate: _selectionDelegate,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 3.0),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 2.0),
+          decoration: styleSpec.backgroundColor != null
+              ? BoxDecoration(
+                  color: styleSpec.backgroundColor,
+                  borderRadius: BorderRadius.circular(tokens.radii.dotLg),
+                )
+              : null,
+          child: Text(
+            widget.line.text,
+            softWrap: false,
+            style: UiTypographyTokens.mono(
+              tokens.typography.meta.copyWith(
+                height: 1.5,
+                color: styleSpec.foregroundColor,
+                fontWeight: styleSpec.fontWeight,
+              ),
             ),
           ),
         ),
@@ -350,13 +455,14 @@ class _LogLineRow extends StatelessWidget {
     );
   }
 
-  /// Resolves foreground color, optional background tint, and weight for [line].
+  /// Resolves foreground color, optional background tint, and weight for [widget.line].
   ({Color? backgroundColor, Color foregroundColor, FontWeight fontWeight})
   _resolveStyle(UiThemeTokens tokens) {
     final colors = tokens.colors;
     final isMetaHeader =
-        line.text.startsWith('@meta ') || line.text.startsWith('===');
-    return switch (line.severity) {
+        widget.line.text.startsWith('@meta ') ||
+        widget.line.text.startsWith('===');
+    return switch (widget.line.severity) {
       DiagnosticLogSeverity.crash => (
         backgroundColor: colors.dangerBg,
         foregroundColor: colors.danger,
@@ -378,6 +484,22 @@ class _LogLineRow extends StatelessWidget {
         fontWeight: FontWeight.w400,
       ),
     };
+  }
+}
+
+/// Console-level selection delegate trimming the trailing newline from completed log-line selections.
+final class _LogLineSelectionDelegate extends StaticSelectionContainerDelegate {
+  @override
+  SelectedContent? getSelectedContent() {
+    final content = super.getSelectedContent();
+    if (content == null || content.plainText.isEmpty) {
+      return null;
+    }
+    final text = content.plainText;
+    if (text.endsWith('\n')) {
+      return SelectedContent(plainText: text.substring(0, text.length - 1));
+    }
+    return content;
   }
 }
 
@@ -465,28 +587,18 @@ class _LogSubsystemFilterField extends StatelessWidget {
   }
 }
 
-/// Toolbar action cluster (`Upload Log`, `Copy All`, `Scroll to Bottom`, `Clear`).
+/// Toolbar action cluster (`Upload Log`, `Copy All`, `Copy Filtered`, `Scroll to Top`, `Clear`).
 class _LogToolbarActions extends StatelessWidget {
   /// Creates a [_LogToolbarActions].
   const _LogToolbarActions({
-    required this.canSyncWebDav,
-    required this.hasEntries,
-    required this.hasFilteredLines,
     required this.isUploading,
-    required this.onUploadLog,
-    required this.onCopyAll,
-    required this.onScrollToBottom,
     required this.onClearLog,
+    required this.onCopyAll,
+    required this.onCopyFiltered,
+    required this.onScrollToTop,
+    required this.onUploadLog,
+    required this.snapshot,
   });
-
-  /// Whether manual WebDAV diagnostic log upload is enabled and configured.
-  final bool canSyncWebDav;
-
-  /// Whether at least one line exists in the diagnostic log buffer.
-  final bool hasEntries;
-
-  /// Whether at least one filtered line is rendered in the console.
-  final bool hasFilteredLines;
 
   /// Whether a manual WebDAV log upload is currently in flight.
   final bool isUploading;
@@ -497,21 +609,28 @@ class _LogToolbarActions extends StatelessWidget {
   /// Callback copying full diagnostic log text to clipboard.
   final VoidCallback onCopyAll;
 
-  /// Callback jumping vertical console scroll to the bottommost entry.
-  final VoidCallback onScrollToBottom;
+  /// Callback copying only the currently filtered diagnostic log entries to clipboard.
+  final VoidCallback onCopyFiltered;
+
+  /// Callback jumping vertical console scroll to the topmost entry.
+  final VoidCallback onScrollToTop;
 
   /// Callback uploading the active diagnostic log to WebDAV.
   final VoidCallback onUploadLog;
 
+  /// Live diagnostic snapshot providing buffer availability and WebDAV sync status.
+  final DiagnosticLogSnapshot snapshot;
+
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final hasFilteredLines = snapshot.filteredLines.isNotEmpty;
 
     return Wrap(
       spacing: 8.0,
       runSpacing: 8.0,
       children: <Widget>[
-        if (canSyncWebDav)
+        if (snapshot.canSyncWebDav)
           _LogUploadToolbarButton(
             isUploading: isUploading,
             onUploadLog: onUploadLog,
@@ -519,16 +638,23 @@ class _LogToolbarActions extends StatelessWidget {
         UiButton(
           key: const ValueKey<String>('log_viewer_copy_button'),
           label: localizations.tooltipCopyLog,
-          leadingIcon: Icons.copy_outlined,
+          leadingIcon: Icons.copy_all_outlined,
           density: UiButtonDensity.compact,
-          onPressed: hasEntries ? onCopyAll : null,
+          onPressed: snapshot.hasEntries ? onCopyAll : null,
         ),
         UiButton(
-          key: const ValueKey<String>('log_viewer_scroll_bottom_button'),
-          label: localizations.tooltipScrollToBottom,
-          leadingIcon: Icons.vertical_align_bottom_rounded,
+          key: const ValueKey<String>('log_viewer_copy_filtered_button'),
+          label: localizations.tooltipCopyFilteredLog,
+          leadingIcon: Icons.copy_outlined,
           density: UiButtonDensity.compact,
-          onPressed: hasFilteredLines ? onScrollToBottom : null,
+          onPressed: hasFilteredLines ? onCopyFiltered : null,
+        ),
+        UiButton(
+          key: const ValueKey<String>('log_viewer_scroll_top_button'),
+          label: localizations.tooltipScrollToTop,
+          leadingIcon: Icons.vertical_align_top_rounded,
+          density: UiButtonDensity.compact,
+          onPressed: hasFilteredLines ? onScrollToTop : null,
         ),
         _LogClearToolbarButton(onClearLog: onClearLog),
       ],
@@ -701,11 +827,20 @@ class _LogViewerLayout extends StatelessWidget {
   }
 }
 
-/// Manages horizontal/vertical console [ScrollController]s and upload busy state for [LogViewerView].
+/// Manages console [ScrollController]s, auto-follow state, and upload busy state for [LogViewerView].
 class _LogViewerViewState extends ConsumerState<LogViewerView> {
+  bool _followEnd = true;
   final ScrollController _horizontalController = ScrollController();
+  bool _isProgrammaticVerticalScroll = false;
   bool _isUploading = false;
+  bool _scrollToEndScheduled = false;
   final ScrollController _verticalController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleScrollToEnd();
+  }
 
   @override
   void dispose() {
@@ -716,6 +851,10 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<DiagnosticLogSnapshot>(
+      logViewerProvider,
+      _handleSnapshotChanged,
+    );
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
     final snapshot = ref.watch(logViewerProvider);
@@ -730,20 +869,21 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
         onLevelChanged: notifier.setMinimumLevel,
         onTagChanged: notifier.setSelectedTag,
         toolbar: _LogToolbarActions(
-          canSyncWebDav: snapshot.canSyncWebDav,
-          hasEntries: snapshot.hasEntries,
-          hasFilteredLines: snapshot.filteredLines.isNotEmpty,
           isUploading: _isUploading,
-          onUploadLog: _handleUploadLog,
-          onCopyAll: _handleCopyAll,
-          onScrollToBottom: _scrollToBottom,
           onClearLog: _clearLog,
+          onCopyAll: _handleCopyAll,
+          onCopyFiltered: _handleCopyFiltered,
+          onScrollToTop: _scrollToTop,
+          onUploadLog: _handleUploadLog,
+          snapshot: snapshot,
         ),
         console: _LogConsolePanel(
           key: const ValueKey<String>('log_viewer_console'),
-          lines: snapshot.filteredLines,
           emptyHint: localizations.emptyLogHint,
           horizontalController: _horizontalController,
+          lines: snapshot.filteredLines,
+          onVerticalMetricsChanged: _handleVerticalMetricsNotification,
+          onVerticalScroll: _handleVerticalScrollNotification,
           verticalController: _verticalController,
         ),
       ),
@@ -763,19 +903,39 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
   }
 
   /// Copies the complete diagnostic log text to the system clipboard.
-  Future<void> _copyAll() async {
+  Future<void> _copyAll() {
     final localizations = AppLocalizations.of(context);
     final fullText = ref.read(logViewerProvider.notifier).readFullLogText();
-    await Clipboard.setData(ClipboardData(text: fullText));
+    return _copyTextToClipboard(
+      fullText,
+      notice: localizations.logCopiedSnackBar,
+    );
+  }
+
+  /// Copies the currently filtered diagnostic log entries to the system clipboard.
+  Future<void> _copyFiltered() {
+    final localizations = AppLocalizations.of(context);
+    final filteredText = ref
+        .read(logViewerProvider.notifier)
+        .readFilteredLogText();
+    return _copyTextToClipboard(
+      filteredText,
+      notice: localizations.logFilteredCopiedSnackBar,
+    );
+  }
+
+  /// Writes [text] to the system clipboard and announces [notice] if still mounted.
+  Future<void> _copyTextToClipboard(
+    String text, {
+    required String notice,
+  }) async {
+    await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) {
       return;
     }
     ref
         .read(floatingNoticeProvider.notifier)
-        .showNotice(
-          localizations.logCopiedSnackBar,
-          tone: FloatingNoticeTone.success,
-        );
+        .showNotice(notice, tone: FloatingNoticeTone.success);
   }
 
   /// Triggers [_copyAll] safely from synchronous button tap callbacks.
@@ -783,9 +943,92 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
     unawaited(_copyAll());
   }
 
+  /// Triggers [_copyFiltered] safely from synchronous button tap callbacks.
+  void _handleCopyFiltered() {
+    unawaited(_copyFiltered());
+  }
+
+  /// Keeps the console anchored to the latest entries when logs load, filters change, or new lines arrive.
+  void _handleSnapshotChanged(
+    DiagnosticLogSnapshot? previous,
+    DiagnosticLogSnapshot next,
+  ) {
+    if (next.filteredLines.isEmpty) {
+      _followEnd = true;
+      return;
+    }
+    final filtersChanged =
+        previous != null &&
+        (previous.minimumLevel != next.minimumLevel ||
+            previous.selectedTag != next.selectedTag);
+    final becameNonEmpty = previous == null || previous.filteredLines.isEmpty;
+    if (filtersChanged || becameNonEmpty) {
+      _followEnd = true;
+      _scheduleScrollToEnd();
+      return;
+    }
+    if (_followEnd && previous.filteredLines != next.filteredLines) {
+      _scheduleScrollToEnd();
+    }
+  }
+
   /// Triggers [_uploadLog] safely from synchronous button tap callbacks.
   void _handleUploadLog() {
     unawaited(_uploadLog());
+  }
+
+  /// Re-anchors the vertical viewport when content or viewport extent changes while following the end.
+  bool _handleVerticalMetricsNotification(
+    ScrollMetricsNotification notification,
+  ) {
+    if (notification.metrics.axis != Axis.vertical || !_followEnd) {
+      return false;
+    }
+    if (notification.metrics.maxScrollExtent - notification.metrics.pixels >
+        0.5) {
+      _scheduleScrollToEnd();
+    }
+    return false;
+  }
+
+  /// Tracks whether the user remains anchored near the end of the vertical log list.
+  bool _handleVerticalScrollNotification(ScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical ||
+        _isProgrammaticVerticalScroll) {
+      return false;
+    }
+    if (notification is ScrollUpdateNotification ||
+        notification is ScrollEndNotification) {
+      final distanceFromEnd =
+          notification.metrics.maxScrollExtent - notification.metrics.pixels;
+      _followEnd = distanceFromEnd <= _endProximityThreshold;
+    }
+    return false;
+  }
+
+  /// Jumps the vertical console immediately to its bottommost extent when auto-follow is active.
+  void _jumpToEnd() {
+    if (!mounted || !_followEnd || _verticalController.positions.length != 1) {
+      return;
+    }
+    final position = _verticalController.position;
+    final target = position.maxScrollExtent;
+    if ((target - position.pixels).abs() > 0.5) {
+      _jumpVertical(target);
+    }
+  }
+
+  /// Jumps [_verticalController] to [offset] without altering [_followEnd] via user-scroll listeners.
+  void _jumpVertical(double offset) {
+    if (_verticalController.positions.length != 1) {
+      return;
+    }
+    _isProgrammaticVerticalScroll = true;
+    try {
+      _verticalController.jumpTo(offset);
+    } finally {
+      _isProgrammaticVerticalScroll = false;
+    }
   }
 
   /// Returns to the primary Tasks shell view.
@@ -793,12 +1036,27 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
     ref.read(shellProvider.notifier).openView(ShellView.tasks);
   }
 
-  /// Scrolls the vertical log list immediately to its bottommost entry.
-  void _scrollToBottom() {
-    if (!_verticalController.hasClients) {
+  /// Schedules a single post-frame vertical jump to the latest log entry.
+  void _scheduleScrollToEnd() {
+    if (_scrollToEndScheduled) {
       return;
     }
-    _verticalController.jumpTo(_verticalController.position.maxScrollExtent);
+    _scrollToEndScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scrollToEndScheduled = false;
+      _jumpToEnd();
+    });
+  }
+
+  /// Scrolls the vertical log list immediately to its topmost entry.
+  void _scrollToTop() {
+    if (_verticalController.positions.length != 1) {
+      return;
+    }
+    if (_verticalController.position.maxScrollExtent > 0.0) {
+      _followEnd = false;
+    }
+    _jumpVertical(0.0);
   }
 
   /// Uploads the active diagnostic log snapshot to WebDAV and announces the outcome.

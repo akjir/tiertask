@@ -15,6 +15,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -309,6 +310,73 @@ void main() {
         expect(find.textContaining('sync warning line'), findsNothing);
         expect(find.textContaining('storage error line'), findsOneWidget);
 
+        lastCopiedText = null;
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_copy_filtered_button')),
+        );
+        await tester.pumpAndSettle();
+        expect(lastCopiedText, contains('storage error line'));
+        expect(lastCopiedText, isNot(contains('sync warning line')));
+        expect(lastCopiedText, isNot(contains('domain debug trace')));
+        expect(lastCopiedText, isNot(contains('@meta format=1')));
+        expect(
+          container.read(floatingNoticeProvider)?.message,
+          equals('Filtered diagnostic log copied to clipboard.'),
+        );
+        expect(
+          container.read(floatingNoticeProvider)?.tone,
+          equals(FloatingNoticeTone.success),
+        );
+
+        lastCopiedText = null;
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_copy_button')),
+        );
+        await tester.pumpAndSettle();
+        expect(lastCopiedText, contains('domain debug trace'));
+        expect(lastCopiedText, contains('sync warning line'));
+        expect(lastCopiedText, contains('storage error line'));
+        expect(
+          container.read(floatingNoticeProvider)?.message,
+          equals('Diagnostic log copied to clipboard.'),
+        );
+
+        await tester.tap(tagDropdown);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('TDF').last);
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<UiButton>(
+                find.byKey(
+                  const ValueKey<String>('log_viewer_copy_filtered_button'),
+                ),
+              )
+              .onPressed,
+          isNull,
+          reason: 'Copy Filtered must be disabled when active filters match zero lines',
+        );
+        expect(
+          tester
+              .widget<UiButton>(
+                find.byKey(
+                  const ValueKey<String>('log_viewer_scroll_top_button'),
+                ),
+              )
+              .onPressed,
+          isNull,
+          reason: 'Scroll to Top must be disabled when active filters match zero lines',
+        );
+        expect(
+          tester
+              .widget<UiButton>(
+                find.byKey(const ValueKey<String>('log_viewer_copy_button')),
+              )
+              .onPressed,
+          isNotNull,
+          reason: 'Copy All must remain enabled when unfiltered log entries still exist',
+        );
+
         await tester.tap(tagDropdown);
         await tester.pumpAndSettle();
         await tester.tap(find.text('All').last);
@@ -385,7 +453,7 @@ void main() {
     );
 
     testWidgets(
-      'shows Upload Log when WebDAV log sync is enabled, handles success/error notices, and scrolls to bottom',
+      'shows Upload Log when WebDAV log sync is enabled, auto-scrolls to end, and scrolls to top on demand',
       (tester) async {
         var failUpload = false;
         Completer<void>? uploadGate;
@@ -478,20 +546,51 @@ void main() {
         final listView = tester.widget<ListView>(find.byType(ListView));
         final verticalController = listView.controller;
         expect(verticalController, isNotNull);
-        expect(verticalController?.offset, equals(0.0));
+        final initialMaxExtent =
+            verticalController?.position.maxScrollExtent ?? 0.0;
         expect(
-          verticalController?.position.maxScrollExtent ?? 0.0,
+          initialMaxExtent,
           greaterThan(0.0),
-          reason: '60 log entries must overflow vertically to test Scroll to Bottom',
+          reason: '60 log entries must overflow vertically to test auto-scroll and Scroll to Top',
         );
+        expect(
+          verticalController?.offset,
+          equals(initialMaxExtent),
+          reason: 'Log console must automatically show the latest entries at the end',
+        );
+        expect(find.textContaining('scrollable log entry #59'), findsOneWidget);
 
         await tester.tap(
-          find.byKey(const ValueKey<String>('log_viewer_scroll_bottom_button')),
+          find.byKey(const ValueKey<String>('log_viewer_scroll_top_button')),
         );
         await tester.pumpAndSettle();
         expect(
           verticalController?.offset,
+          equals(0.0),
+          reason: 'Scroll to Top must jump immediately to offset 0.0',
+        );
+        expect(find.textContaining('@meta format=1'), findsOneWidget);
+
+        AppLogger.info(LogTag.domain, 'live entry #60 while scrolled to top');
+        await tester.pumpAndSettle();
+        expect(
+          verticalController?.offset,
+          equals(0.0),
+          reason: 'New entries arriving while scrolled to top must not yank scroll position away',
+        );
+
+        verticalController?.jumpTo(verticalController.position.maxScrollExtent);
+        await tester.pumpAndSettle();
+        AppLogger.info(LogTag.domain, 'live entry #61 while following end');
+        await tester.pumpAndSettle();
+        expect(
+          verticalController?.offset,
           equals(verticalController?.position.maxScrollExtent),
+          reason: 'Scrolling back to the bottom must resume automatic following of new entries',
+        );
+        expect(
+          find.textContaining('live entry #61 while following end'),
+          findsOneWidget,
         );
 
         final horizontalScrollView = tester.widget<SingleChildScrollView>(
@@ -506,25 +605,289 @@ void main() {
     );
 
     testWidgets(
-      'renders without overflow on compact viewport, short height, and German locale, and navigates Back to tasks',
+      'starts at the end on initial mount with pre-existing logs and re-anchors on filter change',
       (tester) async {
-        final container = await pumpLeafWidget(
+        AppLogger.setEnabled(
+          true,
+          minimumLevel: LogLevel.debug,
+          persistToDisk: false,
+          metadata: const LogMetadata(
+            appVersion: '0.4.0+4',
+            platform: 'linux',
+            workspaceId: 'work',
+          ),
+        );
+        for (var i = 0; i < 50; i++) {
+          AppLogger.info(LogTag.tdf, 'tdf preloaded entry #$i');
+          AppLogger.info(LogTag.sync, 'sync preloaded entry #$i');
+        }
+
+        await pumpLeafWidget(
           tester,
           const Scaffold(body: LogViewerView()),
-          config: const WebDavConfig(language: AppLanguage.german),
-          locale: const Locale('de'),
-          surfaceSize: const Size(390, 420),
-          presetId: 'plum_umber',
-          themeMode: ThemeMode.dark,
+          config: const WebDavConfig(
+            diagnosticsEnabled: true,
+            logStorageMode: StorageMode.local,
+          ),
         );
-        container.read(shellProvider.notifier).openView(ShellView.logs);
         await tester.pumpAndSettle();
 
-        expect(tester.takeException(), isNull);
-        expect(find.text('Diagnoseprotokoll'), findsOneWidget);
-        await tester.tap(find.text('Zurück zu den Aufgaben'));
+        final listView = tester.widget<ListView>(find.byType(ListView));
+        final verticalController = listView.controller;
+        expect(verticalController, isNotNull);
+        expect(verticalController?.position.maxScrollExtent, greaterThan(0.0));
+        expect(
+          verticalController?.offset,
+          equals(verticalController?.position.maxScrollExtent),
+          reason: 'Pre-existing logs must start scrolled to the end on open',
+        );
+        expect(find.textContaining('sync preloaded entry #49'), findsOneWidget);
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_scroll_top_button')),
+        );
         await tester.pumpAndSettle();
-        expect(container.read(shellProvider).view, equals(ShellView.tasks));
+        expect(verticalController?.offset, equals(0.0));
+
+        final tagDropdown = find.descendant(
+          of: find.byKey(const ValueKey<String>('log_viewer_subsystem_filter')),
+          matching: find.byType(DropdownButton<String>),
+        );
+        await tester.tap(tagDropdown);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('TDF').last);
+        await tester.pumpAndSettle();
+
+        expect(
+          verticalController?.offset,
+          equals(verticalController?.position.maxScrollExtent),
+          reason: 'Changing subsystem filter must anchor to the end of filtered entries',
+        );
+        expect(find.textContaining('tdf preloaded entry #49'), findsOneWidget);
+
+        await tester.drag(find.byType(ListView), const Offset(0, 250));
+        await tester.pumpAndSettle();
+        final scrolledUpOffset = verticalController?.offset ?? 0.0;
+        expect(
+          scrolledUpOffset,
+          lessThan(verticalController?.position.maxScrollExtent ?? 0.0),
+          reason: 'Manual upward drag must scroll away from the end',
+        );
+
+        AppLogger.info(LogTag.tdf, 'tdf entry #50 during manual read');
+        await tester.pumpAndSettle();
+        expect(
+          verticalController?.offset,
+          equals(scrolledUpOffset),
+          reason: 'Manual upward scroll must pause auto-follow while new entries arrive',
+        );
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_clear_button')),
+        );
+        await tester.pumpAndSettle();
+        for (var i = 0; i < 40; i++) {
+          AppLogger.info(LogTag.tdf, 'post-clear tdf entry #$i');
+        }
+        await tester.pumpAndSettle();
+        final postClearListView = tester.widget<ListView>(
+          find.byType(ListView),
+        );
+        final postClearController = postClearListView.controller;
+        expect(
+          postClearController?.offset,
+          equals(postClearController?.position.maxScrollExtent),
+          reason: 'New entries added after Clear must resume auto-scrolling to the end',
+        );
+        expect(find.textContaining('post-clear tdf entry #39'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'supports selecting and copying multi-line text directly inside the log console',
+      (tester) async {
+        AppLogger.setEnabled(
+          true,
+          minimumLevel: LogLevel.debug,
+          persistToDisk: false,
+          metadata: const LogMetadata(
+            appVersion: '0.4.0+4',
+            platform: 'linux',
+            workspaceId: 'work',
+          ),
+        );
+        AppLogger.info(LogTag.tdf, 'selectable alpha line');
+        AppLogger.info(LogTag.tdf, 'selectable beta line');
+
+        await pumpLeafWidget(
+          tester,
+          const Scaffold(body: LogViewerView()),
+          config: const WebDavConfig(
+            diagnosticsEnabled: true,
+            logStorageMode: StorageMode.local,
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final consoleFinder = find.byKey(
+          const ValueKey<String>('log_viewer_console'),
+        );
+        expect(
+          find.descendant(
+            of: consoleFinder,
+            matching: find.byType(SelectionArea),
+          ),
+          findsOneWidget,
+          reason: 'Log console must expose a SelectionArea for direct text selection',
+        );
+
+        final firstLineFinder = find.textContaining('selectable alpha line');
+        final secondLineFinder = find.textContaining('selectable beta line');
+        expect(firstLineFinder, findsOneWidget);
+        expect(secondLineFinder, findsOneWidget);
+
+        final firstRect = tester.getRect(firstLineFinder);
+        final secondRect = tester.getRect(secondLineFinder);
+        final gesture = await tester.startGesture(
+          Offset(firstRect.left + 4.0, firstRect.center.dy),
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump();
+        await gesture.moveTo(
+          Offset(secondRect.right - 4.0, secondRect.center.dy),
+        );
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+
+        lastCopiedText = null;
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pumpAndSettle();
+
+        expect(
+          lastCopiedText,
+          isNotNull,
+          reason: 'Ctrl+C must copy the inline console selection to clipboard',
+        );
+        expect(lastCopiedText, contains('selectable alpha line'));
+        expect(lastCopiedText, contains('selectable beta line'));
+        expect(
+          lastCopiedText,
+          contains('\n'),
+          reason:
+              'Multi-line console selections must preserve newline separators',
+        );
+        expect(
+          lastCopiedText?.endsWith('\n'),
+          isFalse,
+          reason: 'Completed console selections must not include a stray trailing newline',
+        );
+
+        final reverseGesture = await tester.startGesture(
+          Offset(secondRect.right - 4.0, secondRect.center.dy),
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump();
+        await reverseGesture.moveTo(
+          Offset(firstRect.left + 4.0, firstRect.center.dy),
+        );
+        await tester.pump();
+        await reverseGesture.up();
+        await tester.pumpAndSettle();
+
+        lastCopiedText = null;
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pumpAndSettle();
+        expect(
+          lastCopiedText,
+          contains('selectable alpha line\n'),
+          reason: 'Bottom-to-top drag selection must preserve newline separation in visual order',
+        );
+        expect(lastCopiedText, contains('selectable beta line'));
+        expect(lastCopiedText?.endsWith('\n'), isFalse);
+
+        final singleLineGesture = await tester.startGesture(
+          Offset(firstRect.left + 4.0, firstRect.center.dy),
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump();
+        await singleLineGesture.moveTo(
+          Offset(firstRect.right - 4.0, firstRect.center.dy),
+        );
+        await tester.pump();
+        await singleLineGesture.up();
+        await tester.pumpAndSettle();
+
+        lastCopiedText = null;
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pumpAndSettle();
+        expect(lastCopiedText, contains('selectable alpha line'));
+        expect(
+          lastCopiedText,
+          isNot(contains('\n')),
+          reason: 'Single-line selection must not add a newline separator',
+        );
+      },
+    );
+
+    testWidgets(
+      'renders without overflow across breakpoints in German locale with WebDAV upload and navigates Back to tasks',
+      (tester) async {
+        const webDavConfig = WebDavConfig(
+          language: AppLanguage.german,
+          diagnosticsEnabled: true,
+          logStorageMode: StorageMode.webdav,
+          storageMode: StorageMode.webdav,
+          serverUrl: 'https://cloud.example.com/dav/',
+          username: 'alice',
+          password: 'secret-password',
+        );
+        const viewportSizes = <Size>[
+          Size(390, 420),
+          Size(720, 700),
+          Size(760, 700),
+          Size(820, 700),
+          Size(960, 700),
+          Size(1280, 800),
+        ];
+
+        for (final size in viewportSizes) {
+          final container = await pumpLeafWidget(
+            tester,
+            const Scaffold(body: LogViewerView()),
+            config: webDavConfig,
+            locale: const Locale('de'),
+            surfaceSize: size,
+            presetId: 'plum_umber',
+            themeMode: ThemeMode.dark,
+          );
+          container.read(shellProvider.notifier).openView(ShellView.logs);
+          await tester.pumpAndSettle();
+
+          expect(
+            tester.takeException(),
+            isNull,
+            reason: 'LogViewerView must not overflow at viewport $size',
+          );
+          expect(find.text('Diagnoseprotokoll'), findsOneWidget);
+          expect(find.text('Alles kopieren'), findsOneWidget);
+          expect(find.text('Gefiltert kopieren'), findsOneWidget);
+          expect(find.text('Nach oben scrollen'), findsOneWidget);
+          expect(find.text('Log hochladen'), findsOneWidget);
+          expect(find.text('Leeren'), findsOneWidget);
+
+          if (size == viewportSizes.first) {
+            await tester.tap(find.text('Zurück zu den Aufgaben'));
+            await tester.pumpAndSettle();
+            expect(container.read(shellProvider).view, equals(ShellView.tasks));
+          }
+        }
       },
     );
   });

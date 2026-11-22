@@ -320,7 +320,7 @@ On `compact` (`<= 720`) viewports, tier navigation uses the slide-over drawer an
 - **Full-Screen File-Read Error:** Replaces Tasks view and hides bottom dock; shows hero `cloud-off` icon, structured per-target Local/Remote diagnostics card, and `Settings` + `Retry` buttons.
 - **Raw TDF Limit Exceeded:** Disables `Copy`, displays byte/line counts, and replaces the code block with a `warning` alert citing `TDF 0.8.0` Section 6.2 (`1 MiB` / `16,384` lines).
 - **Conflict & Recovery Resolution Views:** List affected tasks, labels, and locations (`ENTITY · id`, title, detail) with safe default segmented choices (`Keep Edit (Undelete)` vs `Confirm Deletion`; `Recover as New (fresh ID)` vs `Discard Local Change`) and a docked footer (`Cancel` + `Apply & Sync`).
-- **Forward-Geocoding Disambiguation & Diagnostics:** Single match auto-fills 6dp coordinates; multiple matches open a candidate selection modal. Diagnostic Log Viewer supports `Min Level` and `Subsystem` tag filters, severity row styling (`meta`/`warn`/`error`/`crash`), conditional `Upload Log`, `Copy All`, `Scroll to Bottom`, and `Clear` (retaining `@meta` header lines).
+- **Forward-Geocoding Disambiguation & Diagnostics:** Single match auto-fills 6dp coordinates; multiple matches open a candidate selection modal. Diagnostic Log Viewer supports `Min Level` and `Subsystem` tag filters, severity row styling (`meta`/`warn`/`error`/`crash`), inline multi-line text selection and clipboard copy, automatic scrolling to the latest entries, conditional `Upload Log`, `Copy All`, `Copy Filtered`, `Scroll to Top`, and `Clear` (retaining `@meta` header lines).
 
 ## 9. Keyboard Shortcuts, Focus Management, Motion & Accessibility
 

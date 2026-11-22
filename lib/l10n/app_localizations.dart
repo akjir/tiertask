@@ -1382,12 +1382,6 @@ abstract class AppLocalizations {
   /// **'Copy All'**
   String get tooltipCopyLog;
 
-  /// Tooltip for the Scroll to Bottom button in the diagnostic log viewer.
-  ///
-  /// In en, this message translates to:
-  /// **'Scroll to Bottom'**
-  String get tooltipScrollToBottom;
-
   /// SnackBar confirmation message shown after copying the diagnostic log to the clipboard.
   ///
   /// In en, this message translates to:
@@ -3463,6 +3457,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Close TierTask'**
   String get tooltipCloseApp;
+
+  /// Tooltip and label for the Scroll to Top button in the diagnostic log viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Scroll to Top'**
+  String get tooltipScrollToTop;
+
+  /// Tooltip and label for the Copy Filtered button in the diagnostic log viewer.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy Filtered'**
+  String get tooltipCopyFilteredLog;
+
+  /// Floating notice shown after copying filtered diagnostic log entries to the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Filtered diagnostic log copied to clipboard.'**
+  String get logFilteredCopiedSnackBar;
 }
 
 class _AppLocalizationsDelegate
