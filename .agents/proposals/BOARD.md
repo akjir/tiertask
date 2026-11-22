@@ -11,7 +11,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 
 | ID | Title | Type | Status | Specification |
 | :--- | :--- | :--- | :--- | :--- |
-| TEP-020 | Unified UI Integration, Package Dissolution, and Direct Reactive State Architecture | architecture | review | [`tep-020-unified-ui-integration-and-reactive-architecture.md`](tep-020-unified-ui-integration-and-reactive-architecture.md) |
+| *(None)* | | | | |
 
 ### Completed Proposals
 
@@ -36,6 +36,7 @@ This directory serves as the collaborative feature roadmap and specification hub
 | TEP-017 | Phase 2 Dedicated UI Component Library (packages/tiertask_ui), Theme Presets, Gallery App, and Multi-Package Tooling | architecture | completed | [`tep-017-dedicated-ui-component-library.md`](tep-017-dedicated-ui-component-library.md) |
 | TEP-018 | Phase 3 Adaptive UI Shell, Model-Free Presentation Layer, and Feature Cutover | architecture | completed | [`tep-018-adaptive-ui-shell-and-feature-cutover.md`](tep-018-adaptive-ui-shell-and-feature-cutover.md) |
 | TEP-019 | Phase 4 Legacy UI Retirement, Responsibility-Based Structuring, Global Strict Architecture Lock, and Finalization | architecture | completed | [`tep-019-legacy-ui-retirement-and-architecture-finalization.md`](tep-019-legacy-ui-retirement-and-architecture-finalization.md) |
+| TEP-020 | Unified UI Integration, Package Dissolution, and Direct Reactive State Architecture | architecture | completed | [`tep-020-unified-ui-integration-and-reactive-architecture.md`](tep-020-unified-ui-integration-and-reactive-architecture.md) |
 
 ## Status Lifecycle
 

@@ -1,7 +1,7 @@
 ---
 id: TEP-020
 title: Unified UI Integration, Package Dissolution, and Direct Reactive State Architecture
-status: review
+status: completed
 type: architecture
 created: 2026-11-22
 updated: 2026-11-22
@@ -159,6 +159,7 @@ Execute Red-Green-Refactor TDD (`P-TDD-FIRST`, `P-TEST-MIRROR`) across all manda
   - [x] Synchronize `AGENTS.md`, `ARCHITECTURE.md`, `spec/UI_DESIGN_SYSTEM.md`, `README.md`, `.agents/skills/{ui-design-system,update-documentation,red-team-audit}/SKILL.md`, and superseding notes on `TEP-015`..`TEP-019`.
   - [x] Run `python3 -m unittest discover -s .agents/scripts/tests -p 'test_*.py'` and `python3 .agents/scripts/tiertask_dev.py verify --full --fix` until completely green.
   - [x] Set `status: review`, update `BOARD.md`, and report results to user for approval.
+  - [x] After user approval, set `status: completed`, update `BOARD.md`, and finalize delivered artifacts in Part 3.3.
 
 ### 3.2 Work Log & Decisions
 - **2026-11-22:** Completed forensic audit of `lib/presentation/` (`21` files, `16,175` lines), `lib/ui/` (`27` files, `30,520` lines), `packages/tiertask_ui/` (`25` files, `13,474` lines), `lib/providers/` (`6` files), and `.agents/scripts/tiertask_dev.py`. Drafted `TEP-020` (`status: in-progress`).
@@ -166,6 +167,7 @@ Execute Red-Green-Refactor TDD (`P-TDD-FIRST`, `P-TEST-MIRROR`) across all manda
 - **2026-11-22 (Wave 2):** Hardened core providers (narrowed `.select(...)` on repositories/locale/theme/location/diagnostics, optimistic FIFO `WebDavConfigNotifier` with `_initialBuildPending` build-race fix and rollback, atomic `createLabelAndAssignToTask` and `updateTaskAndComplete` single-commit mutations, `TaskNotifier.lastMutationCommitted` commit tracking, `.autoDispose` conflict/recovery decision notifiers, removed circular `webDavRepositoryProvider` read inside `WebDavConfigNotifier`). Split task actions (`board_actions_provider.dart`) and label/location/sync/workspace actions (`entity_actions_provider.dart`) cleanly onto shared `TaskScheduleHelper` validators and real domain models (`222/222` provider and logger tests passing).
 - **2026-11-22 (Wave 3):** Promoted `TaskBoardEvaluator.areTaskConditionsSatisfied` for single-source condition evaluation; replaced `ui_icon_mapper.dart` with `ui_domain_mappers.dart`; refactored all 27 app UI files and `lib/main.dart` (cached `ThemeData`, `_BackgroundServicesHost`, live Riverpod `CompactLabelPickerSheet`, decoupled text-query providers, granular `.select(...)` cards/chrome, zero `KeyedSubtree` remount hacks); deleted `lib/presentation/` and `test/presentation/`; migrated all `test/ui/` suites and added all 6 permanent `M-REAL-MECHANICS-TESTS` regression scenarios.
 - **2026-11-22 (Wave 4):** Updated `.agents/scripts/tiertask_dev.py` and `test_tiertask_dev.py` (`15/15` passing) for the 8-rank DAG (`0..7`), universal internal Design System sub-ranks (`tokens < primitives < layout < components`), `lib/ui/ -> lib/repositories/` ban, unconditional `export`/`part` ban, and retired directory bans. Synchronized `AGENTS.md` (`20,149` bytes), `ARCHITECTURE.md`, `spec/UI_DESIGN_SYSTEM.md`, skills, and `TEP-015`..`TEP-019` superseding notes. Verified `verify --full --fix --force` (`0` analyzer/static/L10N/ARCH issues, `707/707` Flutter tests passing). Advanced status to `review`.
+- **2026-11-22:** User approved and closed proposal (`status: completed`).
 
 ### 3.3 Delivered Artifacts
 - **Removed:** `packages/tiertask_ui/**`, `lib/presentation/**`, `test/presentation/**`, `lib/ui/ui_icon_mapper.dart`, `test/ui/ui_icon_mapper_test.dart`.
