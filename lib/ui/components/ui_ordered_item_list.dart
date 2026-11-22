@@ -196,6 +196,7 @@ class UiOrderedItemList<T> extends StatelessWidget {
     final virtualizeBounded =
         limit != null && items.length * _minOrderedRowHeight >= limit;
     final listView = ListView.builder(
+      padding: EdgeInsets.zero,
       shrinkWrap: !virtualizeBounded,
       physics: limit == null ? const NeverScrollableScrollPhysics() : null,
       itemCount: items.length,

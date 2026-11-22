@@ -13,11 +13,13 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:tiertask/ui/layout/ui_adaptive_app_shell.dart';
 import 'package:tiertask/ui/primitives/ui_banner.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
 
 import '../test_helpers.dart';
 
@@ -559,6 +561,335 @@ void main() {
             closeTo(76.0, 1.0),
             reason:
                 '$label without sidebarFooter must keep sidebarBody aligned at top padding below 62px chrome',
+          );
+        }
+      },
+    );
+
+    testWidgets(
+      'applies top, bottom, and horizontal system bar insets and removes duplicate child padding',
+      (tester) async {
+        // Portrait mobile edge-to-edge (status bar/cutout 48px, bottom gesture bar 24px).
+        tester.view.padding = const FakeViewPadding(top: 48.0, bottom: 24.0);
+        tester.view.viewPadding = const FakeViewPadding(
+          top: 48.0,
+          bottom: 24.0,
+        );
+        addTearDown(() {
+          tester.view.resetPadding();
+          tester.view.resetViewPadding();
+          tester.view.resetViewInsets();
+        });
+
+        EdgeInsets? childPadding;
+        EdgeInsets? childViewPadding;
+        await pumpUiWidget(
+          tester,
+          UiAdaptiveAppShell(
+            brand: const Text('TierTask', key: ValueKey<String>('brand_text')),
+            trailingActions: const <Widget>[
+              Text('Sync', key: ValueKey<String>('sync_text')),
+            ],
+            isDrawerOpen: true,
+            sidebarBody: const SizedBox(height: 60.0, child: Text('Nav')),
+            sidebarFooter: const Text(
+              'Version 0.5.0',
+              key: ValueKey<String>('drawer_footer'),
+            ),
+            body: Builder(
+              builder: (bodyContext) {
+                childPadding = MediaQuery.paddingOf(bodyContext);
+                childViewPadding = MediaQuery.viewPaddingOf(bodyContext);
+                return const SizedBox.expand(
+                  key: ValueKey<String>('main_body_box'),
+                );
+              },
+            ),
+            floatingNotice: const UiBanner(
+              key: ValueKey<String>('edge_toast'),
+              variant: UiBannerVariant.toast,
+              message: 'Saved',
+            ),
+            bottomDock: const SizedBox(
+              key: ValueKey<String>('edge_dock'),
+              height: 44.0,
+              child: Text('Sync Now'),
+            ),
+            menuOpenTooltip: 'Open menu',
+            menuCloseTooltip: 'Close menu',
+          ),
+          surfaceSize: const Size(390.0, 844.0),
+          wrapInScaffold: false,
+        );
+
+        final menuRect = tester.getRect(find.byTooltip('Close menu'));
+        final brandRect = tester.getRect(
+          find.byKey(const ValueKey<String>('brand_text')),
+        );
+        final dockRect = tester.getRect(
+          find.byKey(const ValueKey<String>('edge_dock')),
+        );
+        final footerRect = tester.getRect(
+          find.byKey(const ValueKey<String>('drawer_footer')),
+        );
+
+        expect(
+          menuRect.top,
+          greaterThanOrEqualTo(48.0),
+          reason: 'Compact top chrome menu toggle must clear 48px status bar',
+        );
+        expect(
+          brandRect.top,
+          greaterThanOrEqualTo(48.0),
+          reason: 'Top chrome brand must clear 48px status bar',
+        );
+        expect(
+          dockRect.bottom,
+          lessThanOrEqualTo(844.0 - 24.0 - 12.0 + 0.5),
+          reason: 'Pinned bottomDock must clear 24px navigation bar plus 12px dock bottom padding',
+        );
+        expect(
+          footerRect.bottom,
+          lessThanOrEqualTo(844.0 - 24.0 - 14.0 + 0.5),
+          reason: 'Compact drawer footer must clear 24px navigation bar plus 14px sidebar bottom padding',
+        );
+        expect(
+          childPadding,
+          equals(EdgeInsets.zero),
+          reason: 'Shell must strip consumed MediaQuery.padding from main body descendants',
+        );
+        expect(
+          childViewPadding,
+          equals(const EdgeInsets.only(top: 48.0, bottom: 24.0)),
+          reason: 'Shell must preserve MediaQuery.viewPadding for overlay-positioned descendants',
+        );
+
+        // Without bottomDock, main body and floatingNotice must clear bottom navigation bar.
+        await pumpUiWidget(
+          tester,
+          const UiAdaptiveAppShell(
+            brand: Text('TierTask'),
+            sidebarBody: SizedBox.shrink(),
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: SizedBox(
+                key: ValueKey<String>('dockless_bottom_anchor'),
+                height: 20.0,
+                width: 100.0,
+              ),
+            ),
+            floatingNotice: UiBanner(
+              key: ValueKey<String>('dockless_toast'),
+              variant: UiBannerVariant.toast,
+              message: 'Deleted',
+            ),
+            menuOpenTooltip: 'Open menu',
+            menuCloseTooltip: 'Close menu',
+          ),
+          surfaceSize: const Size(390.0, 844.0),
+          wrapInScaffold: false,
+        );
+
+        expect(
+          tester
+              .getBottomLeft(
+                find.byKey(const ValueKey<String>('dockless_bottom_anchor')),
+              )
+              .dy,
+          lessThanOrEqualTo(844.0 - 24.0 + 0.5),
+          reason: 'Main body without bottomDock must stay above 24px navigation bar',
+        );
+        expect(
+          tester
+              .getBottomLeft(
+                find.byKey(const ValueKey<String>('dockless_toast')),
+              )
+              .dy,
+          lessThanOrEqualTo(844.0 - 24.0 - 10.0 + 0.5),
+          reason: 'Floating notice without bottomDock must stay above 24px navigation bar + 10px inset',
+        );
+
+        // Soft keyboard open (viewInsets.bottom = 300px, padding.bottom collapses to 0px).
+        tester.view.padding = const FakeViewPadding(top: 48.0);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300.0);
+        await pumpUiWidget(
+          tester,
+          const UiAdaptiveAppShell(
+            brand: Text('TierTask', key: ValueKey<String>('ime_brand')),
+            sidebarBody: SizedBox.shrink(),
+            body: SizedBox.expand(),
+            bottomDock: SizedBox(
+              key: ValueKey<String>('ime_dock'),
+              height: 44.0,
+              child: Text('Quick Add'),
+            ),
+            menuOpenTooltip: 'Open menu',
+            menuCloseTooltip: 'Close menu',
+          ),
+          surfaceSize: const Size(390.0, 844.0),
+          wrapInScaffold: false,
+        );
+
+        expect(
+          tester.getTopLeft(find.byKey(const ValueKey<String>('ime_brand'))).dy,
+          greaterThanOrEqualTo(48.0),
+          reason: 'Top chrome must remain below status bar while IME is open',
+        );
+        expect(
+          tester
+              .getBottomLeft(find.byKey(const ValueKey<String>('ime_dock')))
+              .dy,
+          lessThanOrEqualTo(844.0 - 300.0 - 12.0 + 0.5),
+          reason:
+              'Pinned bottomDock must rise cleanly above 300px soft keyboard',
+        );
+
+        // Landscape wide viewport with left cutout (48px) and right 3-button nav bar (48px).
+        tester.view.resetViewInsets();
+        tester.view.padding = const FakeViewPadding(
+          left: 48.0,
+          top: 24.0,
+          right: 48.0,
+        );
+        tester.view.viewPadding = const FakeViewPadding(
+          left: 48.0,
+          top: 24.0,
+          right: 48.0,
+        );
+        await pumpUiWidget(
+          tester,
+          const UiAdaptiveAppShell(
+            brand: Text('TierTask', key: ValueKey<String>('land_brand')),
+            trailingActions: <Widget>[
+              Text('Sync', key: ValueKey<String>('land_sync')),
+            ],
+            sidebarBody: Text('Nav', key: ValueKey<String>('land_nav')),
+            body: Align(
+              alignment: Alignment.centerRight,
+              child: SizedBox(
+                key: ValueKey<String>('land_body_right'),
+                width: 20.0,
+                height: 20.0,
+              ),
+            ),
+            bottomDock: Align(
+              alignment: Alignment.centerRight,
+              child: SizedBox(
+                key: ValueKey<String>('land_dock_right'),
+                width: 40.0,
+                height: 36.0,
+              ),
+            ),
+          ),
+          surfaceSize: const Size(844.0, 390.0),
+          wrapInScaffold: false,
+        );
+
+        expect(
+          tester
+              .getTopLeft(find.byKey(const ValueKey<String>('land_brand')))
+              .dx,
+          greaterThanOrEqualTo(48.0),
+          reason: 'Landscape top chrome brand must clear left 48px cutout',
+        );
+        expect(
+          tester
+              .getTopRight(find.byKey(const ValueKey<String>('land_sync')))
+              .dx,
+          lessThanOrEqualTo(844.0 - 48.0 + 0.5),
+          reason: 'Landscape top chrome trailing actions must clear right 48px nav bar',
+        );
+        expect(
+          tester.getTopLeft(find.byKey(const ValueKey<String>('land_nav'))).dx,
+          greaterThanOrEqualTo(48.0),
+          reason: 'Landscape persistent sidebar must clear left 48px cutout',
+        );
+        expect(
+          tester
+              .getTopRight(
+                find.byKey(const ValueKey<String>('land_body_right')),
+              )
+              .dx,
+          lessThanOrEqualTo(844.0 - 48.0 + 0.5),
+          reason: 'Landscape main body must clear right 48px nav bar',
+        );
+        expect(
+          tester
+              .getTopRight(
+                find.byKey(const ValueKey<String>('land_dock_right')),
+              )
+              .dx,
+          lessThanOrEqualTo(844.0 - 48.0 + 0.5),
+          reason: 'Landscape bottom dock must clear right 48px nav bar',
+        );
+      },
+    );
+
+    testWidgets(
+      'applies brightness-matched SystemUiOverlayStyle across all 4 theme presets',
+      (tester) async {
+        final presets = <UiThemeTokens>[
+          UiThemePresets.calm.light,
+          UiThemePresets.calm.dark,
+          UiThemePresets.plumUmber.light,
+          UiThemePresets.plumUmber.dark,
+        ];
+
+        for (final tokens in presets) {
+          await pumpUiWidget(
+            tester,
+            const UiAdaptiveAppShell(
+              brand: Text('TierTask'),
+              sidebarBody: SizedBox.shrink(),
+              body: Text('Main'),
+            ),
+            tokens: tokens,
+            wrapInScaffold: false,
+          );
+          await tester.pumpAndSettle();
+
+          final regionFinder = find.descendant(
+            of: find.byType(UiAdaptiveAppShell),
+            matching: find.byType(AnnotatedRegion<SystemUiOverlayStyle>),
+          );
+          expect(
+            regionFinder,
+            findsOneWidget,
+            reason: 'UiAdaptiveAppShell must wrap root shell in AnnotatedRegion<SystemUiOverlayStyle>',
+          );
+
+          final style = tester
+              .widget<AnnotatedRegion<SystemUiOverlayStyle>>(regionFinder)
+              .value;
+          final expectedIconBrightness = tokens.brightness == Brightness.dark
+              ? Brightness.light
+              : Brightness.dark;
+          expect(
+            style.statusBarColor,
+            equals(Colors.transparent),
+            reason: 'Status bar must remain transparent over top chrome panel',
+          );
+          expect(
+            style.statusBarIconBrightness,
+            equals(expectedIconBrightness),
+            reason:
+                'Status bar icon brightness must contrast ${tokens.brightness}',
+          );
+          expect(
+            style.systemNavigationBarColor,
+            equals(tokens.colors.bg),
+            reason: 'Navigation bar color must match shell bg token',
+          );
+          expect(
+            style.systemNavigationBarIconBrightness,
+            equals(expectedIconBrightness),
+            reason:
+                'Navigation bar icon brightness must contrast ${tokens.brightness}',
+          );
+          expect(
+            style.systemNavigationBarContrastEnforced,
+            isFalse,
+            reason: 'Navigation bar must disable default contrast scrim over styled bg',
           );
         }
       },

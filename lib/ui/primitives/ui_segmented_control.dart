@@ -1206,6 +1206,7 @@ class _UiVerticalSegmentedControlState<T>
     super.didChangeDependencies();
     MediaQuery.maybeSizeOf(context);
     MediaQuery.maybePaddingOf(context);
+    MediaQuery.maybeViewPaddingOf(context);
     MediaQuery.maybeViewInsetsOf(context);
     if (_isMenuOpen || _overlayController.isShowing) {
       _scheduleMetricsRefresh();
@@ -1382,7 +1383,33 @@ class _UiVerticalSegmentedControlState<T>
   _UiVerticalPopupMetrics _computePopupMetrics() {
     final tokens = UiThemeTokens.of(context);
     final mediaSize = MediaQuery.sizeOf(context);
-    final mediaPadding = MediaQuery.paddingOf(context);
+    final localPadding = MediaQuery.paddingOf(context);
+    final viewPadding = MediaQuery.viewPaddingOf(context);
+    final flutterView = View.maybeOf(context);
+    final hardwareViewPadding = flutterView == null
+        ? EdgeInsets.zero
+        : EdgeInsets.fromViewPadding(
+            flutterView.viewPadding,
+            flutterView.devicePixelRatio,
+          );
+    final mediaPadding = EdgeInsets.fromLTRB(
+      math.max(
+        math.max(localPadding.left, viewPadding.left),
+        hardwareViewPadding.left,
+      ),
+      math.max(
+        math.max(localPadding.top, viewPadding.top),
+        hardwareViewPadding.top,
+      ),
+      math.max(
+        math.max(localPadding.right, viewPadding.right),
+        hardwareViewPadding.right,
+      ),
+      math.max(
+        math.max(localPadding.bottom, viewPadding.bottom),
+        hardwareViewPadding.bottom,
+      ),
+    );
     final viewInsets = MediaQuery.viewInsetsOf(context);
     final rowMinHeight = UiBreakpoints.isCompact(mediaSize.width)
         ? tokens.spacing.touchTargetMobile

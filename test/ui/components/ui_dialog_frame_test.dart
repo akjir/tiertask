@@ -211,5 +211,123 @@ void main() {
         expect(triggerFocus.hasFocus, isTrue);
       },
     );
+
+    testWidgets(
+      'showBottomSheet and showModal clear system bar padding and soft keyboard viewInsets',
+      (tester) async {
+        tester.view.padding = const FakeViewPadding(top: 48.0, bottom: 24.0);
+        tester.view.viewPadding = const FakeViewPadding(
+          top: 48.0,
+          bottom: 24.0,
+        );
+        addTearDown(() {
+          tester.view.resetPadding();
+          tester.view.resetViewPadding();
+          tester.view.resetViewInsets();
+        });
+
+        await pumpUiWidget(
+          tester,
+          Builder(
+            builder: (context) {
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
+                  UiButton(
+                    key: const ValueKey<String>('open_edge_sheet'),
+                    label: 'Open Sheet',
+                    onPressed: () async {
+                      await UiDialogFrame.showBottomSheet<void>(
+                        context: context,
+                        title: 'Labels',
+                        doneLabel: 'Done',
+                        builder: (_) => const SizedBox(
+                          key: ValueKey<String>('edge_sheet_body'),
+                          height: 120.0,
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            child: Text('Bottom Sheet Content'),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  UiButton(
+                    key: const ValueKey<String>('open_edge_modal'),
+                    label: 'Open Modal',
+                    onPressed: () async {
+                      await UiDialogFrame.showModal<void>(
+                        context: context,
+                        builder: (dialogContext) => UiDialogFrame(
+                          key: const ValueKey<String>('edge_modal_frame'),
+                          title: 'Tall Modal',
+                          onClose: () => Navigator.of(dialogContext).pop(),
+                          body: const SizedBox(height: 900.0),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
+          surfaceSize: const Size(390.0, 844.0),
+          wrapInScaffold: false,
+        );
+
+        await tester.tap(find.byKey(const ValueKey<String>('open_edge_sheet')));
+        await tester.pumpAndSettle();
+
+        final sheetBodyRect = tester.getRect(
+          find.byKey(const ValueKey<String>('edge_sheet_body')),
+        );
+        expect(
+          sheetBodyRect.bottom,
+          lessThanOrEqualTo(844.0 - 24.0 - 16.0 + 0.5),
+          reason: 'Bottom sheet content must clear 24px navigation bar plus 16px bottom padding',
+        );
+
+        // Soft keyboard opens while bottom sheet is visible -> sheet rises above keyboard.
+        tester.view.padding = const FakeViewPadding(top: 48.0);
+        tester.view.viewInsets = const FakeViewPadding(bottom: 300.0);
+        await tester.pumpAndSettle();
+
+        final sheetWithImeRect = tester.getRect(
+          find.byKey(const ValueKey<String>('ui_bottom_sheet')),
+        );
+        expect(
+          sheetWithImeRect.bottom,
+          lessThanOrEqualTo(844.0 - 300.0 + 0.5),
+          reason: 'Bottom sheet must rise above 300px soft keyboard',
+        );
+        expect(
+          sheetWithImeRect.top,
+          greaterThanOrEqualTo(48.0 - 0.5),
+          reason: 'Bottom sheet must stay below 48px status bar',
+        );
+
+        await tester.tap(find.text('Done'));
+        await tester.pumpAndSettle();
+
+        // Modal dialog with tall body and soft keyboard open must stay inside safe + IME bounds.
+        await tester.tap(find.byKey(const ValueKey<String>('open_edge_modal')));
+        await tester.pumpAndSettle();
+
+        final modalRect = tester.getRect(
+          find.byKey(const ValueKey<String>('edge_modal_frame')),
+        );
+        expect(
+          modalRect.top,
+          greaterThanOrEqualTo(48.0 + 16.0 - 0.5),
+          reason: 'Modal dialog must clear 48px status bar plus 16px margin',
+        );
+        expect(
+          modalRect.bottom,
+          lessThanOrEqualTo(844.0 - 300.0 - 16.0 + 0.5),
+          reason:
+              'Modal dialog must clear 300px soft keyboard plus 16px margin',
+        );
+      },
+    );
   });
 }

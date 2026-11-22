@@ -370,6 +370,7 @@ class _WorkspaceListSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final canDelete = summaries.length > 1;
     return ListView.separated(
+      padding: EdgeInsets.zero,
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       itemCount: summaries.length,

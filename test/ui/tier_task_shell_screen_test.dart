@@ -962,5 +962,67 @@ void main() {
         expect(container.read(shellProvider).activeLabelId, isNull);
       },
     );
+
+    testWidgets(
+      'clears Android edge-to-edge status bar and navigation bar in top chrome and Settings action dock without desktop window controls',
+      (tester) async {
+        tester.view.padding = const FakeViewPadding(top: 48.0, bottom: 24.0);
+        tester.view.viewPadding = const FakeViewPadding(
+          top: 48.0,
+          bottom: 24.0,
+        );
+        addTearDown(() {
+          tester.view.resetPadding();
+          tester.view.resetViewPadding();
+        });
+
+        final container = await pumpLeafWidget(
+          tester,
+          const TierTaskShellScreen(),
+          board: createSampleBoard(),
+          surfaceSize: const Size(390.0, 844.0),
+          supportsDesktopWindowControls: false,
+          buildProfile: AppBuildProfile.dev,
+        );
+
+        expect(
+          find.byKey(const ValueKey<String>('chrome_close_window_button')),
+          findsNothing,
+          reason: 'Android shell must never render desktop window close button',
+        );
+        expect(
+          find.byKey(const ValueKey<String>('ui_top_chrome_drag_region')),
+          findsNothing,
+          reason: 'Android shell must never mount desktop chrome drag gestures',
+        );
+        expect(
+          tester
+              .getTopLeft(
+                find.byKey(const ValueKey<String>('chrome_brand_button')),
+              )
+              .dy,
+          greaterThanOrEqualTo(48.0),
+          reason: 'Top chrome brand must clear 48px Android status bar inset',
+        );
+        expect(
+          tester.getTopLeft(find.byTooltip('Open menu')).dy,
+          greaterThanOrEqualTo(48.0),
+          reason: 'Top chrome compact menu button must clear 48px Android status bar inset',
+        );
+
+        container.read(shellProvider.notifier).openView(ShellView.settings);
+        await tester.pumpAndSettle();
+
+        final testSyncButton = find.byKey(
+          const ValueKey<String>('settings_dock_test_sync_button'),
+        );
+        expect(testSyncButton, findsOneWidget);
+        expect(
+          tester.getBottomLeft(testSyncButton).dy,
+          lessThanOrEqualTo(844.0 - 24.0 - 12.0 + 0.5),
+          reason: 'Settings bottom dock button must clear 24px Android gesture navigation bar',
+        );
+      },
+    );
   });
 }

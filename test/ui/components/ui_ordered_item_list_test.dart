@@ -172,5 +172,41 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'applies explicit EdgeInsets.zero on internal ListView so OS MediaQuery padding never injects phantom gaps',
+      (tester) async {
+        tester.view.padding = const FakeViewPadding(top: 48.0, bottom: 24.0);
+        tester.view.viewPadding = const FakeViewPadding(
+          top: 48.0,
+          bottom: 24.0,
+        );
+        addTearDown(() {
+          tester.view.resetPadding();
+          tester.view.resetViewPadding();
+        });
+
+        await pumpUiWidget(
+          tester,
+          SizedBox(
+            width: 390.0,
+            child: UiOrderedItemList<String>(
+              items: const <String>['Alpha'],
+              itemKey: (_, index) => ValueKey<String>('edge_$index'),
+              itemBuilder: (_, item, _, _) => Text(item),
+            ),
+          ),
+          surfaceSize: const Size(390.0, 844.0),
+          wrapInScaffold: false,
+        );
+
+        final listView = tester.widget<ListView>(find.byType(ListView));
+        expect(
+          listView.padding,
+          equals(EdgeInsets.zero),
+          reason: 'UiOrderedItemList must set EdgeInsets.zero on internal ListView to avoid phantom MediaQuery padding',
+        );
+      },
+    );
   });
 }

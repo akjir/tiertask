@@ -1254,5 +1254,72 @@ void main() {
         expect(selected, equals('queue'));
       },
     );
+
+    testWidgets(
+      'vertical popup respects OS viewPadding even inside MediaQuery.removePadding',
+      (tester) async {
+        tester.view.padding = const FakeViewPadding(top: 48.0, bottom: 24.0);
+        tester.view.viewPadding = const FakeViewPadding(
+          top: 48.0,
+          bottom: 24.0,
+        );
+        addTearDown(() {
+          tester.view.resetPadding();
+          tester.view.resetViewPadding();
+        });
+
+        final manySegments = <UiSegment<int>>[
+          for (var i = 0; i < 20; i++)
+            UiSegment<int>(value: i, label: 'Option $i'),
+        ];
+
+        await pumpUiWidget(
+          tester,
+          Builder(
+            builder: (context) {
+              return MediaQuery.removePadding(
+                context: context,
+                removeTop: true,
+                removeBottom: true,
+                removeLeft: true,
+                removeRight: true,
+                child: Align(
+                  alignment: Alignment.topLeft,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 60.0, left: 16.0),
+                    child: UiSegmentedControl<int>(
+                      key: const ValueKey<String>('removed_padding_combo'),
+                      mode: UiSegmentedControlMode.vertical,
+                      segments: manySegments,
+                      value: 0,
+                      onChanged: (_) {},
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+          surfaceSize: const Size(390.0, 500.0),
+          wrapInScaffold: false,
+        );
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('removed_padding_combo')),
+        );
+        await tester.pumpAndSettle();
+
+        final popupRect = tester.getRect(
+          find.descendant(
+            of: find.byType(CompositedTransformFollower),
+            matching: find.byType(FadeTransition),
+          ),
+        );
+        expect(
+          popupRect.bottom,
+          lessThanOrEqualTo(500.0 - 24.0 - 8.0 + 0.5),
+          reason: 'Vertical popup must remain above 24px OS viewPadding even after MediaQuery.removePadding',
+        );
+      },
+    );
   });
 }

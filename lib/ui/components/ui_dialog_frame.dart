@@ -173,14 +173,23 @@ class UiDialogFrame extends StatelessWidget {
         barrierColor: tokens.colors.scrim,
         transitionDuration: tokens.focus.fadeDuration,
         pageBuilder: (dialogContext, _, _) {
+          final safePadding = MediaQuery.paddingOf(dialogContext);
+          final viewInsets = MediaQuery.viewInsetsOf(dialogContext);
           return _UiFocusTrapOverlay(
             onEscape: barrierDismissible
                 ? () => Navigator.of(dialogContext).maybePop()
                 : null,
-            child: Center(
-              child: Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: builder(dialogContext),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                16.0 + safePadding.left + viewInsets.left,
+                16.0 + safePadding.top + viewInsets.top,
+                16.0 + safePadding.right + viewInsets.right,
+                16.0 + safePadding.bottom + viewInsets.bottom,
+              ),
+              child: MediaQuery(
+                data: MediaQuery.of(dialogContext)
+                    .copyWith(padding: EdgeInsets.zero),
+                child: Center(child: builder(dialogContext)),
               ),
             ),
           );
@@ -404,102 +413,128 @@ class _UiBottomSheetShell extends StatelessWidget {
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
     final viewportHeight = MediaQuery.sizeOf(context).height;
+    final safePadding = MediaQuery.paddingOf(context);
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+    final availableHeight = math.max(
+      0.0,
+      viewportHeight - viewInsets.bottom - safePadding.top,
+    );
+    final maxHeight = math.min(viewportHeight * 0.78, availableHeight);
 
-    return Material(
-      key: const ValueKey<String>('ui_bottom_sheet'),
-      type: MaterialType.transparency,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: viewportHeight * 0.78),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: colors.panel,
-            borderRadius: BorderRadius.vertical(
-              top: Radius.circular(tokens.radii.shell),
-            ),
-            border: Border(
-              top: BorderSide(
-                color: colors.line,
-                width: tokens.radii.borderWidth,
+    return Padding(
+      padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: Material(
+        key: const ValueKey<String>('ui_bottom_sheet'),
+        type: MaterialType.transparency,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.panel,
+              borderRadius: BorderRadius.vertical(
+                top: Radius.circular(tokens.radii.shell),
               ),
+              border: Border(
+                top: BorderSide(
+                  color: colors.line,
+                  width: tokens.radii.borderWidth,
+                ),
+              ),
+              boxShadow: tokens.focus.bottomSheetShadow,
             ),
-            boxShadow: tokens.focus.bottomSheetShadow,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              ExcludeSemantics(
-                child: Padding(
-                  key: const ValueKey<String>('ui_bottom_sheet_handle'),
-                  padding: const EdgeInsets.only(top: 8.0, bottom: 2.0),
-                  child: Center(
-                    child: Container(
-                      width: 36.0,
-                      height: 4.0,
-                      decoration: BoxDecoration(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                ExcludeSemantics(
+                  child: Padding(
+                    key: const ValueKey<String>('ui_bottom_sheet_handle'),
+                    padding: const EdgeInsets.only(top: 8.0, bottom: 2.0),
+                    child: Center(
+                      child: Container(
+                        width: 36.0,
+                        height: 4.0,
+                        decoration: BoxDecoration(
+                          color: colors.line,
+                          borderRadius: BorderRadius.circular(
+                            tokens.radii.pill,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
                         color: colors.line,
-                        borderRadius: BorderRadius.circular(tokens.radii.pill),
+                        width: tokens.radii.borderWidth,
                       ),
                     ),
                   ),
-                ),
-              ),
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  border: Border(
-                    bottom: BorderSide(
-                      color: colors.line,
-                      width: tokens.radii.borderWidth,
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      14.0 + safePadding.left,
+                      8.0,
+                      14.0 + safePadding.right,
+                      10.0,
+                    ),
+                    child: Row(
+                      children: <Widget>[
+                        if (icon case final glyph?) ...<Widget>[
+                          ExcludeSemantics(
+                            child: Icon(
+                              glyph,
+                              size: tokens.spacing.iconSm,
+                              color: colors.accent,
+                            ),
+                          ),
+                          const SizedBox(width: 8.0),
+                        ],
+                        Flexible(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: tokens.typography.body.copyWith(
+                              color: colors.ink,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (countLabel case final count?) ...<Widget>[
+                          const SizedBox(width: 8.0),
+                          UiPill(label: count, variant: UiPillVariant.count),
+                        ],
+                        const Spacer(),
+                        if (doneLabel case final done?)
+                          UiButton(
+                            label: done,
+                            density: UiButtonDensity.compact,
+                            onPressed: onDone,
+                          ),
+                      ],
                     ),
                   ),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14.0, 8.0, 14.0, 10.0),
-                  child: Row(
-                    children: <Widget>[
-                      if (icon case final glyph?) ...<Widget>[
-                        ExcludeSemantics(
-                          child: Icon(
-                            glyph,
-                            size: tokens.spacing.iconSm,
-                            color: colors.accent,
-                          ),
-                        ),
-                        const SizedBox(width: 8.0),
-                      ],
-                      Flexible(
-                        child: Text(
-                          title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: tokens.typography.body.copyWith(
-                            color: colors.ink,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      if (countLabel case final count?) ...<Widget>[
-                        const SizedBox(width: 8.0),
-                        UiPill(label: count, variant: UiPillVariant.count),
-                      ],
-                      const Spacer(),
-                      if (doneLabel case final done?)
-                        UiButton(
-                          label: done,
-                          density: UiButtonDensity.compact,
-                          onPressed: onDone,
-                        ),
-                    ],
+                Flexible(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(
+                      14.0 + safePadding.left,
+                      12.0,
+                      14.0 + safePadding.right,
+                      16.0 + safePadding.bottom,
+                    ),
+                    child: MediaQuery(
+                      data: MediaQuery.of(context)
+                          .copyWith(padding: EdgeInsets.zero),
+                      child: child,
+                    ),
                   ),
                 ),
-              ),
-              Flexible(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(14.0, 12.0, 14.0, 16.0),
-                  child: child,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

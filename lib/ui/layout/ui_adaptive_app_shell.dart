@@ -15,6 +15,7 @@
 
 import 'dart:math' as math;
 
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../primitives/ui_button.dart';
@@ -112,55 +113,67 @@ class UiAdaptiveAppShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
+    final safePadding = MediaQuery.paddingOf(context);
+    final viewInsets = MediaQuery.viewInsetsOf(context);
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth.isFinite
-            ? constraints.maxWidth
-            : MediaQuery.sizeOf(context).width;
-        final viewport = UiBreakpoints.classify(width);
-        final isCompact = viewport == UiViewportClass.compact;
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: _resolveSystemUiOverlayStyle(tokens),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth.isFinite
+              ? constraints.maxWidth
+              : MediaQuery.sizeOf(context).width;
+          final viewport = UiBreakpoints.classify(width);
+          final isCompact = viewport == UiViewportClass.compact;
 
-        return Material(
-          color: colors.bg,
-          child: Column(
-            children: <Widget>[
-              _UiTopChromeBar(
-                viewport: viewport,
-                brand: brand,
-                buildBadge: buildBadge,
-                mobileActiveFilter: mobileActiveFilter,
-                workspaceTrigger: workspaceTrigger,
-                searchWidget: searchWidget,
-                isSearchOpen: isSearchOpen,
-                trailingActions: trailingActions,
-                isDrawerOpen: isDrawerOpen,
-                onChromeDragStart: onChromeDragStart,
-                onChromeDoubleTap: onChromeDoubleTap,
-                onToggleDrawer: onToggleDrawer,
-                menuOpenTooltip: menuOpenTooltip,
-                menuCloseTooltip: menuCloseTooltip,
-              ),
-              Expanded(
-                child: _UiShellBodyStack(
+          return Material(
+            color: colors.bg,
+            child: Column(
+              children: <Widget>[
+                _UiTopChromeBar(
                   viewport: viewport,
-                  availableWidth: width,
-                  isCompact: isCompact,
+                  safePadding: safePadding,
+                  brand: brand,
+                  buildBadge: buildBadge,
+                  mobileActiveFilter: mobileActiveFilter,
+                  workspaceTrigger: workspaceTrigger,
+                  searchWidget: searchWidget,
+                  isSearchOpen: isSearchOpen,
+                  trailingActions: trailingActions,
                   isDrawerOpen: isDrawerOpen,
+                  onChromeDragStart: onChromeDragStart,
+                  onChromeDoubleTap: onChromeDoubleTap,
                   onToggleDrawer: onToggleDrawer,
-                  sidebarHeader: sidebarHeader,
-                  sidebarBody: sidebarBody,
-                  sidebarFooter: sidebarFooter,
-                  sidebarScrollController: sidebarScrollController,
-                  body: body,
-                  floatingNotice: floatingNotice,
-                  bottomDock: bottomDock,
+                  menuOpenTooltip: menuOpenTooltip,
+                  menuCloseTooltip: menuCloseTooltip,
                 ),
-              ),
-            ],
-          ),
-        );
-      },
+                Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: viewInsets.bottom),
+                    child: _UiZeroPaddingScope(
+                      child: _UiShellBodyStack(
+                        viewport: viewport,
+                        availableWidth: width,
+                        isCompact: isCompact,
+                        isDrawerOpen: isDrawerOpen,
+                        safePadding: safePadding,
+                        onToggleDrawer: onToggleDrawer,
+                        sidebarHeader: sidebarHeader,
+                        sidebarBody: sidebarBody,
+                        sidebarFooter: sidebarFooter,
+                        sidebarScrollController: sidebarScrollController,
+                        body: body,
+                        floatingNotice: floatingNotice,
+                        bottomDock: bottomDock,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 }
@@ -170,6 +183,7 @@ class _UiTopChromeBar extends StatelessWidget {
   /// Creates a [_UiTopChromeBar].
   const _UiTopChromeBar({
     required this.viewport,
+    required this.safePadding,
     required this.brand,
     required this.buildBadge,
     required this.mobileActiveFilter,
@@ -215,6 +229,9 @@ class _UiTopChromeBar extends StatelessWidget {
   /// Drawer toggle callback.
   final VoidCallback? onToggleDrawer;
 
+  /// System bar and display cutout safe-area insets applied to top and horizontal chrome edges.
+  final EdgeInsets safePadding;
+
   /// Search toggle or active search input.
   final Widget? searchWidget;
 
@@ -255,13 +272,24 @@ class _UiTopChromeBar extends StatelessWidget {
                 onDoubleTap: onChromeDoubleTap,
               ),
             ),
-          ConstrainedBox(
-            constraints: BoxConstraints(minHeight: tokens.spacing.chromeHeight),
-            child: Padding(
-              padding: tokens.spacing.chromePadding(viewport),
-              child: isCompact
-                  ? _buildCompactRow(tokens)
-                  : _buildDesktopRow(tokens),
+          Padding(
+            padding: EdgeInsets.only(
+              top: safePadding.top,
+              left: safePadding.left,
+              right: safePadding.right,
+            ),
+            child: _UiZeroPaddingScope(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: tokens.spacing.chromeHeight,
+                ),
+                child: Padding(
+                  padding: tokens.spacing.chromePadding(viewport),
+                  child: isCompact
+                      ? _buildCompactRow(tokens)
+                      : _buildDesktopRow(tokens),
+                ),
+              ),
             ),
           ),
         ],
@@ -379,6 +407,7 @@ class _UiShellBodyStack extends StatelessWidget {
     required this.availableWidth,
     required this.isCompact,
     required this.isDrawerOpen,
+    required this.safePadding,
     required this.onToggleDrawer,
     required this.sidebarHeader,
     required this.sidebarBody,
@@ -410,6 +439,9 @@ class _UiShellBodyStack extends StatelessWidget {
   /// Drawer toggle callback (invoked on scrim tap).
   final VoidCallback? onToggleDrawer;
 
+  /// System bar and display cutout safe-area insets for sidebar, body, notices, and bottom dock.
+  final EdgeInsets safePadding;
+
   /// Scrollable sidebar navigation body.
   final Widget sidebarBody;
 
@@ -431,6 +463,8 @@ class _UiShellBodyStack extends StatelessWidget {
     final colors = tokens.colors;
     final mainColumn = _UiMainColumn(
       viewport: viewport,
+      isCompact: isCompact,
+      safePadding: safePadding,
       body: body,
       floatingNotice: floatingNotice,
       bottomDock: bottomDock,
@@ -441,12 +475,14 @@ class _UiShellBodyStack extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           SizedBox(
-            width: tokens.spacing.sidebarWidth,
+            width: tokens.spacing.sidebarWidth + safePadding.left,
             child: _UiSidebarContainer(
               header: null,
               body: sidebarBody,
               footer: sidebarFooter,
               scrollController: sidebarScrollController,
+              leftInset: safePadding.left,
+              bottomInset: safePadding.bottom,
             ),
           ),
           Expanded(child: mainColumn),
@@ -455,7 +491,7 @@ class _UiShellBodyStack extends StatelessWidget {
     }
 
     final drawerWidth = math.min(
-      tokens.spacing.drawerMaxWidth,
+      tokens.spacing.drawerMaxWidth + safePadding.left,
       availableWidth * 0.92,
     );
 
@@ -483,6 +519,8 @@ class _UiShellBodyStack extends StatelessWidget {
                 body: sidebarBody,
                 footer: sidebarFooter,
                 scrollController: sidebarScrollController,
+                leftInset: safePadding.left,
+                bottomInset: safePadding.bottom,
               ),
             ),
           ),
@@ -500,16 +538,24 @@ class _UiSidebarContainer extends StatelessWidget {
     required this.body,
     required this.footer,
     required this.scrollController,
+    required this.leftInset,
+    required this.bottomInset,
   });
 
   /// Scrollable navigation sections.
   final Widget body;
+
+  /// Bottom system navigation bar safe inset added below sidebar scroll content.
+  final double bottomInset;
 
   /// Optional scrollable footer aligned to the bottom when navigation content fits.
   final Widget? footer;
 
   /// Optional compact header.
   final Widget? header;
+
+  /// Left display cutout or system bar safe inset added to sidebar leading padding.
+  final double leftInset;
 
   /// Optional scroll controller.
   final ScrollController? scrollController;
@@ -533,13 +579,15 @@ class _UiSidebarContainer extends StatelessWidget {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final minContentHeight = constraints.maxHeight.isFinite
-                ? math.max(0.0, constraints.maxHeight - 28.0)
+                ? math.max(0.0, constraints.maxHeight - 28.0 - bottomInset)
                 : 0.0;
             return SingleChildScrollView(
               controller: scrollController,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10.0,
-                vertical: 14.0,
+              padding: EdgeInsets.fromLTRB(
+                10.0 + leftInset,
+                14.0,
+                10.0,
+                14.0 + bottomInset,
               ),
               child: _UiSidebarScrollContent(
                 header: header,
@@ -644,6 +692,8 @@ class _UiMainColumn extends StatelessWidget {
   /// Creates a [_UiMainColumn].
   const _UiMainColumn({
     required this.viewport,
+    required this.isCompact,
+    required this.safePadding,
     required this.body,
     required this.floatingNotice,
     required this.bottomDock,
@@ -658,6 +708,12 @@ class _UiMainColumn extends StatelessWidget {
   /// Optional floating bottom toast anchored inside the viewport region.
   final Widget? floatingNotice;
 
+  /// Whether viewport is compact (determining whether left safe inset applies here vs persistent sidebar).
+  final bool isCompact;
+
+  /// System bar and display cutout safe-area insets.
+  final EdgeInsets safePadding;
+
   /// Active viewport class.
   final UiViewportClass viewport;
 
@@ -665,11 +721,14 @@ class _UiMainColumn extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
-    final isCompact = viewport == UiViewportClass.compact;
     final noticeBottom = isCompact
         ? tokens.spacing.floatingNoticeInsetCompact
         : tokens.spacing.floatingNoticeInsetDesktop;
     final noticeHorizontal = isCompact ? 14.0 : 26.0;
+    final mainLeftInset = isCompact ? safePadding.left : 0.0;
+    final mainRightInset = safePadding.right;
+    final mainBottomInset = bottomDock == null ? safePadding.bottom : 0.0;
+    final dockPadding = tokens.spacing.dockPadding(viewport);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -677,12 +736,22 @@ class _UiMainColumn extends StatelessWidget {
         Expanded(
           child: Stack(
             children: <Widget>[
-              Positioned.fill(child: body),
+              Positioned.fill(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    mainLeftInset,
+                    0.0,
+                    mainRightInset,
+                    mainBottomInset,
+                  ),
+                  child: body,
+                ),
+              ),
               if (floatingNotice case final notice?)
                 Positioned(
-                  left: noticeHorizontal,
-                  right: noticeHorizontal,
-                  bottom: noticeBottom,
+                  left: noticeHorizontal + mainLeftInset,
+                  right: noticeHorizontal + mainRightInset,
+                  bottom: noticeBottom + mainBottomInset,
                   child: Align(
                     alignment: Alignment.bottomCenter,
                     heightFactor: 1.0,
@@ -704,11 +773,49 @@ class _UiMainColumn extends StatelessWidget {
               ),
             ),
             child: Padding(
-              padding: tokens.spacing.dockPadding(viewport),
+              padding: EdgeInsets.fromLTRB(
+                dockPadding.left + mainLeftInset,
+                dockPadding.top,
+                dockPadding.right + mainRightInset,
+                dockPadding.bottom + safePadding.bottom,
+              ),
               child: dock,
             ),
           ),
       ],
     );
   }
+}
+
+/// Clears consumed `MediaQuery.padding` for shell descendants while preserving `viewPadding` and `viewInsets`.
+class _UiZeroPaddingScope extends StatelessWidget {
+  /// Creates a [_UiZeroPaddingScope] wrapping [child].
+  const _UiZeroPaddingScope({required this.child});
+
+  /// Descendant subtree shielded from duplicate `MediaQuery.padding`.
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(padding: EdgeInsets.zero),
+      child: child,
+    );
+  }
+}
+
+/// Resolves theme-contrasting edge-to-edge system bar overlay styling for [tokens].
+SystemUiOverlayStyle _resolveSystemUiOverlayStyle(UiThemeTokens tokens) {
+  final iconBrightness = tokens.brightness == Brightness.dark
+      ? Brightness.light
+      : Brightness.dark;
+  return SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: iconBrightness,
+    statusBarBrightness: tokens.brightness,
+    systemNavigationBarColor: tokens.colors.bg,
+    systemNavigationBarDividerColor: Colors.transparent,
+    systemNavigationBarIconBrightness: iconBrightness,
+    systemNavigationBarContrastEnforced: false,
+  );
 }
