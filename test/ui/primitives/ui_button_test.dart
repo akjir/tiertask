@@ -231,7 +231,6 @@ void main() {
                   label: 'Work',
                   leadingIcon: Icons.grid_view_outlined,
                   trailingIcon: Icons.unfold_more_rounded,
-                  variant: UiButtonVariant.secondary,
                   density: UiButtonDensity.chrome,
                   onPressed: () {},
                 ),
@@ -239,7 +238,6 @@ void main() {
                   key: const ValueKey<String>('chrome_sync_muted'),
                   label: 'Synced',
                   leadingIcon: Icons.cloud_done_outlined,
-                  variant: UiButtonVariant.secondary,
                   density: UiButtonDensity.chrome,
                   tone: UiButtonTone.muted,
                   onPressed: () {},
@@ -249,7 +247,6 @@ void main() {
                   child: UiButton(
                     key: const ValueKey<String>('inset_chrome_btn'),
                     label: 'Inset',
-                    variant: UiButtonVariant.secondary,
                     density: UiButtonDensity.chrome,
                     onPressed: () {},
                   ),
@@ -258,7 +255,6 @@ void main() {
                   key: const ValueKey<String>('standard_icon_accent'),
                   leadingIcon: Icons.my_location_rounded,
                   variant: UiButtonVariant.icon,
-                  density: UiButtonDensity.standard,
                   tone: UiButtonTone.accent,
                   onPressed: () {},
                 ),
@@ -400,6 +396,81 @@ void main() {
           tester.getSize(containerFinder).width,
           closeTo(220.0, 0.1),
           reason: 'Focused button in tight parent must keep full 220px width inside focus ring',
+        );
+      },
+    );
+
+    testWidgets(
+      'keeps TickerProvider off idle UiButton state, omits AnimatedContainer on disabled buttons, and wraps loading spinner in RepaintBoundary',
+      (tester) async {
+        await pumpUiWidget(
+          tester,
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              UiButton(
+                key: const ValueKey<String>('idle_btn'),
+                label: 'Idle',
+                leadingIcon: Icons.sync_rounded,
+                onPressed: () {},
+              ),
+              const UiButton(
+                key: ValueKey<String>('static_disabled_btn'),
+                label: 'Disabled',
+                onPressed: null,
+              ),
+              UiButton(
+                key: const ValueKey<String>('spinning_btn'),
+                label: 'Loading',
+                leadingIcon: Icons.sync_rounded,
+                isLoading: true,
+                onPressed: () {},
+              ),
+            ],
+          ),
+        );
+
+        final idleState = tester.state(
+          find.byKey(const ValueKey<String>('idle_btn')),
+        );
+        expect(
+          idleState is TickerProvider,
+          isFalse,
+          reason: 'UiButton state must not mix in SingleTickerProviderStateMixin when idle',
+        );
+
+        final disabledFinder = find.byKey(
+          const ValueKey<String>('static_disabled_btn'),
+        );
+        expect(
+          find.descendant(
+            of: disabledFinder,
+            matching: find.byType(AnimatedContainer),
+          ),
+          findsNothing,
+          reason: 'Disabled UiButton must omit idle AnimatedContainer',
+        );
+        expect(
+          find.descendant(of: disabledFinder, matching: find.byType(Stack)),
+          findsNothing,
+          reason: 'Disabled UiButton must omit focus-ring Stack',
+        );
+
+        final spinnerFinder = find.descendant(
+          of: find.byKey(const ValueKey<String>('spinning_btn')),
+          matching: find.byType(RotationTransition),
+        );
+        expect(spinnerFinder, findsOneWidget);
+        expect(
+          find.ancestor(
+            of: spinnerFinder,
+            matching: find.descendant(
+              of: find.byKey(const ValueKey<String>('spinning_btn')),
+              matching: find.byType(RepaintBoundary),
+            ),
+          ),
+          findsOneWidget,
+          reason: 'UiButton loading RotationTransition must be isolated in a RepaintBoundary',
         );
       },
     );

@@ -80,7 +80,6 @@ void main() {
             child: UiBanner(
               key: const ValueKey<String>('undo_toast'),
               variant: UiBannerVariant.toast,
-              tone: UiBannerTone.neutral,
               message: 'Completed task',
               actionLabel: 'Undo',
               onAction: () => undone = true,
@@ -91,11 +90,7 @@ void main() {
           );
         }
 
-        await pumpUiWidget(
-          tester,
-          buildToast(),
-          surfaceSize: const Size(1280, 800),
-        );
+        await pumpUiWidget(tester, buildToast());
         expect(find.text('Ctrl+Z'), findsOneWidget);
         expect(
           tester

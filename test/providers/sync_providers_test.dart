@@ -142,11 +142,9 @@ class _InMemorySyncWebDavRepository extends WebDavRepository {
 void main() {
   const bothConfig = WebDavConfig(
     storageMode: StorageMode.both,
-    localFilePath: 'tasks.tdf',
     serverUrl: 'https://cloud.example.com/dav/',
     username: 'alice',
     password: 'secret',
-    filePath: 'tasks.tdf',
   );
 
   ProviderContainer createSyncContainer({
@@ -203,11 +201,11 @@ void main() {
     notifier.setSuccess(syncedAt);
     expect(
       container.read(syncStateProvider),
-      equals(SyncState(isSyncing: false, lastSyncedAt: syncedAt)),
+      equals(SyncState(lastSyncedAt: syncedAt)),
     );
     expect(
       container.read(syncStateProvider).hashCode,
-      equals(SyncState(isSyncing: false, lastSyncedAt: syncedAt).hashCode),
+      equals(SyncState(lastSyncedAt: syncedAt).hashCode),
     );
 
     const sampleReport = StorageFileReadReport(
@@ -465,7 +463,6 @@ void main() {
       serverUrl: 'https://cloud.example.com/dav/',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final webDavContainer = createSyncContainer(
       config: webDavDeConfig,
@@ -514,11 +511,9 @@ void main() {
     const bothEnConfig = WebDavConfig(
       storageMode: StorageMode.both,
       language: AppLanguage.english,
-      localFilePath: 'tasks.tdf',
       serverUrl: 'https://cloud.example.com/dav/',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final bothLocalFailContainer = createSyncContainer(
       config: bothEnConfig,
@@ -560,11 +555,9 @@ void main() {
     const bothDeConfig = WebDavConfig(
       storageMode: StorageMode.both,
       language: AppLanguage.german,
-      localFilePath: 'tasks.tdf',
       serverUrl: 'https://cloud.example.com/dav/',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final bothFailContainer = createSyncContainer(
       config: bothDeConfig,
@@ -743,11 +736,8 @@ void main() {
         'tdf 0.8.0\n\nqueue {\n  modified 2026-11-01 08:00:00\n  task 000001OkD2\n}\n\ntask 000001OkD2 {\n  name "Base Task"\n  created 2026-11-01 08:00:00\n  modified 2026-11-01 08:00:00\n}\n';
     var readCallCount = 0;
     var injectConcurrentEditsRemaining = 2;
-    const localOnlyConfig = WebDavConfig(
-      storageMode: StorageMode.local,
-      localFilePath: 'tasks.tdf',
-    );
-    final settingsRepository = InMemorySettingsRepository(localOnlyConfig);
+    const localOnlyConfig = WebDavConfig(storageMode: StorageMode.local);
+    final settingsRepository = InMemorySettingsRepository();
 
     final container = createSyncContainer(
       config: localOnlyConfig,
@@ -869,7 +859,6 @@ void main() {
       serverUrl: 'http://${server.address.host}:${server.port}',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final settingsRepository = InMemorySettingsRepository(webdavOnlyConfig);
 
@@ -1089,10 +1078,8 @@ void main() {
         '}\n';
 
     var currentDisk = gen0Initial;
-    var clockTime = DateTime.utc(2026, 11, 14, 10, 0);
-    final settingsRepository = InMemorySettingsRepository(
-      const WebDavConfig(storageMode: StorageMode.local),
-    );
+    var clockTime = DateTime.utc(2026, 11, 14, 10);
+    final settingsRepository = InMemorySettingsRepository();
     final container = ProviderContainer(
       overrides: [
         settingsRepositoryProvider.overrideWithValue(settingsRepository),
@@ -1332,11 +1319,8 @@ void main() {
 
     var localClock = DateTime.utc(2026, 11, 11, 11, 59);
     var localSaveCalls = 0;
-    const localOnlyConfig = WebDavConfig(
-      storageMode: StorageMode.local,
-      localFilePath: 'tasks.tdf',
-    );
-    final localSettings = InMemorySettingsRepository(localOnlyConfig);
+    const localOnlyConfig = WebDavConfig(storageMode: StorageMode.local);
+    final localSettings = InMemorySettingsRepository();
     final localContainer = ProviderContainer(
       overrides: [
         settingsRepositoryProvider.overrideWithValue(localSettings),
@@ -1439,7 +1423,6 @@ void main() {
       serverUrl: 'http://127.0.0.1:${server.port}',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
 
     // 2a. Initial 200 OK at 12:00:01 cleans and PUTs; second refresh at 12:00:05 (304) performs zero PUTs.
@@ -1493,11 +1476,9 @@ void main() {
     var bothClock = DateTime.utc(2026, 11, 11, 11, 59);
     final bothLoopbackConfig = WebDavConfig(
       storageMode: StorageMode.both,
-      localFilePath: 'tasks.tdf',
       serverUrl: 'http://127.0.0.1:${server.port}',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final bothSettings = InMemorySettingsRepository(bothLoopbackConfig);
     final bothContainer = ProviderContainer(
@@ -1590,11 +1571,9 @@ void main() {
     final syncTime = DateTime.utc(2026, 11, 11, 12, 0, 1);
     const manualTzConfig = WebDavConfig(
       storageMode: StorageMode.both,
-      localFilePath: 'tasks.tdf',
       serverUrl: 'https://cloud.example.com/dav/',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
       timeZoneMode: AppTimeZoneMode.manual,
       manualTimeZoneOffsetMinutes: 120,
     );
@@ -1617,7 +1596,7 @@ void main() {
     expect(migratedTask?.repeatRule?.clock.isMidnight, isFalse);
     expect(
       migratedTask?.dueAnchor,
-      equals(TdfLocalDateTime(2026, 11, 20, 16, 30, 0)),
+      equals(TdfLocalDateTime(2026, 11, 20, 16, 30)),
     );
     expect(migratedTask?.suspendedAt, isNull);
     expect(localTdf, startsWith('tdf 0.8.0\n'));
@@ -1626,14 +1605,10 @@ void main() {
     expect(remoteTdf, equals(localTdf));
 
     var autoLocalTdf = existing080Tdf;
-    const systemTzConfig = WebDavConfig(
-      storageMode: StorageMode.local,
-      localFilePath: 'tasks.tdf',
-      timeZoneMode: AppTimeZoneMode.automatic,
-    );
+    const systemTzConfig = WebDavConfig(storageMode: StorageMode.local);
     final autoContainer = createSyncContainer(
       config: systemTzConfig,
-      settingsRepository: InMemorySettingsRepository(systemTzConfig),
+      settingsRepository: InMemorySettingsRepository(),
       clock: () => syncTime,
       getLocal: () => autoLocalTdf,
       setLocal: (value) => autoLocalTdf = value,
@@ -1692,7 +1667,6 @@ void main() {
     var currentTime = DateTime.utc(2026, 11, 11, 12, 5);
     final settingsRepository = InMemorySettingsRepository(bothConfig);
     final container = createSyncContainer(
-      config: bothConfig,
       settingsRepository: settingsRepository,
       clock: () => currentTime,
       getLocal: () => localTdf,
@@ -1761,7 +1735,7 @@ void main() {
   });
 
   test('Concurrent local repeat completion and remote history set edits merge without data loss', () async {
-    var currentTime = DateTime.utc(2026, 11, 11, 8, 0);
+    var currentTime = DateTime.utc(2026, 11, 11, 8);
     var isOnline = true;
     var localTdf =
         'tdf 0.8.0\n\n'
@@ -1781,7 +1755,6 @@ void main() {
     final settingsRepository = InMemorySettingsRepository(bothConfig);
 
     final container1 = createSyncContainer(
-      config: bothConfig,
       settingsRepository: settingsRepository,
       clock: () => currentTime,
       getLocal: () => localTdf,
@@ -1794,7 +1767,7 @@ void main() {
 
     // Go offline and complete the recurring task locally at 10:00:00.
     isOnline = false;
-    currentTime = DateTime.utc(2026, 11, 11, 10, 0);
+    currentTime = DateTime.utc(2026, 11, 11, 10);
     await container1
         .read(taskNotifierProvider.notifier)
         .completeTask('repHist001');
@@ -1822,7 +1795,6 @@ void main() {
     isOnline = true;
     currentTime = DateTime.utc(2026, 11, 11, 10, 5);
     final container2 = createSyncContainer(
-      config: bothConfig,
       settingsRepository: settingsRepository,
       clock: () => currentTime,
       getLocal: () => localTdf,
@@ -1847,8 +1819,8 @@ void main() {
 
   test('Queued optimistic mutations across deleted.generation advancement ignore automatic block cleanup on retired entities, strip retired blocked references on surviving candidate tasks, and flag real edits on retired tasks as recoveryRequired', () async {
     const tdfService = TdfService();
-    final t10 = DateTime.utc(2026, 11, 11, 10, 0);
-    final t12 = DateTime.utc(2026, 11, 11, 12, 0);
+    final t10 = DateTime.utc(2026, 11, 11, 10);
+    final t12 = DateTime.utc(2026, 11, 11, 12);
 
     const gen0Raw =
         'tdf 0.8.0\n\n'
@@ -1892,11 +1864,8 @@ void main() {
 
     var diskTdf = gen0Raw;
     var clockTime = t10;
-    const localConfig = WebDavConfig(
-      storageMode: StorageMode.local,
-      localFilePath: 'tasks.tdf',
-    );
-    final settingsRepository = InMemorySettingsRepository(localConfig);
+    const localConfig = WebDavConfig(storageMode: StorageMode.local);
+    final settingsRepository = InMemorySettingsRepository();
     final container = createSyncContainer(
       config: localConfig,
       settingsRepository: settingsRepository,
@@ -2065,7 +2034,7 @@ void main() {
     clockTime = t10;
     final container2 = createSyncContainer(
       config: localConfig,
-      settingsRepository: InMemorySettingsRepository(localConfig),
+      settingsRepository: InMemorySettingsRepository(),
       clock: () => clockTime,
       getLocal: () => diskTdf,
       setLocal: (value) => diskTdf = value,
@@ -2137,9 +2106,8 @@ void main() {
     var remoteSaves = 0;
     final settings = InMemorySettingsRepository(bothConfig);
     final container = createSyncContainer(
-      config: bothConfig,
       settingsRepository: settings,
-      clock: () => DateTime.utc(2026, 11, 11, 9, 0),
+      clock: () => DateTime.utc(2026, 11, 11, 9),
       getLocal: () => localTdf,
       setLocal: (value) {
         localSaves++;
@@ -2183,7 +2151,7 @@ void main() {
   });
 
   test('TaskSyncPipeline.resolveWorkspaceTimeZone returns TdfTimeZoneContext.systemLocal() in automatic mode and fixedOffset in manual mode (TDF-CTX-001)', () {
-    const autoConfig = WebDavConfig(timeZoneMode: AppTimeZoneMode.automatic);
+    const autoConfig = WebDavConfig();
     final autoZone = TaskSyncPipeline.resolveWorkspaceTimeZone(
       autoConfig,
       DateTime.utc(2026, 1, 15, 12),
@@ -2245,11 +2213,10 @@ void main() {
 
     // 1. StorageMode.both while WebDAV is offline: Stage 1 (deferred) MUST NOT prune >30d tombstones/Completed, MUST NOT advance generation, and MUST NOT inflate/strip suspended <= now!
     var bothLocalTdf = expiredRetentionTdf;
-    final evalTime = DateTime.utc(2026, 11, 15, 12, 0);
-    var bothEvalTime = DateTime.utc(2026, 9, 25, 12, 0);
+    final evalTime = DateTime.utc(2026, 11, 15, 12);
+    var bothEvalTime = DateTime.utc(2026, 9, 25, 12);
     var bothOnline = true;
     final bothOfflineContainer = createSyncContainer(
-      config: bothConfig,
       settingsRepository: InMemorySettingsRepository(bothConfig),
       clock: () => bothEvalTime,
       getLocal: () => bothLocalTdf,
@@ -2301,19 +2268,16 @@ void main() {
     );
     expect(
       offlineDiskParsed.findTask('openKeep01')?.suspendedAt,
-      equals(DateTime.utc(2026, 11, 14, 12, 0)),
+      equals(DateTime.utc(2026, 11, 14, 12)),
       reason: 'StorageMode.both Stage 1 while offline must defer suspended <= now cleanup',
     );
 
     // 2. StorageMode.local: authoritative local stage GCs >30d Completed into deleted, expires >30d tombstones, strips blocked across Completed + Open, and increments generation ONCE even across Step 3 contention retry!
-    const localOnlyConfig = WebDavConfig(
-      storageMode: StorageMode.local,
-      localFilePath: 'tasks.tdf',
-    );
+    const localOnlyConfig = WebDavConfig(storageMode: StorageMode.local);
     var localDisk = expiredRetentionTdf;
     var localReadCount = 0;
     var injectedRetryExpiredLocation = false;
-    final localSettings = InMemorySettingsRepository(localOnlyConfig);
+    final localSettings = InMemorySettingsRepository();
     final localContainer = createSyncContainer(
       config: localOnlyConfig,
       settingsRepository: localSettings,
@@ -2362,11 +2326,11 @@ void main() {
   });
 
   test('StorageMode.both Stage 1 Step 3 local contention retry under TdfCleanupMode.deferred keeps local task.modified at T11 so remote T12 wins in Stage 2 before stamping T100', () async {
-    final t10 = DateTime.utc(2026, 11, 11, 10, 0);
-    final t11 = DateTime.utc(2026, 11, 11, 11, 0);
-    final t12 = DateTime.utc(2026, 11, 11, 12, 0);
-    final t50 = DateTime.utc(2026, 11, 11, 15, 0);
-    final t100 = DateTime.utc(2026, 11, 11, 20, 0);
+    final t10 = DateTime.utc(2026, 11, 11, 10);
+    final t11 = DateTime.utc(2026, 11, 11, 11);
+    final t12 = DateTime.utc(2026, 11, 11, 12);
+    final t50 = DateTime.utc(2026, 11, 11, 15);
+    final t100 = DateTime.utc(2026, 11, 11, 20);
 
     var localDisk =
         'tdf 0.8.0\n\n'
@@ -2397,7 +2361,6 @@ void main() {
     var readCalls = 0;
     var injectedLocalContention = false;
     final container = createSyncContainer(
-      config: bothConfig,
       settingsRepository: InMemorySettingsRepository(bothConfig),
       clock: () => t100,
       getLocal: () {
@@ -2452,12 +2415,11 @@ void main() {
 
     var localDisk = initialSynced;
     var remoteDisk = initialSynced;
-    var currentTime = DateTime.utc(2026, 9, 25, 12, 0);
+    var currentTime = DateTime.utc(2026, 9, 25, 12);
     var injectConcurrentLocalDuringStage2 = false;
 
     final settings = InMemorySettingsRepository(bothConfig);
     final container = createSyncContainer(
-      config: bothConfig,
       settingsRepository: settings,
       clock: () => currentTime,
       getLocal: () => localDisk,
@@ -2486,7 +2448,7 @@ void main() {
     expect(initialBoard.deletedBlock.findTaskRecord('expTomb001'), isNotNull);
 
     // 2. Advance past 30 days (2026-11-15): Stage 1 (deferred) keeps generation 0; Stage 2 (finalStage) expires expTomb001 (0 -> 1); during Stage 2 PUT, external local writer edits localDisk at generation 0; Stage 3 converges without SyncGenerationRollback or resurrecting expTomb001!
-    currentTime = DateTime.utc(2026, 11, 15, 12, 0);
+    currentTime = DateTime.utc(2026, 11, 15, 12);
     injectConcurrentLocalDuringStage2 = true;
     await container.read(taskNotifierProvider.notifier).syncFromRemote();
 
@@ -2525,15 +2487,12 @@ void main() {
       flush: true,
     );
 
-    const localConfig = WebDavConfig(
-      storageMode: StorageMode.local,
-      localFilePath: 'tasks.tdf',
-    );
-    final settings = InMemorySettingsRepository(localConfig);
+    const localConfig = WebDavConfig(storageMode: StorageMode.local);
+    final settings = InMemorySettingsRepository();
     final container = ProviderContainer(
       overrides: [
         settingsRepositoryProvider.overrideWithValue(settings),
-        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9, 0)),
+        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9)),
         localStorageDirectoryPathProvider.overrideWithValue(tempDir.path),
       ],
     );
@@ -2695,7 +2654,6 @@ void main() {
       serverUrl: 'http://${server.address.host}:${server.port}',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final settings = InMemorySettingsRepository(config);
     final container = ProviderContainer(
@@ -2890,7 +2848,6 @@ void main() {
       serverUrl: 'http://${server.address.host}:${server.port}',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final settings = InMemorySettingsRepository(config);
     final container = ProviderContainer(
@@ -3007,13 +2964,12 @@ void main() {
       serverUrl: 'http://${server.address.host}:${server.port}',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final settings = InMemorySettingsRepository(config);
     final container = ProviderContainer(
       overrides: [
         settingsRepositoryProvider.overrideWithValue(settings),
-        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9, 0)),
+        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9)),
       ],
     );
     addTearDown(container.dispose);
@@ -3132,11 +3088,9 @@ void main() {
 
     final bothConfig = WebDavConfig(
       storageMode: StorageMode.both,
-      localFilePath: 'tasks.tdf',
       serverUrl: 'http://${server.address.host}:${server.port}',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final settings = InMemorySettingsRepository(bothConfig);
     var failLocalSave = false;
@@ -3250,13 +3204,12 @@ void main() {
       serverUrl: 'http://${server.address.host}:${server.port}',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final settings = InMemorySettingsRepository(config);
     final container = ProviderContainer(
       overrides: [
         settingsRepositoryProvider.overrideWithValue(settings),
-        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9, 0)),
+        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 9)),
       ],
     );
     addTearDown(container.dispose);
@@ -3333,7 +3286,6 @@ void main() {
     const localEnConfig = WebDavConfig(
       storageMode: StorageMode.local,
       language: AppLanguage.english,
-      localFilePath: 'tasks.tdf',
     );
     const remoteEnConfig = WebDavConfig(
       storageMode: StorageMode.webdav,
@@ -3341,25 +3293,20 @@ void main() {
       serverUrl: 'https://cloud.example.com/dav/',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     const bothEnConfig = WebDavConfig(
       storageMode: StorageMode.both,
       language: AppLanguage.english,
-      localFilePath: 'tasks.tdf',
       serverUrl: 'https://cloud.example.com/dav/',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     const bothDeConfig = WebDavConfig(
       storageMode: StorageMode.both,
       language: AppLanguage.german,
-      localFilePath: 'tasks.tdf',
       serverUrl: 'https://cloud.example.com/dav/',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
 
     // 1. Local-only syntax error reports localOnly with format error line.
@@ -3679,7 +3626,6 @@ void main() {
     const bothUnconfiguredWebDav = WebDavConfig(
       storageMode: StorageMode.both,
       language: AppLanguage.english,
-      localFilePath: 'tasks.tdf',
     );
     final unconfiguredRemoteContainer = createSyncContainer(
       config: bothUnconfiguredWebDav,
@@ -3850,7 +3796,7 @@ void main() {
     var remoteTdf = initialTdf;
     var remoteEtag = '"etag-opt-v1"';
     var localTdf = initialTdf;
-    var currentTime = DateTime.utc(2026, 11, 1, 9, 0);
+    var currentTime = DateTime.utc(2026, 11, 1, 9);
 
     server.listen((HttpRequest request) async {
       if (request.method == 'GET') {
@@ -3886,11 +3832,9 @@ void main() {
 
     final bothConfig = WebDavConfig(
       storageMode: StorageMode.both,
-      localFilePath: 'tasks.tdf',
       serverUrl: 'http://${server.address.host}:${server.port}',
       username: 'alice',
       password: 'secret',
-      filePath: 'tasks.tdf',
     );
     final settings = _CountingSyncStateSettingsRepository(
       bothConfig,
@@ -3959,7 +3903,7 @@ void main() {
     serializeCalls = 0;
     localWriteCalls = 0;
     syncStateSaveCalls = 0;
-    currentTime = DateTime.utc(2026, 11, 1, 10, 0);
+    currentTime = DateTime.utc(2026, 11, 1, 10);
     await container
         .read(taskNotifierProvider.notifier)
         .addTask('Local Edit Task', targetTier: TaskTier.someday);
@@ -4004,15 +3948,12 @@ void main() {
 
     // 5. StorageMode.local no-op sync performs 0 parses/serializes, and expiry cleanup still fires when time advances.
     var localOnlyTdf = initialTdf;
-    var localOnlyTime = DateTime.utc(2026, 11, 1, 9, 0);
+    var localOnlyTime = DateTime.utc(2026, 11, 1, 9);
     var localOnlyParses = 0;
     var localOnlySerializes = 0;
     var localOnlyWrites = 0;
-    const localOnlyConfig = WebDavConfig(
-      storageMode: StorageMode.local,
-      localFilePath: 'tasks.tdf',
-    );
-    final localOnlySettings = InMemorySettingsRepository(localOnlyConfig);
+    const localOnlyConfig = WebDavConfig(storageMode: StorageMode.local);
+    final localOnlySettings = InMemorySettingsRepository();
     final localOnlyRepo = _CountingReadWriteLocalRepository(
       config: localOnlyConfig,
       getTdf: () => localOnlyTdf,
@@ -4047,7 +3988,7 @@ void main() {
     expect(localOnlyWrites, equals(0));
 
     // Advance past suspended 2026-11-02 08:00 -> stampAndNormalize must clean suspended and persist to disk!
-    localOnlyTime = DateTime.utc(2026, 11, 2, 9, 0);
+    localOnlyTime = DateTime.utc(2026, 11, 2, 9);
     await localOnlyContainer
         .read(taskNotifierProvider.notifier)
         .syncFromRemote();
@@ -4059,6 +4000,364 @@ void main() {
     );
     expect(localOnlyTdf, isNot(contains('suspended ')));
   });
+
+  test('TaskSyncPipeline pins workspaceId and repositories across mid-sync workspace switch without contaminating Workspace B', () async {
+    final fixedNow = DateTime.utc(2026, 11, 10, 12);
+    const configA = WebDavConfig(
+      storageMode: StorageMode.both,
+      localFilePath: 'alpha.tdf',
+      serverUrl: 'https://cloud.example.com',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'alpha.tdf',
+      language: AppLanguage.english,
+    );
+    const configB = WebDavConfig(
+      storageMode: StorageMode.both,
+      localFilePath: 'beta.tdf',
+      serverUrl: 'https://cloud.example.com',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'beta.tdf',
+      language: AppLanguage.english,
+    );
+    final settingsRepo = InMemorySettingsRepository(configA);
+    await settingsRepo.createWorkspace('Beta', id: 'beta', config: configB);
+
+    const alphaInitialTdf =
+        'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task alpha00001\n}\n\ntask alpha00001 {\n    name "Alpha Local Task"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n';
+    const alphaRemoteTdf =
+        'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 09:00:00\n    task alpha00002\n}\n\ntask alpha00002 {\n    name "Alpha Remote Task"\n    created 2026-11-01 09:00:00\n    modified 2026-11-01 09:00:00\n}\n';
+    const betaInitialTdf =
+        'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task beta000001\n}\n\ntask beta000001 {\n    name "Beta Only Task"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n';
+
+    final localFiles = <String, String>{
+      'alpha.tdf': alphaInitialTdf,
+      'beta.tdf': betaInitialTdf,
+    };
+    final remoteFiles = <String, String>{
+      '/remote.php/dav/files/alice/alpha.tdf': alphaRemoteTdf,
+      '/remote.php/dav/files/alice/beta.tdf': betaInitialTdf,
+    };
+    final alphaRemoteFetchStarted = Completer<void>();
+    final alphaRemoteFetchGate = Completer<void>();
+
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settingsRepo),
+        clockProvider.overrideWithValue(() => fixedNow),
+        localFileRepositoryProvider.overrideWith((ref) {
+          final cfg =
+              ref.watch(webDavConfigProvider).asData?.value ??
+              ref.watch(activeWorkspaceProvider).asData?.value.config ??
+              configA;
+          return _InMemoryMappedLocalRepo(config: cfg, files: localFiles);
+        }),
+        webDavRepositoryProvider.overrideWith((ref) {
+          final cfg =
+              ref.watch(webDavConfigProvider).asData?.value ??
+              ref.watch(activeWorkspaceProvider).asData?.value.config ??
+              configA;
+          return _GatedMappedWebDavRepo(
+            config: cfg,
+            remoteFiles: remoteFiles,
+            onFetch: (path) async {
+              if (path.endsWith('alpha.tdf') &&
+                  !alphaRemoteFetchStarted.isCompleted) {
+                alphaRemoteFetchStarted.complete();
+                await alphaRemoteFetchGate.future;
+              }
+            },
+          );
+        }),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(activeWorkspaceProvider.future);
+    await container.read(webDavConfigProvider.future);
+
+    // Start Workspace A sync directly via a provider Ref so we can switch to Workspace B while A's remote GET is suspended.
+    late Ref capturedRef;
+    final refHolder = Provider<void>((ref) {
+      capturedRef = ref;
+    });
+    container.read(refHolder);
+
+    final syncA = TaskSyncPipeline.runSyncWithStatus(
+      capturedRef,
+      configA,
+      isInitialLoad: true,
+    );
+    await alphaRemoteFetchStarted.future;
+
+    // Switch active workspace to Beta while Alpha's remote fetch is still suspended!
+    await container
+        .read(activeWorkspaceProvider.notifier)
+        .switchWorkspace('beta');
+    await container.read(webDavConfigProvider.future);
+    container.read(syncStateProvider.notifier).setError('Beta own status');
+
+    // Release Alpha's remote fetch so Alpha finishes Stage 2 + Stage 3 local convergence.
+    alphaRemoteFetchGate.complete();
+    await syncA;
+
+    expect(
+      localFiles['beta.tdf'],
+      equals(betaInitialTdf),
+      reason: 'Mid-sync workspace switch must NEVER write Alpha board into Beta local file',
+    );
+    expect(
+      localFiles['alpha.tdf'],
+      allOf(contains('Alpha Local Task'), contains('Alpha Remote Task')),
+      reason: 'Pinned Alpha sync must still converge Alpha into alpha.tdf',
+    );
+    expect(
+      container.read(syncStateProvider).errorMessage,
+      equals('Beta own status'),
+      reason: 'Completed Alpha sync must NEVER overwrite Beta syncStateProvider status',
+    );
+  });
+
+  test('TaskSyncPipeline routes parse/serialize through parseAsync/serializeAsync and converges >= 32 KiB Both-mode boards with consistent reused digests', () async {
+    final fixedNow = DateTime.utc(2026, 11, 22, 12);
+    const config = WebDavConfig(
+      serverUrl: 'https://cloud.example.com',
+      username: 'alice',
+      password: 'secret',
+      filePath: 'large.tdf',
+      localFilePath: 'large.tdf',
+      storageMode: StorageMode.both,
+    );
+    final buffer = StringBuffer('tdf 0.8.0\n\n');
+    final queueBuffer = StringBuffer(
+      'queue {\n    modified 2026-11-22 11:00:00\n',
+    );
+    for (var i = 0; i < 240; i++) {
+      final id = 'tsk${i.toString().padLeft(7, '0')}';
+      queueBuffer.writeln('    task $id');
+    }
+    queueBuffer.writeln('}\n');
+    buffer.write(queueBuffer);
+    for (var i = 0; i < 240; i++) {
+      final id = 'tsk${i.toString().padLeft(7, '0')}';
+      buffer.writeln('task $id {');
+      buffer.writeln(
+        '    name "Large board task number $i with padded text for isolate offload threshold"',
+      );
+      buffer.writeln('    created 2026-11-22 11:00:00');
+      buffer.writeln('    modified 2026-11-22 11:00:00');
+      buffer.writeln('}\n');
+    }
+    final baseLargeTdf = buffer.toString();
+    expect(
+      utf8.encode(baseLargeTdf).length,
+      greaterThanOrEqualTo(TdfService.isolateOffloadThresholdBytes),
+      reason: 'Fixture must meet the 32 KiB isolate offload threshold',
+    );
+
+    const localAddition =
+        'task loc0000001 {\n'
+        '    name "Local Added Task"\n'
+        '    created 2026-11-22 11:25:00\n'
+        '    modified 2026-11-22 11:25:00\n'
+        '}\n';
+    const remoteAddition =
+        'task rem0000001 {\n'
+        '    name "Remote Added Task"\n'
+        '    created 2026-11-22 11:30:00\n'
+        '    modified 2026-11-22 11:30:00\n'
+        '}\n';
+    final largeLocalTdf = '$baseLargeTdf\n$localAddition';
+    final largeRemoteTdf = '$baseLargeTdf\n$remoteAddition';
+
+    var localDisk = largeLocalTdf;
+    var remoteDisk = largeRemoteTdf;
+    var localWrites = 0;
+    var remoteWrites = 0;
+    final settingsRepo = InMemorySettingsRepository(config);
+    final trackingTdfService = _TrackingAsyncTdfService();
+
+    final container = ProviderContainer(
+      overrides: [
+        settingsRepositoryProvider.overrideWithValue(settingsRepo),
+        clockProvider.overrideWithValue(() => fixedNow),
+        tdfServiceProvider.overrideWithValue(trackingTdfService),
+        localFileRepositoryProvider.overrideWithValue(
+          _InMemorySyncLocalRepository(
+            config: config,
+            getTdf: () => localDisk,
+            setTdf: (value) {
+              localWrites++;
+              localDisk = value;
+            },
+          ),
+        ),
+        webDavRepositoryProvider.overrideWithValue(
+          _InMemorySyncWebDavRepository(
+            config: config,
+            getTdf: () => remoteDisk,
+            setTdf: (value) {
+              remoteWrites++;
+              remoteDisk = value;
+            },
+            isOnline: () => true,
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(activeWorkspaceProvider.future);
+    await container.read(webDavConfigProvider.future);
+
+    late Ref capturedRef;
+    final refHolder = Provider<void>((ref) {
+      capturedRef = ref;
+    });
+    container.read(refHolder);
+
+    final merged = await TaskSyncPipeline.synchronize(
+      capturedRef,
+      config,
+      isInitialLoad: true,
+    );
+
+    expect(
+      trackingTdfService.parseAsyncCalls,
+      greaterThanOrEqualTo(2),
+      reason: 'TaskSyncPipeline must route local and remote parsing through TdfService.parseAsync',
+    );
+    expect(
+      trackingTdfService.serializeAsyncCalls,
+      greaterThanOrEqualTo(1),
+      reason: 'TaskSyncPipeline must route serialization through TdfService.serializeAsync',
+    );
+    expect(merged.allTasks.length, equals(242));
+    expect(merged.findTask('loc0000001')?.title, equals('Local Added Task'));
+    expect(merged.findTask('rem0000001')?.title, equals('Remote Added Task'));
+    expect(
+      localDisk,
+      equals(remoteDisk),
+      reason: 'Both-mode Stage 3 must converge local disk with canonical remote document',
+    );
+    final expectedDigest = Sha256Service.hashHex(utf8.encode(localDisk));
+    final syncState = await settingsRepo.loadWorkspaceSyncState('tasks');
+    expect(syncState.localSourceDigest, equals(expectedDigest));
+    expect(syncState.remoteSourceDigest, equals(expectedDigest));
+    expect(syncState.lastSyncedLocalTdf, equals(localDisk));
+    expect(syncState.lastSyncedRemoteTdf, equals(remoteDisk));
+
+    final localWritesBeforeRefresh = localWrites;
+    final remoteWritesBeforeRefresh = remoteWrites;
+    final refreshed = await TaskSyncPipeline.synchronize(capturedRef, config);
+    expect(refreshed.allTasks.length, equals(242));
+    expect(
+      localWrites,
+      equals(localWritesBeforeRefresh),
+      reason: 'Steady-state refresh on converged >= 32 KiB Both-mode board must perform zero local writes',
+    );
+    expect(
+      remoteWrites,
+      equals(remoteWritesBeforeRefresh),
+      reason: 'Steady-state refresh on converged >= 32 KiB Both-mode board must perform zero remote writes',
+    );
+  });
+}
+
+class _TrackingAsyncTdfService extends TdfService {
+  int parseAsyncCalls = 0;
+  int serializeAsyncCalls = 0;
+
+  @override
+  Future<TaskBoard> parseAsync(
+    String tdfContent, {
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+    bool pruneExpiredCompleted = false,
+    bool evaluateTiers = true,
+  }) {
+    parseAsyncCalls++;
+    return super.parseAsync(
+      tdfContent,
+      evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+      pruneExpiredCompleted: pruneExpiredCompleted,
+      evaluateTiers: evaluateTiers,
+    );
+  }
+
+  @override
+  Future<String> serializeAsync(TaskBoard board) {
+    serializeAsyncCalls++;
+    return super.serializeAsync(board);
+  }
+}
+
+class _InMemoryMappedLocalRepo extends LocalFileRepository {
+  _InMemoryMappedLocalRepo({required super.config, required this.files});
+
+  final Map<String, String> files;
+
+  @override
+  bool get canWatchDirectory => false;
+
+  @override
+  bool fileExists() => (files[config.localFilePath] ?? '').isNotEmpty;
+
+  @override
+  Future<String> loadTdf() async => files[config.localFilePath] ?? '';
+
+  @override
+  Future<({String content, String? digest, bool exists})>
+  readTdfWithDigest() async {
+    final content = files[config.localFilePath] ?? '';
+    final exists = content.isNotEmpty;
+    final digest = exists ? Sha256Service.hashHex(utf8.encode(content)) : null;
+    return (content: content, digest: digest, exists: exists);
+  }
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    files[config.localFilePath] = tdfContent;
+  }
+
+  @override
+  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) => action();
+}
+
+class _GatedMappedWebDavRepo extends WebDavRepository {
+  _GatedMappedWebDavRepo({
+    required super.config,
+    required this.remoteFiles,
+    required this.onFetch,
+  });
+
+  final Future<void> Function(String path) onFetch;
+  final Map<String, String> remoteFiles;
+
+  @override
+  Future<String> fetchTdf() async {
+    final path = config.resolveEndpointUri()?.path ?? '';
+    await onFetch(path);
+    return remoteFiles[path] ?? '';
+  }
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    final path = config.resolveEndpointUri()?.path ?? '';
+    remoteFiles[path] = tdfContent;
+  }
 }
 
 class _CountingParseSerializeTdfService extends TdfService {
@@ -4103,6 +4402,12 @@ class _CountingParseSerializeTdfService extends TdfService {
     onSerialize();
     return super.serialize(board);
   }
+
+  @override
+  Future<String> serializeAsync(TaskBoard board) {
+    onSerialize();
+    return super.serializeAsync(board);
+  }
 }
 
 class _CountingSyncStateSettingsRepository extends InMemorySettingsRepository {
@@ -4136,8 +4441,7 @@ class _CountingReadWriteLocalRepository extends _InMemorySyncLocalRepository {
   final void Function() onWrite;
 
   @override
-  Future<({String content, String? digest, bool exists})>
-  readTdfWithDigest() async {
+  Future<({String content, String? digest, bool exists})> readTdfWithDigest() {
     onRead();
     return super.readTdfWithDigest();
   }
@@ -4158,9 +4462,10 @@ class _FailingReadLocalRepository extends LocalFileRepository {
   bool get canWatchDirectory => false;
 
   @override
-  Future<({String content, String? digest, bool exists})>
-  readTdfWithDigest() async {
-    throw readError;
+  Future<({String content, String? digest, bool exists})> readTdfWithDigest() {
+    return Future<({String content, String? digest, bool exists})>.error(
+      readError,
+    );
   }
 
   @override

@@ -19,7 +19,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_board_sync.dart';
+import 'package:tiertask/models/task_board_sync_scoping.dart';
 import 'package:tiertask/models/task_item.dart';
+import 'package:tiertask/models/tdf_entity_merger.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
@@ -31,8 +33,8 @@ import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
-  final baseInstant = DateTime.utc(2026, 11, 4, 12, 0, 0);
-  final defaultCreated = DateTime.utc(2026, 11, 1, 8, 0, 0);
+  final baseInstant = DateTime.utc(2026, 11, 4, 12);
+  final defaultCreated = DateTime.utc(2026, 11, 1, 8);
   DateTime t(int seconds) => baseInstant.add(Duration(seconds: seconds));
   TdfQueueBlock makeQueue(int seconds, List<String> taskIds) =>
       TdfQueueBlock(modifiedAt: t(seconds), taskIds: taskIds);
@@ -110,7 +112,7 @@ void main() {
           makeTask(taskId, name, modSec, 0, const [], const [], note),
         ]);
 
-    final baseline = singleTaskBoard('N0', 'Q0', 10);
+    final baseline = singleTaskBoard('N0', 'Q0');
 
     test('executes all 6 scalar verification table cases symmetrically in both (L, R) and (R, L) directions', () {
       final cases = [
@@ -300,11 +302,10 @@ label 000001OkD2 {
     const labelId = 'work00OkD2';
 
     test('enforces exact 30-day (2,592,000s) deletion record expiry, single generation increment across multiple expiries, and nonzero generation retention', () {
-      final delTime = DateTime.utc(2026, 10, 5, 12, 0, 0);
+      final delTime = DateTime.utc(2026, 10, 5, 12);
       final exactly30Days = delTime.add(const Duration(seconds: 2592000));
       final over30Days = delTime.add(const Duration(seconds: 2592001));
       final delBlock = TdfDeletedBlock(
-        generation: 0,
         tasks: [
           TdfDeletedTaskRecord(
             taskId: taskId,
@@ -374,7 +375,7 @@ label 000001OkD2 {
       );
       final remoteBoard = evalBoard(const [], null, 20, null, const [
         baseLabel,
-      ], TdfDeletedBlock(generation: 0, tasks: [delRec]));
+      ], TdfDeletedBlock(tasks: [delRec]));
 
       for (final (first, second) in [
         (localBoard, remoteBoard),
@@ -485,8 +486,13 @@ label 000001OkD2 {
         localBoard: localWithAmbiguous,
         sharedBoard: advancedShared,
         baseline: baseline,
-        recoverTaskIds: const [ambTask1Id, ambTask2Id],
-        recoverLabelIds: const [ambLabelId],
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          ambTask1Id: TdfRecoveryResolution.recoverAsNew,
+          ambTask2Id: TdfRecoveryResolution.recoverAsNew,
+        },
+        labelRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          ambLabelId: TdfRecoveryResolution.recoverAsNew,
+        },
         evaluationTime: t(30),
       );
 
@@ -551,7 +557,7 @@ label 000001OkD2 {
         radius: 100.0,
       );
       final baseWithLoc = TaskBoard.evaluate(
-        tasks: [makeTask(taskId, 'Someday Task', 10)],
+        tasks: [makeTask(taskId, 'Someday Task')],
         locations: [baseLoc.copyWith(modifiedAt: t(10))],
         evaluationTime: t(10),
       );
@@ -571,16 +577,8 @@ label 000001OkD2 {
       );
       final remoteDeletedBoth = TaskBoard.evaluate(
         tasks: const [],
-        locations: const [],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
-          tasks: [
-            TdfDeletedTaskRecord(
-              taskId: taskId,
-              deletedAt: t(20),
-              completionsCheckpoint: 0,
-            ),
-          ],
+          tasks: [TdfDeletedTaskRecord(taskId: taskId, deletedAt: t(20))],
           locations: [
             TdfDeletedLocationRecord(locationId: locId, deletedAt: t(20)),
           ],
@@ -686,9 +684,15 @@ label 000001OkD2 {
       final recovered = TaskBoardSync.recoverAmbiguousEntities(
         localBoard: ambLocBoard,
         sharedBoard: advancedShared,
-        recoverTaskIds: const [taskId],
-        recoverLabelIds: const [labelId],
-        recoverLocationIds: const [locId],
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          taskId: TdfRecoveryResolution.recoverAsNew,
+        },
+        labelRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          labelId: TdfRecoveryResolution.recoverAsNew,
+        },
+        locationRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          locId: TdfRecoveryResolution.recoverAsNew,
+        },
         evaluationTime: t(30),
       );
       expect(recovered.locations.length, equals(1));
@@ -714,7 +718,7 @@ label 000001OkD2 {
         name: 'Shared Label',
         modifiedAt: t(10),
       );
-      final sharedTaskOnRemote = makeTask(taskShared, 'Shared Task', 10);
+      final sharedTaskOnRemote = makeTask(taskShared, 'Shared Task');
       final sharedBoard = TaskBoard.evaluate(
         tasks: [sharedTaskOnRemote],
         labels: [sharedLabelOnRemote],
@@ -762,9 +766,15 @@ label 000001OkD2 {
       final recoveredBoard = TaskBoardSync.recoverAmbiguousEntities(
         localBoard: localBoard,
         sharedBoard: sharedBoard,
-        recoverTaskIds: const [taskAmb],
-        recoverLabelIds: const [labelAmb],
-        recoverLocationIds: const [locAmb],
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          taskAmb: TdfRecoveryResolution.recoverAsNew,
+        },
+        labelRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          labelAmb: TdfRecoveryResolution.recoverAsNew,
+        },
+        locationRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          locAmb: TdfRecoveryResolution.recoverAsNew,
+        },
         evaluationTime: t(30),
       );
 
@@ -1161,6 +1171,207 @@ label 000001OkD2 {
       expect(upperHexState.localSourceDigest, isNull);
       expect(upperHexState.lastSyncedRemoteTdf, equals('tdf 0.8.0\n'));
     });
+
+    test('WorkspaceSyncState.fromBytes enforces upfront maxSerializedBytes, maxTdfFileBytes baselines, and 4096-byte metadata bounds', () {
+      const localHex =
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+      const remoteHex =
+          'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad';
+
+      Uint8List buildRawV4({
+        String? localTdf,
+        String? remoteTdf,
+        int? localGen,
+        int? remoteGen,
+        String? localDigest,
+        String? remoteDigest,
+        String? etag,
+        String? lastModified,
+      }) {
+        void writeStr(BytesBuilder builder, String? value) {
+          if (value == null) {
+            builder.addByte(0);
+            return;
+          }
+          builder.addByte(1);
+          final asciiBytes = value.codeUnits;
+          final len = ByteData(4)..setUint32(0, asciiBytes.length);
+          builder
+            ..add(len.buffer.asUint8List())
+            ..add(asciiBytes);
+        }
+
+        void writeGen(BytesBuilder builder, int? value) {
+          if (value == null) {
+            builder.addByte(0);
+            return;
+          }
+          builder.addByte(1);
+          final data = ByteData(8)..setInt64(0, value);
+          builder.add(data.buffer.asUint8List());
+        }
+
+        final builder = BytesBuilder(copy: false)
+          ..add(const <int>[0x54, 0x54, 0x53, 0x04]);
+        writeStr(builder, localTdf);
+        writeStr(builder, remoteTdf);
+        writeGen(builder, localGen);
+        writeGen(builder, remoteGen);
+        writeStr(builder, localDigest);
+        writeStr(builder, remoteDigest);
+        writeStr(builder, etag);
+        writeStr(builder, lastModified);
+        return builder.toBytes();
+      }
+
+      // 1. Upfront maxSerializedBytes + 1 rejection (even with valid TTS\x04 header):
+      final oversizedPayload = Uint8List(
+        WorkspaceSyncState.maxSerializedBytes + 1,
+      );
+      oversizedPayload[0] = 0x54;
+      oversizedPayload[1] = 0x54;
+      oversizedPayload[2] = 0x53;
+      oversizedPayload[3] = 0x04;
+      expect(
+        WorkspaceSyncState.fromBytes(oversizedPayload),
+        equals(WorkspaceSyncState.empty),
+        reason:
+            'Payloads larger than maxSerializedBytes must be rejected upfront',
+      );
+
+      // 2. Single canonical TDF baseline at exact maxTdfFileBytes (1 MiB) passes, while +1 byte fails:
+      const header = 'tdf 0.8.0\n';
+      final exactMaxTdf = '$header${'#' * (maxTdfFileBytes - header.length)}';
+      expect(exactMaxTdf.length, equals(maxTdfFileBytes));
+      final validMaxLocalBytes = buildRawV4(
+        localTdf: exactMaxTdf,
+        localGen: 1,
+        localDigest: localHex,
+      );
+      expect(
+        validMaxLocalBytes.length,
+        lessThan(WorkspaceSyncState.maxSerializedBytes),
+      );
+      final decodedMaxLocal = WorkspaceSyncState.fromBytes(validMaxLocalBytes);
+      expect(
+        decodedMaxLocal.lastSyncedLocalTdf,
+        equals(exactMaxTdf),
+        reason: 'Exact maxTdfFileBytes canonical baseline must decode cleanly',
+      );
+
+      final overMaxTdf = '$exactMaxTdf#';
+      expect(overMaxTdf.length, equals(maxTdfFileBytes + 1));
+      final overLocalBytes = buildRawV4(
+        localTdf: overMaxTdf,
+        localGen: 1,
+        localDigest: localHex,
+      );
+      expect(
+        overLocalBytes.length,
+        lessThan(WorkspaceSyncState.maxSerializedBytes),
+        reason: 'Payload fits inside total maxSerializedBytes so per-field cap must enforce maxTdfFileBytes',
+      );
+      expect(
+        WorkspaceSyncState.fromBytes(overLocalBytes),
+        equals(WorkspaceSyncState.empty),
+        reason: 'lastSyncedLocalTdf exceeding maxTdfFileBytes must fail safely to empty',
+      );
+
+      final overRemoteBytes = buildRawV4(
+        remoteTdf: overMaxTdf,
+        remoteGen: 1,
+        remoteDigest: remoteHex,
+      );
+      expect(
+        WorkspaceSyncState.fromBytes(overRemoteBytes),
+        equals(WorkspaceSyncState.empty),
+        reason: 'lastSyncedRemoteTdf exceeding maxTdfFileBytes must fail safely to empty',
+      );
+
+      // 3. Metadata strings capped at 4096 bytes (exact 4096 passes; 4097 fails on every metadata field):
+      final maxMeta = 'e' * 4096;
+      final overMeta = 'e' * 4097;
+      final exactEtagBytes = buildRawV4(
+        remoteTdf: header,
+        remoteGen: 2,
+        remoteDigest: remoteHex,
+        etag: maxMeta,
+      );
+      expect(
+        WorkspaceSyncState.fromBytes(exactEtagBytes).remoteEtag,
+        equals(maxMeta),
+        reason: '4096-byte remoteEtag must decode cleanly',
+      );
+
+      final oversizedMetadataPayloads = <({String label, Uint8List bytes})>[
+        (
+          label: 'remoteEtag',
+          bytes: buildRawV4(
+            remoteTdf: header,
+            remoteGen: 2,
+            remoteDigest: remoteHex,
+            etag: overMeta,
+          ),
+        ),
+        (
+          label: 'remoteLastModified',
+          bytes: buildRawV4(
+            remoteTdf: header,
+            remoteGen: 2,
+            remoteDigest: remoteHex,
+            lastModified: overMeta,
+          ),
+        ),
+        (
+          label: 'localSourceDigest',
+          bytes: buildRawV4(
+            localTdf: header,
+            localGen: 1,
+            localDigest: overMeta,
+            remoteTdf: header,
+            remoteGen: 2,
+            remoteDigest: remoteHex,
+          ),
+        ),
+        (
+          label: 'remoteSourceDigest',
+          bytes: buildRawV4(
+            localTdf: header,
+            localGen: 1,
+            localDigest: localHex,
+            remoteTdf: header,
+            remoteGen: 2,
+            remoteDigest: overMeta,
+          ),
+        ),
+      ];
+      for (final testCase in oversizedMetadataPayloads) {
+        expect(
+          WorkspaceSyncState.fromBytes(testCase.bytes),
+          equals(WorkspaceSyncState.empty),
+          reason:
+              '${testCase.label} exceeding 4096 bytes must fail safely to empty',
+        );
+      }
+
+      // 4. Forged 0xFFFFFFFF length prefix in a short buffer fails cleanly:
+      final forgedLength = Uint8List.fromList(const <int>[
+        0x54,
+        0x54,
+        0x53,
+        0x04,
+        0x01,
+        0xFF,
+        0xFF,
+        0xFF,
+        0xFF,
+      ]);
+      expect(
+        WorkspaceSyncState.fromBytes(forgedLength),
+        equals(WorkspaceSyncState.empty),
+        reason: 'Forged uint32 max length prefix must be rejected before allocation',
+      );
+    });
   });
 
   group('TDF 0.7.0 Payload Comparison, Reconciliation, Stage Fairness & Bounds', () {
@@ -1218,13 +1429,13 @@ label 000001OkD2 {
       final earlierCreatedZeta = TaskItem(
         id: 'tie0000001',
         title: 'Zeta',
-        createdAt: DateTime.utc(2026, 11, 1, 8, 0, 0),
+        createdAt: DateTime.utc(2026, 11, 1, 8),
         modifiedAt: t(10),
       );
       final laterCreatedAlpha = TaskItem(
         id: 'tie0000001',
         title: 'Alpha',
-        createdAt: DateTime.utc(2026, 11, 1, 9, 0, 0),
+        createdAt: DateTime.utc(2026, 11, 1, 9),
         modifiedAt: t(10),
       );
       expect(
@@ -1331,11 +1542,7 @@ label 000001OkD2 {
       }
 
       final repLead0 = base.copyWith(
-        repeatRule: const TaskRepeatRule(
-          count: 1,
-          unit: RepeatUnit.weeks,
-          leadDays: 0,
-        ),
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.weeks),
       );
       final repLead3 = base.copyWith(
         repeatRule: const TaskRepeatRule(
@@ -1382,8 +1589,8 @@ label 000001OkD2 {
         suspendedAt: t(90),
         suspendedNote: 'Expired',
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'pre0000001', requiredCompletion: 1),
-          TdfTaskDependency(taskId: 'del0000001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'pre0000001'),
+          TdfTaskDependency(taskId: 'del0000001'),
         ],
       );
       expect(
@@ -1404,10 +1611,10 @@ label 000001OkD2 {
     test('defers bystander post-merge block cleanup in Stage 1 (TdfCleanupMode.deferred) and cleans in Stage 2 without revision inflation', () {
       const bystanderId = 'bys0000001';
       const activeId = 'act0000001';
-      final tBase = DateTime.utc(2026, 11, 11, 9, 0, 0);
-      final tRemoteEdit = DateTime.utc(2026, 11, 11, 11, 0, 0);
-      final tExpired = DateTime.utc(2026, 11, 11, 12, 0, 0);
-      final tSyncNow = DateTime.utc(2026, 11, 11, 12, 5, 0);
+      final tBase = DateTime.utc(2026, 11, 11, 9);
+      final tRemoteEdit = DateTime.utc(2026, 11, 11, 11);
+      final tExpired = DateTime.utc(2026, 11, 11, 12);
+      final tSyncNow = DateTime.utc(2026, 11, 11, 12, 5);
 
       final bystanderBase = TaskItem(
         id: bystanderId,
@@ -1433,7 +1640,7 @@ label 000001OkD2 {
           bystanderBase,
           activeBase.copyWith(
             title: 'Local Disk Edit',
-            modifiedAt: DateTime.utc(2026, 11, 11, 10, 0, 0),
+            modifiedAt: DateTime.utc(2026, 11, 11, 10),
           ),
         ],
         evaluationTime: tSyncNow,
@@ -1473,7 +1680,6 @@ label 000001OkD2 {
         secondary: remoteBoard,
         baseline: localBaseline,
         evaluationTime: tSyncNow,
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       final stage2Bystander = stage2Board.findTask(bystanderId)!;
       expect(
@@ -1498,7 +1704,6 @@ label 000001OkD2 {
       final normalizedCleaned = TaskBoardSync.stampAndNormalize(
         localBaseline,
         evaluationTime: tSyncNow,
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(normalizedCleaned.findTask(bystanderId)!.suspendedAt, isNull);
       expect(
@@ -1513,9 +1718,9 @@ label 000001OkD2 {
       const discardedLocalId = 'dsc0000001';
       const sharedOpenId = 'shr0000001';
 
-      final tBase = DateTime.utc(2026, 11, 14, 8, 0, 0);
-      final tExpired = DateTime.utc(2026, 11, 14, 12, 0, 0);
-      final tNow = DateTime.utc(2026, 11, 14, 12, 5, 0);
+      final tBase = DateTime.utc(2026, 11, 14, 8);
+      final tExpired = DateTime.utc(2026, 11, 14, 12);
+      final tNow = DateTime.utc(2026, 11, 14, 12, 5);
 
       // 1. Local-only task whose ONLY diff vs baseline is expired suspended cleanup -> discarded cleanly without RecoveryRequired!
       final cleanTaskBase = TaskItem(
@@ -1579,8 +1784,8 @@ label 000001OkD2 {
         createdAt: tBase,
         modifiedAt: tBase,
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: editedLocalOnlyId, requiredCompletion: 1),
-          TdfTaskDependency(taskId: discardedLocalId, requiredCompletion: 1),
+          TdfTaskDependency(taskId: editedLocalOnlyId),
+          TdfTaskDependency(taskId: discardedLocalId),
         ],
       );
       final baselineAmbig = TaskBoard.evaluate(
@@ -1593,22 +1798,19 @@ label 000001OkD2 {
           editedBase.copyWith(
             history: <TaskHistoryEntry>[
               TaskHistoryEntry(
-                timestampUtc: DateTime.utc(2026, 11, 14, 10, 0, 0),
+                timestampUtc: DateTime.utc(2026, 11, 14, 10),
                 text: 'Local progress',
               ),
             ],
             dependencies: const <TdfTaskDependency>[
-              TdfTaskDependency(
-                taskId: discardedLocalId,
-                requiredCompletion: 1,
-              ),
+              TdfTaskDependency(taskId: discardedLocalId),
             ],
-            modifiedAt: DateTime.utc(2026, 11, 14, 10, 0, 0),
+            modifiedAt: DateTime.utc(2026, 11, 14, 10),
           ),
           discardedBase.copyWith(
-            dueAt: DateTime.utc(2026, 11, 20, 17, 0, 0),
+            dueAt: DateTime.utc(2026, 11, 20, 17),
             dueNote: 'Edited due note',
-            modifiedAt: DateTime.utc(2026, 11, 14, 10, 5, 0),
+            modifiedAt: DateTime.utc(2026, 11, 14, 10, 5),
           ),
           sharedTask,
         ],
@@ -1645,8 +1847,9 @@ label 000001OkD2 {
         localBoard: localAmbig,
         sharedBoard: remoteAmbig,
         baseline: baselineAmbig,
-        recoverTaskIds: const <String>{editedLocalOnlyId},
-        recoverLabelIds: const <String>{},
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          editedLocalOnlyId: TdfRecoveryResolution.recoverAsNew,
+        },
         evaluationTime: tNow,
       );
       expect(recovered.findTask(discardedLocalId), isNull);
@@ -1661,7 +1864,7 @@ label 000001OkD2 {
       expect(
         recovered.findTask(sharedOpenId)!.dependencies,
         equals(<TdfTaskDependency>[
-          TdfTaskDependency(taskId: newRecoveredTask.id, requiredCompletion: 1),
+          TdfTaskDependency(taskId: newRecoveredTask.id),
         ]),
         reason: 'Shared open task must rewrite recovered prerequisite and strip discardedTaskIds',
       );
@@ -1746,27 +1949,21 @@ label 000001OkD2 {
           fullTask.canonicalDirectChildStatementCount,
           lessThanOrEqualTo(maxTdfStmtsPerBlock),
         );
-        TaskBoardSync.validateMergedGraphAndBounds(
-          <TaskItem>[fullTask],
-          const <TdfLabel>[],
-          const <TdfLocation>[],
-        );
+        TaskBoardSync.validateMergedGraphAndBounds(<TaskItem>[
+          fullTask,
+        ], const <TdfLabel>[]);
 
         final tooManySubtasks = <SubtaskItem>[
           for (var i = 0; i <= maxTdfStmtsPerBlock; i++)
             SubtaskItem(title: 'Step $i'),
         ];
         expect(
-          () => TaskBoardSync.validateMergedGraphAndBounds(
-            <TaskItem>[
-              makeTask(
-                'tskSub1025',
-                'Overflow Subtasks',
-              ).copyWith(subtasks: tooManySubtasks),
-            ],
-            const <TdfLabel>[],
-            const <TdfLocation>[],
-          ),
+          () => TaskBoardSync.validateMergedGraphAndBounds(<TaskItem>[
+            makeTask(
+              'tskSub1025',
+              'Overflow Subtasks',
+            ).copyWith(subtasks: tooManySubtasks),
+          ], const <TdfLabel>[]),
           throwsA(
             isA<TdfException>().having(
               (error) => error.kind,
@@ -1783,9 +1980,9 @@ label 000001OkD2 {
   group('TDF 0.8.0 Schedule Anchors, Stage Fairness, Symmetric Refresh, Scoped Cascades & Bound Decisions', () {
     test('couples dueAnchor atomically in _compareDue, tie-breaks, M_clean == G revisions, Case 1 & Case 2 merges, payload signatures, and DeletionConflict screening', () {
       const id = 'anc0000001';
-      final anchorEarly = TdfLocalDateTime(2026, 1, 31, 9, 0, 0);
-      final anchorLate = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
-      final dueUtc = DateTime.utc(2026, 2, 28, 17, 0, 0);
+      final anchorEarly = TdfLocalDateTime(2026, 1, 31, 9);
+      final anchorLate = TdfLocalDateTime(2026, 1, 31, 18);
+      final dueUtc = DateTime.utc(2026, 2, 28, 17);
 
       final base = TaskItem(
         id: id,
@@ -1968,8 +2165,8 @@ label 000001OkD2 {
       final case1Remote = evalBoard(<TaskItem>[
         withAnchorEarlyMod10.copyWith(
           completions: 1,
-          dueAt: DateTime.utc(2026, 3, 31, 16, 0, 0),
-          dueAnchor: TdfLocalDateTime(2026, 3, 31, 18, 0, 0),
+          dueAt: DateTime.utc(2026, 3, 31, 16),
+          dueAnchor: TdfLocalDateTime(2026, 3, 31, 18),
           modifiedAt: t(11),
         ),
       ]);
@@ -1984,7 +2181,7 @@ label 000001OkD2 {
       expect(case1Task.title, equals('Renamed Report'));
       expect(
         case1Task.dueAnchor,
-        equals(TdfLocalDateTime(2026, 3, 31, 18, 0, 0)),
+        equals(TdfLocalDateTime(2026, 3, 31, 18)),
         reason: 'Case 1 occurrence winner must carry its dueAnchor atomically',
       );
 
@@ -1996,7 +2193,6 @@ label 000001OkD2 {
         null,
         const <TdfLabel>[],
         TdfDeletedBlock(
-          generation: 0,
           tasks: <TdfDeletedTaskRecord>[
             TdfDeletedTaskRecord(taskId: id, deletedAt: t(20)),
           ],
@@ -2050,7 +2246,6 @@ label 000001OkD2 {
         secondary: boardR,
         baseline: boardB,
         evaluationTime: t100,
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(directFinal.findTask(id)!.title, equals('Y'));
       expect(directFinal.findTask(id)!.suspendedAt, isNull);
@@ -2086,7 +2281,6 @@ label 000001OkD2 {
         secondary: boardR,
         baseline: boardB,
         evaluationTime: t100,
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       final stage2Task = stage2Final.findTask(id)!;
       expect(
@@ -2139,21 +2333,15 @@ label 000001OkD2 {
       const unackedDelId = 'und0000001';
       const ackedDelId = 'ack0000001';
 
-      final retiredBase = makeTask(retiredId, 'Retired Cached Task', 10);
-      final unackedLiveBase = makeTask(
-        unackedDelId,
-        'Deleted Locally On Disk',
-        10,
-      );
+      final retiredBase = makeTask(retiredId, 'Retired Cached Task');
+      final unackedLiveBase = makeTask(unackedDelId, 'Deleted Locally On Disk');
       final openBase = makeTask(
         sharedOpenId,
         'Open Dependent',
         10,
         0,
         const <String>[],
-        const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: retiredId, requiredCompletion: 1),
-        ],
+        const <TdfTaskDependency>[TdfTaskDependency(taskId: retiredId)],
       );
       final doneBase = TaskItem(
         id: sharedDoneId,
@@ -2164,7 +2352,7 @@ label 000001OkD2 {
         completions: 1,
         modifiedAt: t(10),
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: retiredId, requiredCompletion: 1),
+          TdfTaskDependency(taskId: retiredId),
         ],
       );
 
@@ -2211,7 +2399,6 @@ label 000001OkD2 {
         baseline: baselineAtG,
         acknowledgedGeneration: 1,
         evaluationTime: t(30),
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(
         converged.deletedBlock.generation,
@@ -2264,7 +2451,7 @@ label 000001OkD2 {
         tasks: <TaskItem>[
           retiredBase.copyWith(
             dueAt: t(500),
-            dueAnchor: TdfLocalDateTime(2026, 11, 30, 12, 0, 0),
+            dueAnchor: TdfLocalDateTime(2026, 11, 30, 12),
             modifiedAt: t(16),
           ),
           makeTask(staleEditedId, 'Not in B', 17),
@@ -2301,8 +2488,8 @@ label 000001OkD2 {
         name: 'Private',
         isScoped: true,
       );
-      final anchor = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
-      final dueUtc = DateTime.utc(2026, 2, 28, 17, 0, 0);
+      final anchor = TdfLocalDateTime(2026, 1, 31, 18);
+      final dueUtc = DateTime.utc(2026, 2, 28, 17);
       final historyEntries = <TaskHistoryEntry>[
         TaskHistoryEntry(timestampUtc: t(5), text: 'Created note'),
       ];
@@ -2332,9 +2519,7 @@ label 000001OkD2 {
         tasks: <TaskItem>[
           baseTask.copyWith(labelIds: const <String>[], modifiedAt: t(20)),
         ],
-        labels: const <TdfLabel>[],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           labels: <TdfDeletedLabelRecord>[
             TdfDeletedLabelRecord(labelId: scopedId, deletedAt: t(20)),
           ],
@@ -2415,9 +2600,7 @@ label 000001OkD2 {
             modifiedAt: t(22),
           ),
         ],
-        labels: const <TdfLabel>[],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           labels: <TdfDeletedLabelRecord>[
             TdfDeletedLabelRecord(labelId: scopedId, deletedAt: t(20)),
           ],
@@ -2449,8 +2632,8 @@ label 000001OkD2 {
       const labelId = 'bndLbl0001';
       const locId = 'bndLoc0001';
 
-      final anchor1 = TdfLocalDateTime(2026, 1, 31, 12, 0, 0);
-      final anchor2 = TdfLocalDateTime(2026, 1, 31, 13, 0, 0);
+      final anchor1 = TdfLocalDateTime(2026, 1, 31, 12);
+      final anchor2 = TdfLocalDateTime(2026, 1, 31, 13);
       final baseTask = TaskItem(
         id: taskId,
         title: 'Bound Task',
@@ -2503,10 +2686,7 @@ label 000001OkD2 {
 
       final boardDeleted = TaskBoard.evaluate(
         tasks: const <TaskItem>[],
-        labels: const <TdfLabel>[],
-        locations: const <TdfLocation>[],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           tasks: <TdfDeletedTaskRecord>[
             TdfDeletedTaskRecord(taskId: taskId, deletedAt: t(20)),
           ],
@@ -2657,8 +2837,8 @@ label 000001OkD2 {
       const dropLocId = 'recDropLoc';
       const sharedOpenId = 'shrOpenTsk';
 
-      final anchor = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
-      final dueUtc = DateTime.utc(2026, 2, 28, 17, 0, 0);
+      final anchor = TdfLocalDateTime(2026, 1, 31, 18);
+      final dueUtc = DateTime.utc(2026, 2, 28, 17);
       final hist = <TaskHistoryEntry>[
         TaskHistoryEntry(timestampUtc: t(8), text: 'Progress entry'),
       ];
@@ -2669,9 +2849,7 @@ label 000001OkD2 {
         10,
         0,
         const <String>[],
-        const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: dropTaskId, requiredCompletion: 1),
-        ],
+        const <TdfTaskDependency>[TdfTaskDependency(taskId: dropTaskId)],
       );
       final sharedBoard = TaskBoard.evaluate(
         tasks: <TaskItem>[sharedOnRemote],
@@ -2691,7 +2869,7 @@ label 000001OkD2 {
         history: hist,
         labelIds: const <String>[keepLabelId, dropScopedLabelId],
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: dropTaskId, requiredCompletion: 1),
+          TdfTaskDependency(taskId: dropTaskId),
         ],
         conditions: const <TaskCondition>[
           LocationTaskCondition(locationIds: <String>[keepLocId, dropLocId]),
@@ -2712,8 +2890,8 @@ label 000001OkD2 {
           sharedOnRemote.copyWith(
             labelIds: const <String>[keepLabelId, dropScopedLabelId],
             dependencies: const <TdfTaskDependency>[
-              TdfTaskDependency(taskId: keepTaskId, requiredCompletion: 1),
-              TdfTaskDependency(taskId: dropTaskId, requiredCompletion: 1),
+              TdfTaskDependency(taskId: keepTaskId),
+              TdfTaskDependency(taskId: dropTaskId),
             ],
             conditions: const <TaskCondition>[
               LocationTaskCondition(locationIds: <String>[dropLocId]),
@@ -2828,9 +3006,7 @@ label 000001OkD2 {
       expect(sharedAfter.labelIds, equals(<String>[newLabel.id]));
       expect(
         sharedAfter.dependencies,
-        equals(<TdfTaskDependency>[
-          TdfTaskDependency(taskId: recTask.id, requiredCompletion: 1),
-        ]),
+        equals(<TdfTaskDependency>[TdfTaskDependency(taskId: recTask.id)]),
         reason: 'Shared open task must rewrite recovered prerequisite and strip discarded prerequisite',
       );
       expect(
@@ -2844,7 +3020,7 @@ label 000001OkD2 {
 
     test('enforces maxTdfSyncGeneration overflow, baseline-free L_before(T), Completed retention gating by cleanupMode, and inline merge recoveryResolutions', () {
       // 1. maxTdfSyncGeneration accepted when no records retire, and throws limitExceeded on tombstone expiry:
-      final delTime = DateTime.utc(2026, 10, 1, 12, 0, 0);
+      final delTime = DateTime.utc(2026, 10, 1, 12);
       final within30Days = delTime.add(const Duration(seconds: 2592000));
       final past30Days = delTime.add(const Duration(seconds: 2592001));
       final atMaxGen = TaskBoard.evaluate(
@@ -2917,7 +3093,6 @@ label 000001OkD2 {
         secondary: boardWithOldDone,
         baseline: boardWithOldDone,
         evaluationTime: past30Days,
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(finalDone.findTask(doneId), isNull);
       expect(finalDone.deletedBlock.generation, equals(0));
@@ -2936,9 +3111,7 @@ label 000001OkD2 {
       const scopedLbl = TdfLabel(id: scopedId, name: 'Scoped', isScoped: true);
       final winnerDeletedBoard = TaskBoard.evaluate(
         tasks: <TaskItem>[makeTask(taskNoBaseId, 'No Base Scoped', 25)],
-        labels: const <TdfLabel>[],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           labels: <TdfDeletedLabelRecord>[
             TdfDeletedLabelRecord(labelId: scopedId, deletedAt: t(25)),
           ],
@@ -2964,7 +3137,6 @@ label 000001OkD2 {
           () => TaskBoardSync.merge(
             primary: first,
             secondary: second,
-            baseline: null,
             evaluationTime: t(30),
           ),
           throwsA(
@@ -2985,7 +3157,6 @@ label 000001OkD2 {
         final mergedNoBase = TaskBoardSync.merge(
           primary: first,
           secondary: second,
-          baseline: null,
           labelConflictResolutions: const <String, TdfDeletionResolution>{
             scopedId: TdfDeletionResolution.delete,
           },
@@ -3055,17 +3226,17 @@ label 000001OkD2 {
     });
 
     test('stampAndNormalize and merge enforce TDF-PUB-004 retention pruning and single-increment generation across retries', () {
-      final tOldDel = DateTime.utc(2026, 9, 1, 8, 0, 0);
-      final tOldDone = DateTime.utc(2026, 9, 15, 8, 0, 0);
-      final tRecentDone = DateTime.utc(2026, 11, 10, 8, 0, 0);
-      final tNow = DateTime.utc(2026, 11, 15, 12, 0, 0);
+      final tOldDel = DateTime.utc(2026, 9, 1, 8);
+      final tOldDone = DateTime.utc(2026, 9, 15, 8);
+      final tRecentDone = DateTime.utc(2026, 11, 10, 8);
+      final tNow = DateTime.utc(2026, 11, 15, 12);
 
       final board = TaskBoard.evaluate(
         tasks: <TaskItem>[
           TaskItem(
             id: 'doneOld001',
             title: 'Completed Over 30d Ago',
-            createdAt: DateTime.utc(2026, 9, 1, 8, 0, 0),
+            createdAt: DateTime.utc(2026, 9, 1, 8),
             modifiedAt: tOldDone,
             completedAt: tOldDone,
             isCompleted: true,
@@ -3074,24 +3245,24 @@ label 000001OkD2 {
           TaskItem(
             id: 'doneNew002',
             title: 'Completed Recently With Expired Blocker',
-            createdAt: DateTime.utc(2026, 11, 1, 8, 0, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 8),
             modifiedAt: tRecentDone,
             completedAt: tRecentDone,
             isCompleted: true,
             completions: 1,
             blockedByTaskIds: const <String>['expDel0001'],
             dependencies: const <TdfTaskDependency>[
-              TdfTaskDependency(taskId: 'expDel0001', requiredCompletion: 1),
+              TdfTaskDependency(taskId: 'expDel0001'),
             ],
           ),
           TaskItem(
             id: 'openDep003',
             title: 'Open Task Blocked On Expired Tombstone',
-            createdAt: DateTime.utc(2026, 11, 1, 8, 0, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 8),
             modifiedAt: tRecentDone,
             blockedByTaskIds: const <String>['expDel0001'],
             dependencies: const <TdfTaskDependency>[
-              TdfTaskDependency(taskId: 'expDel0001', requiredCompletion: 1),
+              TdfTaskDependency(taskId: 'expDel0001'),
             ],
           ),
         ],
@@ -3109,7 +3280,6 @@ label 000001OkD2 {
           taskIds: const <String>['openDep003'],
         ),
         evaluationTime: tNow,
-        pruneExpiredCompleted: false,
       );
 
       // Deferred mode must NOT prune >30d Completed or >30d deleted or increment generation:
@@ -3129,7 +3299,6 @@ label 000001OkD2 {
       final finalBoard = TaskBoardSync.stampAndNormalize(
         board,
         evaluationTime: tNow,
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(finalBoard.findTask('doneOld001'), isNull);
       expect(
@@ -3176,7 +3345,6 @@ label 000001OkD2 {
         acknowledgedGeneration: 2,
         preTransactionPrimaryGeneration: 2,
         evaluationTime: tNow,
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(
         retried.deletedBlock.generation,
@@ -3201,7 +3369,6 @@ label 000001OkD2 {
       final baseTask = makeTask(
         taskUndelId,
         'Labeled Task',
-        10,
       ).copyWith(labelIds: const <String>[labelUndelId]);
       final baselineA = evalBoard(
         <TaskItem>[baseTask],
@@ -3222,7 +3389,6 @@ label 000001OkD2 {
           baseTask.copyWith(labelIds: const <String>[], modifiedAt: t(15)),
         ],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           labels: <TdfDeletedLabelRecord>[
             TdfDeletedLabelRecord(labelId: labelUndelId, deletedAt: t(15)),
           ],
@@ -3254,7 +3420,6 @@ label 000001OkD2 {
       final scopedBaseTask = makeTask(
         taskScopedExpId,
         'Scoped Task',
-        10,
       ).copyWith(labelIds: const <String>[labelScopedExpId], isPriority: true);
       final baselineB = evalBoard(
         <TaskItem>[scopedBaseTask],
@@ -3331,12 +3496,11 @@ label 000001OkD2 {
         modifiedAt: t(15),
       );
 
-      final previewHeader =
-          TdfPayloadComparison.previewMergedTaskPrerequisiteHeader(
-            local: localWinner,
-            incoming: remoteReopenedLoser,
-            baseline: baseTask,
-          );
+      final previewHeader = TdfEntityMerger.previewMergedTaskPrerequisiteHeader(
+        local: localWinner,
+        incoming: remoteReopenedLoser,
+        baseline: baseTask,
+      );
       expect(
         previewHeader.isCompleted,
         isTrue,
@@ -3369,11 +3533,10 @@ label 000001OkD2 {
       const confTaskId = 'TskConfRc1';
 
       // 3a: Superseded acknowledged tombstones must be discarded while unacknowledged local deletion intents are kept.
-      final ambBase = makeTask(ambTaskId, 'Ambiguous Base', 10);
+      final ambBase = makeTask(ambTaskId, 'Ambiguous Base');
       final baselineA = TaskBoard.evaluate(
         tasks: <TaskItem>[ambBase],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           tasks: <TdfDeletedTaskRecord>[
             TdfDeletedTaskRecord(taskId: oldAckTaskId, deletedAt: t(5)),
           ],
@@ -3385,7 +3548,6 @@ label 000001OkD2 {
           ambBase.copyWith(title: 'Ambiguous Edited', modifiedAt: t(15)),
         ],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           tasks: <TdfDeletedTaskRecord>[
             TdfDeletedTaskRecord(taskId: oldAckTaskId, deletedAt: t(5)),
             TdfDeletedTaskRecord(taskId: localDelTaskId, deletedAt: t(16)),
@@ -3402,7 +3564,9 @@ label 000001OkD2 {
         localBoard: localA,
         sharedBoard: sharedA,
         baseline: baselineA,
-        recoverTaskIds: const <String>[ambTaskId],
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          ambTaskId: TdfRecoveryResolution.recoverAsNew,
+        },
         evaluationTime: t(30),
       );
       expect(
@@ -3417,10 +3581,10 @@ label 000001OkD2 {
       );
 
       // 3b: Locally edited entity conflicting with an active tombstone on sharedBoard must raise DeletionConflict instead of being silently discarded.
-      final confBase = makeTask(confTaskId, 'Conflict Base', 10);
+      final confBase = makeTask(confTaskId, 'Conflict Base');
       final baselineB = TaskBoard.evaluate(
         tasks: <TaskItem>[ambBase, confBase],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: t(10),
       );
       final localB = TaskBoard.evaluate(
@@ -3428,7 +3592,7 @@ label 000001OkD2 {
           ambBase.copyWith(title: 'Ambiguous Edited', modifiedAt: t(15)),
           confBase.copyWith(title: 'Conflict Edited', modifiedAt: t(16)),
         ],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: t(20),
       );
       final sharedB = TaskBoard.evaluate(
@@ -3446,7 +3610,9 @@ label 000001OkD2 {
           localBoard: localB,
           sharedBoard: sharedB,
           baseline: baselineB,
-          recoverTaskIds: const <String>[ambTaskId],
+          taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+            ambTaskId: TdfRecoveryResolution.recoverAsNew,
+          },
           evaluationTime: t(30),
         ),
         throwsSyncOutcome(
@@ -3476,12 +3642,12 @@ label 000001OkD2 {
         radius: 100,
         modifiedAt: t(10),
       );
-      final baseTask = makeTask(taskDelId, 'Base Task', 10);
+      final baseTask = makeTask(taskDelId, 'Base Task');
       final baselineA = TaskBoard.evaluate(
         tasks: <TaskItem>[baseTask],
         labels: <TdfLabel>[baseLabel],
         locations: <TdfLocation>[baseLoc],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: t(10),
       );
       final localA = TaskBoard.evaluate(
@@ -3496,13 +3662,12 @@ label 000001OkD2 {
         ],
         labels: <TdfLabel>[baseLabel],
         locations: <TdfLocation>[baseLoc],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: t(15),
       );
       final remoteA = TaskBoard.evaluate(
         tasks: const <TaskItem>[],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           tasks: <TdfDeletedTaskRecord>[
             TdfDeletedTaskRecord(taskId: taskDelId, deletedAt: t(16)),
           ],
@@ -3548,7 +3713,7 @@ label 000001OkD2 {
         tasks: const <TaskItem>[],
         labels: <TdfLabel>[baseLabel2],
         locations: <TdfLocation>[baseLoc2],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: t(10),
       );
       final localB = TaskBoard.evaluate(
@@ -3562,13 +3727,12 @@ label 000001OkD2 {
           ),
         ],
         locations: <TdfLocation>[baseLoc2],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: t(15),
       );
       final remoteB = TaskBoard.evaluate(
         tasks: const <TaskItem>[],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           labels: <TdfDeletedLabelRecord>[
             TdfDeletedLabelRecord(labelId: labelDel2Id, deletedAt: t(16)),
           ],
@@ -3599,11 +3763,11 @@ label 000001OkD2 {
         name: 'Tombstoned Label',
         modifiedAt: t(10),
       );
-      final survBase = makeTask(taskSurvId, 'Surviving Open', 10);
+      final survBase = makeTask(taskSurvId, 'Surviving Open');
       final baselineC = TaskBoard.evaluate(
         tasks: <TaskItem>[survBase],
         labels: <TdfLabel>[baseLabel3],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: t(10),
       );
       final localC = TaskBoard.evaluate(
@@ -3615,13 +3779,13 @@ label 000001OkD2 {
           ).copyWith(labelIds: const <String>[labelTombId]),
           survBase.copyWith(
             dependencies: const <TdfTaskDependency>[
-              TdfTaskDependency(taskId: taskDiscId, requiredCompletion: 1),
+              TdfTaskDependency(taskId: taskDiscId),
             ],
             modifiedAt: t(15),
           ),
         ],
         labels: <TdfLabel>[baseLabel3],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: t(15),
       );
       final remoteC = TaskBoard.evaluate(
@@ -3656,13 +3820,12 @@ label 000001OkD2 {
     test('Defect 5: conflicting task tombstones are not treated as non-conflicting preview deletions that hide dependent DeletionConflict', () {
       const prereqId = 'TskPrqCnf1';
       const dependentId = 'TskDepCnf1';
-      final basePrereq = makeTask(prereqId, 'Prereq Base', 10);
-      final baseDependent = makeTask(dependentId, 'Dependent Base', 10)
-          .copyWith(
-            dependencies: const <TdfTaskDependency>[
-              TdfTaskDependency(taskId: prereqId, requiredCompletion: 1),
-            ],
-          );
+      final basePrereq = makeTask(prereqId, 'Prereq Base');
+      final baseDependent = makeTask(dependentId, 'Dependent Base').copyWith(
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: prereqId),
+        ],
+      );
       final baseline = evalBoard(
         <TaskItem>[basePrereq, baseDependent],
         null,
@@ -3684,7 +3847,6 @@ label 000001OkD2 {
       final remote = TaskBoard.evaluate(
         tasks: const <TaskItem>[],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           tasks: <TdfDeletedTaskRecord>[
             TdfDeletedTaskRecord(taskId: prereqId, deletedAt: t(18)),
             TdfDeletedTaskRecord(taskId: dependentId, deletedAt: t(18)),
@@ -3719,17 +3881,17 @@ label 000001OkD2 {
       );
       final baseline = TaskBoard.evaluate(
         tasks: <TaskItem>[baseTask],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: maxTs,
       );
       final local = TaskBoard.evaluate(
         tasks: <TaskItem>[baseTask],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: maxTs,
       );
       final remoteDeletedWithoutTombstone = TaskBoard.evaluate(
         tasks: const <TaskItem>[],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: maxTs,
       );
 
@@ -3826,7 +3988,6 @@ label 000001OkD2 {
           makeTask(
             recTaskId,
             'Suspended Recovery Task',
-            10,
           ).copyWith(suspendedAt: t(20)),
         ],
         null,
@@ -3855,7 +4016,9 @@ label 000001OkD2 {
       final mergedRecoverApi = TaskBoardSync.recoverAmbiguousEntities(
         localBoard: localNormal,
         sharedBoard: remoteNormal,
-        recoverTaskIds: const <String>[recTaskId],
+        taskRecoveryResolutions: const <String, TdfRecoveryResolution>{
+          recTaskId: TdfRecoveryResolution.recoverAsNew,
+        },
         evaluationTime: t(30),
       );
       final apiTask = mergedRecoverApi.allTasks.single;
@@ -3879,7 +4042,7 @@ label 000001OkD2 {
             suspendedAt: maxMinusOne,
           ),
         ],
-        deletedBlock: TdfDeletedBlock(generation: 0),
+        deletedBlock: TdfDeletedBlock(),
         evaluationTime: maxMinusOne,
       );
       final remoteBoundary = TaskBoard.evaluate(
@@ -3922,32 +4085,28 @@ label 000001OkD2 {
         createdAt: t(0),
         modifiedAt: t(10),
       );
-      final fastResult = TdfPayloadComparison.mergeTaskWithBaselineAndUncleaned(
+      final fastResult = TdfEntityMerger.mergeTaskWithBaselineAndUncleaned(
         local: plainTask,
         incoming: plainTask,
         baseline: plainTask,
         evaluationTime: t(30),
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(fastResult.merged, equals(plainTask));
       expect(fastResult.uncleaned, equals(plainTask));
       expect(fastResult.wasUnchangedIdentity, isTrue);
 
       // 2. Identical WITH expired suspended in finalStage must still clean suspended and NOT falsely skip cleanup:
-      final expiredResult =
-          TdfPayloadComparison.mergeTaskWithBaselineAndUncleaned(
-            local: baseTask,
-            incoming: baseTask,
-            baseline: baseTask,
-            evaluationTime: t(30),
-            cleanupMode: TdfCleanupMode.finalStage,
-          );
-      final referenceExpired = TdfPayloadComparison.mergeTaskWithBaseline(
+      final expiredResult = TdfEntityMerger.mergeTaskWithBaselineAndUncleaned(
         local: baseTask,
         incoming: baseTask,
         baseline: baseTask,
         evaluationTime: t(30),
-        cleanupMode: TdfCleanupMode.finalStage,
+      );
+      final referenceExpired = TdfEntityMerger.mergeTaskWithBaseline(
+        local: baseTask,
+        incoming: baseTask,
+        baseline: baseTask,
+        evaluationTime: t(30),
       );
       expect(expiredResult.merged, equals(referenceExpired));
       expect(expiredResult.merged.suspendedAt, isNull);
@@ -3962,27 +4121,24 @@ label 000001OkD2 {
         note: 'Remote Note',
         modifiedAt: t(25),
       );
-      final mergedPair = TdfPayloadComparison.mergeTaskWithBaselineAndUncleaned(
+      final mergedPair = TdfEntityMerger.mergeTaskWithBaselineAndUncleaned(
         local: localEdit,
         incoming: remoteEdit,
         baseline: baseTask,
         evaluationTime: t(30),
-        cleanupMode: TdfCleanupMode.finalStage,
       );
-      final expectedMerged = TdfPayloadComparison.mergeTaskWithBaseline(
+      final expectedMerged = TdfEntityMerger.mergeTaskWithBaseline(
         local: localEdit,
         incoming: remoteEdit,
         baseline: baseTask,
         evaluationTime: t(30),
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       final expectedCandidates =
-          TdfPayloadComparison.mergeTaskCandidatesWithBaseline(
+          TdfEntityMerger.mergeTaskCandidatesWithBaseline(
             local: localEdit,
             incoming: remoteEdit,
             baseline: baseTask,
             evaluationTime: t(30),
-            cleanupMode: TdfCleanupMode.finalStage,
           );
       expect(mergedPair.merged, equals(expectedMerged));
       expect(mergedPair.uncleaned, equals(expectedCandidates.uncleaned));
@@ -4000,7 +4156,6 @@ label 000001OkD2 {
           ),
         ],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           tasks: <TdfDeletedTaskRecord>[
             TdfDeletedTaskRecord(taskId: 'del001OkD2', deletedAt: t(0)),
           ],
@@ -4011,7 +4166,6 @@ label 000001OkD2 {
       final noOpResult = TaskBoardSync.stampAndNormalizeWithStatus(
         unchangedBoard,
         evaluationTime: t(30),
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(
         noOpResult.documentChanged,
@@ -4033,7 +4187,6 @@ label 000001OkD2 {
       final expiredTombstoneResult = TaskBoardSync.stampAndNormalizeWithStatus(
         unchangedBoard,
         evaluationTime: t(30).add(const Duration(days: 40)),
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(
         expiredTombstoneResult.documentChanged,
@@ -4057,7 +4210,6 @@ label 000001OkD2 {
       final cleanedBlockResult = TaskBoardSync.stampAndNormalizeWithStatus(
         suspendedBoard,
         evaluationTime: t(30),
-        cleanupMode: TdfCleanupMode.finalStage,
       );
       expect(
         cleanedBlockResult.documentChanged,
@@ -4066,6 +4218,383 @@ label 000001OkD2 {
             'Cleaning an expired suspended block must set documentChanged=true',
       );
       expect(cleanedBlockResult.board.allTasks.single.suspendedAt, isNull);
+    });
+  });
+
+  group('TaskBoardSyncScoping.scopeCandidateAndBaseline', () {
+    const utcZone = TdfTimeZoneContext.utc;
+
+    test(
+      'passes through unchanged when hasCandidate is false or origin is null',
+      () {
+        final candidate = evalBoard(<TaskItem>[
+          makeTask('task000001', 'Alpha'),
+        ]);
+        final baseline = evalBoard(<TaskItem>[makeTask('task000001', 'Alpha')]);
+
+        final noCandidate = TaskBoardSyncScoping.scopeCandidateAndBaseline(
+          candidate: candidate,
+          hasCandidate: false,
+          storedBaseline: baseline,
+          candidateOriginBoard: baseline,
+          storedAckGeneration: 2,
+          utcNow: t(100),
+          localNow: t(100),
+          timeZone: utcZone,
+          dueLeadWindow: TaskBoard.defaultDueLeadWindow,
+        );
+        expect(identical(noCandidate.candidate, candidate), isTrue);
+        expect(identical(noCandidate.baseline, baseline), isTrue);
+        expect(noCandidate.ackGeneration, equals(2));
+
+        final noOrigin = TaskBoardSyncScoping.scopeCandidateAndBaseline(
+          candidate: candidate,
+          hasCandidate: true,
+          storedBaseline: baseline,
+          candidateOriginBoard: null,
+          storedAckGeneration: 2,
+          utcNow: t(100),
+          localNow: t(100),
+          timeZone: utcZone,
+          dueLeadWindow: TaskBoard.defaultDueLeadWindow,
+        );
+        expect(identical(noOrigin.candidate, candidate), isTrue);
+        expect(identical(noOrigin.baseline, baseline), isTrue);
+        expect(noOrigin.ackGeneration, equals(2));
+      },
+    );
+
+    test('restores pre-cleanup bystander snapshots while preserving user edits', () {
+      final bystanderOrigin = TaskItem(
+        id: 'bystander1',
+        title: 'Bystander',
+        createdAt: defaultCreated,
+        modifiedAt: t(10),
+        suspendedAt: t(20),
+      );
+      final editedOrigin = makeTask('edited0001', 'Before');
+      final originBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[bystanderOrigin, editedOrigin],
+        evaluationTime: t(15),
+      );
+
+      final bystanderCleaned = bystanderOrigin.copyWith(
+        clearSuspendedAt: true,
+        modifiedAt: t(50),
+      );
+      final editedNext = editedOrigin.copyWith(
+        title: 'After',
+        modifiedAt: t(50),
+      );
+      final candidateBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[bystanderCleaned, editedNext],
+        evaluationTime: t(50),
+      );
+
+      final scopedNoBaseline = TaskBoardSyncScoping.scopeCandidateAndBaseline(
+        candidate: candidateBoard,
+        hasCandidate: true,
+        storedBaseline: null,
+        candidateOriginBoard: originBoard,
+        storedAckGeneration: null,
+        utcNow: t(60),
+        localNow: t(60),
+        timeZone: utcZone,
+        dueLeadWindow: TaskBoard.defaultDueLeadWindow,
+      );
+      expect(
+        scopedNoBaseline.candidate.findTask('bystander1'),
+        equals(bystanderOrigin),
+        reason:
+            'Untouched bystander should revert to pre-cleanup origin snapshot',
+      );
+      expect(
+        scopedNoBaseline.candidate.findTask('edited0001')?.title,
+        equals('After'),
+        reason: 'User-edited task must remain unchanged',
+      );
+      expect(scopedNoBaseline.baseline, isNull);
+    });
+
+    test('scopes storedBaseline to origin across external additions, deletions, and queue advances', () {
+      final labelKeep = TdfLabel(
+        id: 'label00001',
+        name: 'Work',
+        modifiedAt: t(10),
+      );
+      final labelDeleted = TdfLabel(
+        id: 'label00002',
+        name: 'Temp',
+        modifiedAt: t(10),
+      );
+      final labelAdded = TdfLabel(
+        id: 'label00003',
+        name: 'External',
+        modifiedAt: t(40),
+      );
+      final locKeep = TdfLocation(
+        id: 'locat00001',
+        name: 'Office',
+        latitude: 47.0,
+        longitude: 8.0,
+        radius: 100,
+        modifiedAt: t(10),
+      );
+      final locAdded = TdfLocation(
+        id: 'locat00002',
+        name: 'RemoteLoc',
+        latitude: 48.0,
+        longitude: 9.0,
+        radius: 200,
+        modifiedAt: t(40),
+      );
+      final task1 = makeTask('task000001', 'Alpha');
+      final task2 = makeTask('task000002', 'Beta');
+      final taskExternal = makeTask('task000003', 'Gamma', 40);
+
+      final originBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[task1, task2],
+        labels: <TdfLabel>[labelKeep, labelDeleted],
+        locations: <TdfLocation>[locKeep],
+        queueBlock: makeQueue(10, <String>['task000001', 'task000002']),
+        evaluationTime: t(20),
+      );
+      final candidateBoard = originBoard.updateTask(
+        'task000001',
+        title: 'Alpha Edited',
+        currentDate: t(30),
+      );
+      final storedBaseline = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          task1.copyWith(title: 'Alpha External', modifiedAt: t(40)),
+          taskExternal,
+        ],
+        labels: <TdfLabel>[labelKeep, labelAdded],
+        locations: <TdfLocation>[locKeep, locAdded],
+        deletedBlock: TdfDeletedBlock(
+          tasks: <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(taskId: 'task000002', deletedAt: t(40)),
+          ],
+          labels: <TdfDeletedLabelRecord>[
+            TdfDeletedLabelRecord(labelId: 'label00002', deletedAt: t(40)),
+          ],
+        ),
+        queueBlock: makeQueue(40, <String>['task000003', 'task000001']),
+        evaluationTime: t(40),
+      );
+
+      final scoped = TaskBoardSyncScoping.scopeCandidateAndBaseline(
+        candidate: candidateBoard,
+        hasCandidate: true,
+        storedBaseline: storedBaseline,
+        candidateOriginBoard: originBoard,
+        storedAckGeneration: 0,
+        utcNow: t(50),
+        localNow: t(50),
+        timeZone: utcZone,
+        dueLeadWindow: TaskBoard.defaultDueLeadWindow,
+      );
+
+      final scopedBaseline = scoped.baseline;
+      if (scopedBaseline == null) {
+        fail('Expected non-null scopedBaseline');
+      }
+      expect(
+        scopedBaseline.findTask('task000003'),
+        isNull,
+        reason: 'External task added after origin must be excluded from scoped baseline',
+      );
+      expect(
+        scopedBaseline.findTask('task000001')?.title,
+        equals('Alpha'),
+        reason:
+            'Baseline task edited after origin must revert to origin snapshot',
+      );
+      expect(
+        scopedBaseline.findTask('task000002'),
+        isNotNull,
+        reason:
+            'Externally tombstoned origin task must remain in scoped baseline',
+      );
+      expect(scopedBaseline.findLabel('label00003'), isNull);
+      expect(scopedBaseline.findLabel('label00002'), isNotNull);
+      expect(scopedBaseline.findLocation('locat00002'), isNull);
+      expect(
+        scopedBaseline.queueBlock,
+        equals(originBoard.queueBlock),
+        reason: 'Advanced stored queue must revert to origin queue',
+      );
+    });
+
+    test('rebases candidate generation and strips retired entities and dependencies when retired entities are untouched', () {
+      final retiredTask = makeTask('retiredT01', 'Retired');
+      final survivingTask = TaskItem(
+        id: 'surviveT01',
+        title: 'Surviving',
+        createdAt: defaultCreated,
+        modifiedAt: t(10),
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'retiredT01'),
+        ],
+      );
+      final editedTask = makeTask('editedT001', 'Original');
+      final retiredLabel = TdfLabel(
+        id: 'retiredL01',
+        name: 'OldLabel',
+        modifiedAt: t(10),
+      );
+      final retiredLocation = TdfLocation(
+        id: 'retiredP01',
+        name: 'OldPlace',
+        latitude: 47.0,
+        longitude: 8.0,
+        radius: 100,
+        modifiedAt: t(10),
+      );
+
+      final originBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[retiredTask, survivingTask, editedTask],
+        labels: <TdfLabel>[retiredLabel],
+        locations: <TdfLocation>[retiredLocation],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        queueBlock: makeQueue(10, <String>['retiredT01', 'editedT001']),
+        evaluationTime: t(20),
+      );
+      final candidateBoard = originBoard.updateTask(
+        'editedT001',
+        title: 'Updated',
+        currentDate: t(30),
+      );
+      final storedBaseline = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          survivingTask.copyWith(
+            dependencies: const <TdfTaskDependency>[],
+            modifiedAt: t(25),
+          ),
+          editedTask,
+        ],
+        deletedBlock: TdfDeletedBlock(generation: 2),
+        queueBlock: makeQueue(25, <String>['editedT001']),
+        evaluationTime: t(25),
+      );
+
+      final scoped = TaskBoardSyncScoping.scopeCandidateAndBaseline(
+        candidate: candidateBoard,
+        hasCandidate: true,
+        storedBaseline: storedBaseline,
+        candidateOriginBoard: originBoard,
+        storedAckGeneration: 2,
+        utcNow: t(50),
+        localNow: t(50),
+        timeZone: utcZone,
+        dueLeadWindow: TaskBoard.defaultDueLeadWindow,
+      );
+
+      expect(scoped.candidate.deletedBlock.generation, equals(2));
+      expect(scoped.ackGeneration, equals(2));
+      expect(scoped.candidate.findTask('retiredT01'), isNull);
+      expect(scoped.candidate.findLabel('retiredL01'), isNull);
+      expect(scoped.candidate.findLocation('retiredP01'), isNull);
+      expect(
+        scoped.candidate.queueBlock.taskIds,
+        isNot(contains('retiredT01')),
+      );
+      final rebasedSurvivor = scoped.candidate.findTask('surviveT01');
+      expect(rebasedSurvivor?.dependencies, isEmpty);
+      expect(rebasedSurvivor?.effectiveModifiedAt, equals(t(50)));
+    });
+
+    test('holds origin generation when candidate modifies a retired task, label, or location reference', () {
+      final retiredTask = makeTask('retiredT01', 'Retired');
+      final retiredLabel = TdfLabel(
+        id: 'retiredL01',
+        name: 'OldLabel',
+        modifiedAt: t(10),
+      );
+      final retiredLocation = TdfLocation(
+        id: 'retiredP01',
+        name: 'OldPlace',
+        latitude: 47.0,
+        longitude: 8.0,
+        radius: 100,
+        modifiedAt: t(10),
+      );
+      final bystanderTask = makeTask('bystandT01', 'Plain');
+
+      final originBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[retiredTask, bystanderTask],
+        labels: <TdfLabel>[retiredLabel],
+        locations: <TdfLocation>[retiredLocation],
+        deletedBlock: TdfDeletedBlock(generation: 1),
+        evaluationTime: t(20),
+      );
+      final storedBaseline = TaskBoard.evaluate(
+        tasks: <TaskItem>[bystanderTask],
+        deletedBlock: TdfDeletedBlock(generation: 2),
+        evaluationTime: t(25),
+      );
+
+      final editedRetiredTaskCandidate = originBoard.updateTask(
+        'retiredT01',
+        title: 'Modified Retired Task',
+        currentDate: t(30),
+      );
+      final taskConflictScoped = TaskBoardSyncScoping.scopeCandidateAndBaseline(
+        candidate: editedRetiredTaskCandidate,
+        hasCandidate: true,
+        storedBaseline: storedBaseline,
+        candidateOriginBoard: originBoard,
+        storedAckGeneration: 2,
+        utcNow: t(50),
+        localNow: t(50),
+        timeZone: utcZone,
+        dueLeadWindow: TaskBoard.defaultDueLeadWindow,
+      );
+      expect(taskConflictScoped.ackGeneration, equals(1));
+      expect(taskConflictScoped.candidate.deletedBlock.generation, equals(1));
+      expect(taskConflictScoped.baseline?.deletedBlock.generation, equals(1));
+      expect(taskConflictScoped.baseline?.findTask('retiredT01'), isNotNull);
+
+      final refRetiredLocationCandidate = originBoard.updateTask(
+        'bystandT01',
+        conditions: <TaskCondition>[
+          LocationTaskCondition.fromIds(const <String>['retiredP01']),
+        ],
+        currentDate: t(30),
+      );
+      final locConflictScoped = TaskBoardSyncScoping.scopeCandidateAndBaseline(
+        candidate: refRetiredLocationCandidate,
+        hasCandidate: true,
+        storedBaseline: storedBaseline,
+        candidateOriginBoard: originBoard,
+        storedAckGeneration: 2,
+        utcNow: t(50),
+        localNow: t(50),
+        timeZone: utcZone,
+        dueLeadWindow: TaskBoard.defaultDueLeadWindow,
+      );
+      expect(locConflictScoped.ackGeneration, equals(1));
+      expect(locConflictScoped.baseline?.findLocation('retiredP01'), isNotNull);
+
+      final refRetiredLabelCandidate = originBoard.updateTask(
+        'bystandT01',
+        labelIds: const <String>['retiredL01'],
+        currentDate: t(30),
+      );
+      final labelConflictScoped =
+          TaskBoardSyncScoping.scopeCandidateAndBaseline(
+            candidate: refRetiredLabelCandidate,
+            hasCandidate: true,
+            storedBaseline: storedBaseline,
+            candidateOriginBoard: originBoard,
+            storedAckGeneration: 2,
+            utcNow: t(50),
+            localNow: t(50),
+            timeZone: utcZone,
+            dueLeadWindow: TaskBoard.defaultDueLeadWindow,
+          );
+      expect(labelConflictScoped.ackGeneration, equals(1));
+      expect(labelConflictScoped.baseline?.findLabel('retiredL01'), isNotNull);
     });
   });
 }

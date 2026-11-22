@@ -20,8 +20,8 @@ abstract final class Sha256Service {
   /// Lowercase hexadecimal digit table (`0-9`, `a-f`).
   static const String _hexDigits = '0123456789abcdef';
 
-  /// Standard FIPS 180-4 SHA-256 32-bit round constants.
-  static const List<int> _roundConstants = <int>[
+  /// Standard FIPS 180-4 SHA-256 32-bit round constants stored in an unboxed [Uint32List].
+  static final Uint32List _roundConstants = Uint32List.fromList(const <int>[
     0x428a2f98,
     0x71374491,
     0xb5c0fbcf,
@@ -86,34 +86,23 @@ abstract final class Sha256Service {
     0xa4506ceb,
     0xbef9a3f7,
     0xc67178f2,
-  ];
+  ]);
 
-  /// Computes the 32-byte FIPS 180-4 SHA-256 binary digest of [inputBytes].
+  /// Computes the 32-byte FIPS 180-4 SHA-256 binary digest of [inputBytes] without allocating a full padded copy.
   static Uint8List hashBytes(List<int> inputBytes) {
-    final bitLength = inputBytes.length * 8;
-    final paddedLength = ((inputBytes.length + 9 + 63) ~/ 64) * 64;
-    final padded = Uint8List(paddedLength);
-    padded.setRange(0, inputBytes.length, inputBytes);
-    padded[inputBytes.length] = 0x80;
-
-    final view = ByteData.sublistView(padded);
-    view.setUint32(paddedLength - 8, (bitLength ~/ 0x100000000) & 0xFFFFFFFF);
-    view.setUint32(paddedLength - 4, bitLength & 0xFFFFFFFF);
-
-    final state = <int>[
-      0x6a09e667,
-      0xbb67ae85,
-      0x3c6ef372,
-      0xa54ff53a,
-      0x510e527f,
-      0x9b05688c,
-      0x1f83d9ab,
-      0x5be0cd19,
-    ];
+    final state = Uint32List(8)
+      ..[0] = 0x6a09e667
+      ..[1] = 0xbb67ae85
+      ..[2] = 0x3c6ef372
+      ..[3] = 0xa54ff53a
+      ..[4] = 0x510e527f
+      ..[5] = 0x9b05688c
+      ..[6] = 0x1f83d9ab
+      ..[7] = 0x5be0cd19;
     final schedule = Uint32List(64);
-    for (var offset = 0; offset < paddedLength; offset += 64) {
-      _compressBlock(view, offset, state, schedule);
-    }
+    final fullBlocksBytes = inputBytes.length & ~63;
+    _compressFullInputBlocks(inputBytes, fullBlocksBytes, state, schedule);
+    _compressTailBlocks(inputBytes, fullBlocksBytes, state, schedule);
 
     final digest = Uint8List(32);
     final digestView = ByteData.sublistView(digest);
@@ -139,7 +128,7 @@ abstract final class Sha256Service {
   static void _compressBlock(
     ByteData view,
     int blockOffset,
-    List<int> state,
+    Uint32List state,
     Uint32List schedule,
   ) {
     for (var i = 0; i < 16; i++) {
@@ -148,8 +137,16 @@ abstract final class Sha256Service {
     for (var i = 16; i < 64; i++) {
       final prev15 = schedule[i - 15];
       final prev2 = schedule[i - 2];
-      final sigma0 = _rotr32(prev15, 7) ^ _rotr32(prev15, 18) ^ (prev15 >>> 3);
-      final sigma1 = _rotr32(prev2, 17) ^ _rotr32(prev2, 19) ^ (prev2 >>> 10);
+      final sigma0 =
+          (((prev15 >>> 7) | (prev15 << 25)) ^
+              ((prev15 >>> 18) | (prev15 << 14)) ^
+              (prev15 >>> 3)) &
+          0xFFFFFFFF;
+      final sigma1 =
+          (((prev2 >>> 17) | (prev2 << 15)) ^
+              ((prev2 >>> 19) | (prev2 << 13)) ^
+              (prev2 >>> 10)) &
+          0xFFFFFFFF;
       schedule[i] =
           (schedule[i - 16] + sigma0 + schedule[i - 7] + sigma1) & 0xFFFFFFFF;
     }
@@ -164,11 +161,19 @@ abstract final class Sha256Service {
     var h = state[7];
 
     for (var i = 0; i < 64; i++) {
-      final sum1 = _rotr32(e, 6) ^ _rotr32(e, 11) ^ _rotr32(e, 25);
-      final choice = (e & f) ^ ((~e & 0xFFFFFFFF) & g);
+      final sum1 =
+          (((e >>> 6) | (e << 26)) ^
+              ((e >>> 11) | (e << 21)) ^
+              ((e >>> 25) | (e << 7))) &
+          0xFFFFFFFF;
+      final choice = (e & f) ^ ((~e) & g);
       final temp1 =
           (h + sum1 + choice + _roundConstants[i] + schedule[i]) & 0xFFFFFFFF;
-      final sum0 = _rotr32(a, 2) ^ _rotr32(a, 13) ^ _rotr32(a, 22);
+      final sum0 =
+          (((a >>> 2) | (a << 30)) ^
+              ((a >>> 13) | (a << 19)) ^
+              ((a >>> 22) | (a << 10))) &
+          0xFFFFFFFF;
       final majority = (a & b) ^ (a & c) ^ (b & c);
       final temp2 = (sum0 + majority) & 0xFFFFFFFF;
 
@@ -192,9 +197,51 @@ abstract final class Sha256Service {
     state[7] = (state[7] + h) & 0xFFFFFFFF;
   }
 
-  /// Right-rotates an unsigned 32-bit integer [value] by [shift] bits.
-  static int _rotr32(int value, int shift) {
-    final masked = value & 0xFFFFFFFF;
-    return ((masked >>> shift) | (masked << (32 - shift))) & 0xFFFFFFFF;
+  /// Streams all full 64-byte blocks from [inputBytes] up to [fullBlocksBytes] into [state].
+  static void _compressFullInputBlocks(
+    List<int> inputBytes,
+    int fullBlocksBytes,
+    Uint32List state,
+    Uint32List schedule,
+  ) {
+    if (fullBlocksBytes == 0) {
+      return;
+    }
+    if (inputBytes is Uint8List) {
+      final view = ByteData.sublistView(inputBytes);
+      for (var offset = 0; offset < fullBlocksBytes; offset += 64) {
+        _compressBlock(view, offset, state, schedule);
+      }
+      return;
+    }
+    final scratch = Uint8List(64);
+    final scratchView = ByteData.sublistView(scratch);
+    for (var offset = 0; offset < fullBlocksBytes; offset += 64) {
+      scratch.setRange(0, 64, inputBytes, offset);
+      _compressBlock(scratchView, 0, state, schedule);
+    }
+  }
+
+  /// Pads and compresses the remaining trailing bytes of [inputBytes] starting at [fullBlocksBytes] using a 128-byte tail buffer.
+  static void _compressTailBlocks(
+    List<int> inputBytes,
+    int fullBlocksBytes,
+    Uint32List state,
+    Uint32List schedule,
+  ) {
+    final remaining = inputBytes.length - fullBlocksBytes;
+    final tailLength = remaining < 56 ? 64 : 128;
+    final tail = Uint8List(128);
+    if (remaining > 0) {
+      tail.setRange(0, remaining, inputBytes, fullBlocksBytes);
+    }
+    tail[remaining] = 0x80;
+    final bitLength = inputBytes.length * 8;
+    final tailView = ByteData.sublistView(tail);
+    tailView.setUint32(tailLength - 8, (bitLength ~/ 0x100000000) & 0xFFFFFFFF);
+    tailView.setUint32(tailLength - 4, bitLength & 0xFFFFFFFF);
+    for (var offset = 0; offset < tailLength; offset += 64) {
+      _compressBlock(tailView, offset, state, schedule);
+    }
   }
 }

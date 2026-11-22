@@ -41,7 +41,7 @@ enum _TimeZoneRuleKind {
 /// Proleptic Gregorian calendar and Unicode scalar validation utilities per `spec/TDF_SPEC_0.8.0.md` Sections 4.1 and 4.4.
 abstract final class TdfCalendar {
   /// Unix epoch (`1970-01-01 00:00:00` UTC).
-  static final DateTime epochUtc = DateTime.utc(1970, 1, 1, 0, 0, 0);
+  static final DateTime epochUtc = DateTime.utc(1970);
 
   /// Maximum valid TDF timestamp (`9999-12-31 23:59:59` UTC).
   static final DateTime maxTimestampUtc = DateTime.utc(
@@ -57,7 +57,7 @@ abstract final class TdfCalendar {
   static const int maxYear = 9999;
 
   /// Minimum valid TDF timestamp (`0001-01-01 00:00:00` UTC).
-  static final DateTime minTimestampUtc = DateTime.utc(1, 1, 1, 0, 0, 0);
+  static final DateTime minTimestampUtc = DateTime.utc(1);
 
   /// Minimum supported year in the proleptic Gregorian calendar.
   static const int minYear = 1;
@@ -525,6 +525,9 @@ class TdfTimeZoneContext {
   /// Whether transition rules are available for this time zone context.
   bool get isAvailable => _ruleKind != _TimeZoneRuleKind.unavailable;
 
+  /// Whether this time zone context can cross Dart isolate boundaries without capturing custom closures.
+  bool get isIsolateSendable => _customOffsetObserver == null;
+
   /// Resolves a local civil date and clock (`year-month-day hour:minute:second`) to a UTC [DateTime] per `TDF-CAL-001`:
   /// 1. Unique local instant -> exact UTC instant.
   /// 2. Overlap (fold) -> earliest matching UTC instant.
@@ -553,7 +556,6 @@ class TdfTimeZoneContext {
       throw const FormatException('InvalidTimestamp');
     }
     if (_ruleKind == _TimeZoneRuleKind.systemLocal ||
-        _ruleKind == _TimeZoneRuleKind.americaNewYork ||
         _ruleKind == _TimeZoneRuleKind.customObserver) {
       return _resolveSampledLocalToUtc(year, month, day, hour, minute, second);
     }
@@ -571,6 +573,11 @@ class TdfTimeZoneContext {
       throw const FormatException('InvalidTimestamp');
     }
     return resolvedUtc;
+  }
+
+  /// Converts a UTC [instant] into a validated `0001..9999` [TdfLocalDateTime], throwing [FormatException] when outside range (`TDF-TYPE-004`).
+  TdfLocalDateTime toLocalDateTime(DateTime instant) {
+    return TdfLocalDateTime.fromWallClock(toLocalWallClock(instant));
   }
 
   /// Converts a UTC [instant] into local wall-clock components (returned as a `DateTime.utc(...)` carrier).
@@ -617,7 +624,7 @@ class TdfTimeZoneContext {
 
   /// Computes the day of the month (`1..7`) of the first Sunday of [month] in [year].
   static int _firstSundayOfMonth(int year, int month) {
-    final firstDay = DateTime.utc(year, month, 1);
+    final firstDay = DateTime.utc(year, month);
     return firstDay.weekday == DateTime.sunday ? 1 : (8 - firstDay.weekday);
   }
 
@@ -681,6 +688,44 @@ class TdfTimeZoneContext {
     ).toLocal().timeZoneOffset.inSeconds;
   }
 
+  /// Resolves the UTC offset in seconds for a local wall-clock timestamp in `America/New_York` per `TDF-CAL-001`.
+  static int _resolveAmericaNewYorkLocalOffsetSeconds(
+    int year,
+    int month,
+    int day,
+    int hour,
+    int minute,
+    int second,
+  ) {
+    const estSeconds = -18000;
+    const edtSeconds = -14400;
+    if (month < 3 || month > 11) {
+      return estSeconds;
+    }
+    if (month > 3 && month < 11) {
+      return edtSeconds;
+    }
+    final daySeconds = hour * 3600 + minute * 60 + second;
+    if (month == 3) {
+      final springDay = _firstSundayOfMonth(year, 3) + 7;
+      if (day < springDay) {
+        return estSeconds;
+      }
+      if (day > springDay) {
+        return edtSeconds;
+      }
+      return daySeconds < 3 * 3600 ? estSeconds : edtSeconds;
+    }
+    final autumnDay = _firstSundayOfMonth(year, 11);
+    if (day < autumnDay) {
+      return edtSeconds;
+    }
+    if (day > autumnDay) {
+      return estSeconds;
+    }
+    return daySeconds < 2 * 3600 ? edtSeconds : estSeconds;
+  }
+
   /// Resolves the UTC offset in seconds (`-18000` EST or `-14400` EDT) at [utcEpochSeconds] in `America/New_York`.
   static int _resolveAmericaNewYorkUtcOffsetSeconds(int utcEpochSeconds) {
     final utcInstant = DateTime.fromMillisecondsSinceEpoch(
@@ -694,24 +739,10 @@ class TdfTimeZoneContext {
     final secondSundayMarch = _firstSundayOfMonth(year, 3) + 7;
     final firstSundayNovember = _firstSundayOfMonth(year, 11);
     final dstStartSec =
-        DateTime.utc(
-          year,
-          3,
-          secondSundayMarch,
-          7,
-          0,
-          0,
-        ).millisecondsSinceEpoch ~/
+        DateTime.utc(year, 3, secondSundayMarch, 7).millisecondsSinceEpoch ~/
         1000;
     final dstEndSec =
-        DateTime.utc(
-          year,
-          11,
-          firstSundayNovember,
-          6,
-          0,
-          0,
-        ).millisecondsSinceEpoch ~/
+        DateTime.utc(year, 11, firstSundayNovember, 6).millisecondsSinceEpoch ~/
         1000;
     if (utcEpochSeconds >= dstStartSec && utcEpochSeconds < dstEndSec) {
       return -14400;
@@ -760,17 +791,20 @@ class TdfTimeZoneContext {
   /// Resolves the UTC offset in seconds for a UTC [utcInstant] in `Europe/Berlin`.
   static int _resolveEuropeBerlinUtcOffsetSeconds(DateTime utcInstant) {
     final year = utcInstant.year;
+    if (year < 1 || year > 9999) {
+      return 3600;
+    }
     final springSunday = _lastSundayOfMonth(year, 3);
     final autumnSunday = _lastSundayOfMonth(year, 10);
-    final dstStartUtc = DateTime.utc(year, 3, springSunday, 1, 0, 0);
-    final dstEndUtc = DateTime.utc(year, 10, autumnSunday, 1, 0, 0);
+    final dstStartUtc = DateTime.utc(year, 3, springSunday, 1);
+    final dstEndUtc = DateTime.utc(year, 10, autumnSunday, 1);
     if (!utcInstant.isBefore(dstStartUtc) && utcInstant.isBefore(dstEndUtc)) {
       return 7200;
     }
     return 3600;
   }
 
-  /// Resolves the UTC offset in seconds for a direct fixed or analytical `Europe/Berlin` local wall time.
+  /// Resolves the UTC offset in seconds for a direct fixed or analytical local wall time.
   int _resolveOffsetSecondsForLocal(
     int year,
     int month,
@@ -789,7 +823,15 @@ class TdfTimeZoneContext {
         minute,
         second,
       ),
-      _TimeZoneRuleKind.americaNewYork ||
+      _TimeZoneRuleKind.americaNewYork =>
+        _resolveAmericaNewYorkLocalOffsetSeconds(
+          year,
+          month,
+          day,
+          hour,
+          minute,
+          second,
+        ),
       _TimeZoneRuleKind.systemLocal ||
       _TimeZoneRuleKind.customObserver ||
       _TimeZoneRuleKind.unavailable => 0,
@@ -815,7 +857,7 @@ class TdfTimeZoneContext {
     };
   }
 
-  /// Resolves local components to UTC via `15`-minute candidate offset sampling and epoch-second gap binary search (`TDF-CAL-001`).
+  /// Resolves local components to UTC via a 3-probe non-transition fast path with `15`-minute sweep fallback (`TDF-CAL-001`).
   DateTime _resolveSampledLocalToUtc(
     int year,
     int month,
@@ -826,10 +868,28 @@ class TdfTimeZoneContext {
   ) {
     final wallAsUtc = DateTime.utc(year, month, day, hour, minute, second);
     final centerSec = wallAsUtc.millisecondsSinceEpoch ~/ 1000;
-    final targetTuple = (year, month, day, hour, minute, second);
     final startSec = centerSec - _searchHalfWindowSeconds;
     final endSec = centerSec + _searchHalfWindowSeconds;
 
+    final offsetStart = _observeOffsetSecondsForEpoch(startSec);
+    final offsetCenter = _observeOffsetSecondsForEpoch(centerSec);
+    final offsetEnd = _observeOffsetSecondsForEpoch(endSec);
+    if (offsetStart == offsetCenter && offsetCenter == offsetEnd) {
+      final candidateUtcSec = centerSec - offsetCenter;
+      if (offsetCenter == 0 ||
+          _observeOffsetSecondsForEpoch(candidateUtcSec) == offsetCenter) {
+        final resolvedUtc = DateTime.fromMillisecondsSinceEpoch(
+          candidateUtcSec * 1000,
+          isUtc: true,
+        );
+        if (!TdfCalendar.isWithinTimestampBounds(resolvedUtc)) {
+          throw const FormatException('InvalidTimestamp');
+        }
+        return resolvedUtc;
+      }
+    }
+
+    final targetTuple = (year, month, day, hour, minute, second);
     final seenOffsets = <int>{};
     int? earliestMatchSec;
     for (

@@ -24,7 +24,6 @@ import '../l10n/tier_localization_extension.dart';
 import '../models/app_workspace.dart';
 import '../models/location_state.dart';
 import '../models/task_board.dart';
-import '../models/task_board_evaluator.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_location.dart';
 import '../models/tdf_metadata.dart';
@@ -74,19 +73,22 @@ class TierTaskShellScreen extends ConsumerStatefulWidget {
 /// Manages scroll offset preservation, global desktop shortcuts, Android `PopScope`,
 /// boundary timer subscription, and startup recovery notices for [TierTaskShellScreen].
 class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
-  final ScrollController _labelsScrollController = ScrollController();
-  final ScrollController _locationsScrollController = ScrollController();
-  final FocusNode _quickAddFocusNode = FocusNode();
+  late final _ShellControllers _controllers;
   final FocusNode _rootFocusNode = FocusNode(debugLabel: 'TierTaskShellRoot');
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _searchFocusNode = FocusNode();
-  final ScrollController _settingsScrollController = ScrollController();
-  final ScrollController _sidebarScrollController = ScrollController();
-  final ScrollController _tasksScrollController = ScrollController();
 
   @override
   void initState() {
     super.initState();
+    _controllers = _ShellControllers(
+      labelsScroll: ScrollController(),
+      locationsScroll: ScrollController(),
+      quickAddFocus: FocusNode(),
+      search: TextEditingController(),
+      searchFocus: FocusNode(),
+      settingsScroll: ScrollController(),
+      sidebarScroll: ScrollController(),
+      tasksScroll: ScrollController(),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -99,22 +101,15 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
 
   @override
   void dispose() {
-    _labelsScrollController.dispose();
-    _locationsScrollController.dispose();
-    _quickAddFocusNode.dispose();
     _rootFocusNode.dispose();
-    _searchController.dispose();
-    _searchFocusNode.dispose();
-    _settingsScrollController.dispose();
-    _sidebarScrollController.dispose();
-    _tasksScrollController.dispose();
+    _controllers.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Keep live due, lead-window, suspension, and condition time boundaries ticking.
-    ref.watch(boardBoundaryTimerProvider);
+    // Keep live due, lead-window, suspension, and condition time boundaries ticking without rebuilding root shell.
+    ref.listen<bool>(boardBoundaryTimerProvider.select((_) => true), (_, _) {});
     _registerScopeListeners();
 
     return PopScope<void>(
@@ -126,16 +121,7 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
         skipTraversal: true,
         onKeyEvent: _handleRootKeyEvent,
         child: _ShellAdaptiveScaffold(
-          controllers: _ShellControllers(
-            labelsScroll: _labelsScrollController,
-            locationsScroll: _locationsScrollController,
-            quickAddFocus: _quickAddFocusNode,
-            search: _searchController,
-            searchFocus: _searchFocusNode,
-            settingsScroll: _settingsScrollController,
-            sidebarScroll: _sidebarScrollController,
-            tasksScroll: _tasksScrollController,
-          ),
+          controllers: _controllers,
           onOpenSearch: _openSearchAndFocus,
         ),
       ),
@@ -148,15 +134,16 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
     if (isCompact) {
       ref.read(shellProvider.notifier).setCompactComposerOpen(true);
     }
+    final quickAddFocus = _controllers.quickAddFocus;
     if (!isCompact &&
-        _quickAddFocusNode.context != null &&
-        _quickAddFocusNode.canRequestFocus) {
-      _quickAddFocusNode.requestFocus();
+        quickAddFocus.context != null &&
+        quickAddFocus.canRequestFocus) {
+      quickAddFocus.requestFocus();
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _quickAddFocusNode.canRequestFocus) {
-        _quickAddFocusNode.requestFocus();
+      if (mounted && quickAddFocus.canRequestFocus) {
+        quickAddFocus.requestFocus();
       }
     });
   }
@@ -266,15 +253,14 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
   void _openSearchAndFocus() {
     final wasOpen = ref.read(shellProvider).searchOpen;
     ref.read(shellProvider.notifier).openSearch();
-    if (wasOpen &&
-        _searchFocusNode.context != null &&
-        _searchFocusNode.canRequestFocus) {
-      _searchFocusNode.requestFocus();
+    final searchFocus = _controllers.searchFocus;
+    if (wasOpen && searchFocus.context != null && searchFocus.canRequestFocus) {
+      searchFocus.requestFocus();
       return;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _searchFocusNode.canRequestFocus) {
-        _searchFocusNode.requestFocus();
+      if (mounted && searchFocus.canRequestFocus) {
+        searchFocus.requestFocus();
       }
     });
   }
@@ -285,14 +271,14 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
       activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
       (previous, next) {
         if (previous != null && next != null && previous != next) {
-          _resetScrollController(_sidebarScrollController);
-          _resetScrollController(_tasksScrollController);
+          _resetScrollController(_controllers.sidebarScroll);
+          _resetScrollController(_controllers.tasksScroll);
         }
       },
     );
     ref.listen<String>(searchQueryProvider, (_, next) {
-      if (_searchController.text != next) {
-        _searchController.text = next;
+      if (_controllers.search.text != next) {
+        _controllers.search.text = next;
       }
     });
     ref.listen<
@@ -308,7 +294,7 @@ class _TierTaskShellScreenState extends ConsumerState<TierTaskShellScreen> {
       ),
       (previous, next) {
         if (previous != null && previous != next) {
-          _resetScrollController(_tasksScrollController);
+          _resetScrollController(_controllers.tasksScroll);
         }
       },
     );
@@ -360,6 +346,18 @@ class _ShellControllers {
 
   /// Preserved scroll controller for [TasksView].
   final ScrollController tasksScroll;
+
+  /// Disposes all owned scroll controllers, text controllers, and focus nodes.
+  void dispose() {
+    labelsScroll.dispose();
+    locationsScroll.dispose();
+    quickAddFocus.dispose();
+    search.dispose();
+    searchFocus.dispose();
+    settingsScroll.dispose();
+    sidebarScroll.dispose();
+    tasksScroll.dispose();
+  }
 }
 
 /// Watches narrow shell chrome slices so search, sidebar filter, or card-expand edits never rebuild [UiAdaptiveAppShell].
@@ -493,9 +491,6 @@ class _ShellAdaptiveView extends ConsumerWidget {
     final showWindow = ref.watch(
       desktopWindowActionsProvider.select((actions) => actions.isSupported),
     );
-    final hasNotice = ref.watch(
-      floatingNoticeProvider.select((notice) => notice != null),
-    );
 
     return UiAdaptiveAppShell(
       brand: const _ShellBrandButton(),
@@ -519,7 +514,7 @@ class _ShellAdaptiveView extends ConsumerWidget {
       sidebarBody: const _ShellSidebarBody(),
       sidebarFooter: const _ShellSidebarFooter(),
       sidebarScrollController: sidebarScrollController,
-      floatingNotice: hasNotice ? const _ShellFloatingNotice() : null,
+      floatingNotice: const _ShellFloatingNotice(),
       bottomDock: bottomDock,
       body: body,
     );
@@ -563,7 +558,6 @@ class _ChromeCloseWindowButton extends ConsumerWidget {
     return UiButton(
       key: const ValueKey<String>('chrome_close_window_button'),
       variant: UiButtonVariant.icon,
-      density: UiButtonDensity.standard,
       leadingIcon: Icons.close_rounded,
       isDangerHover: true,
       tooltip: localizations.tooltipCloseApp,
@@ -588,7 +582,6 @@ class _ChromeLocationButton extends ConsumerWidget {
     return UiButton(
       key: const ValueKey<String>('chrome_location_button'),
       variant: UiButtonVariant.icon,
-      density: UiButtonDensity.standard,
       tone: UiDomainMappers.locationButtonTone(status),
       leadingIcon: UiDomainMappers.locationIcon(status),
       isLoading: status == LocationStatus.searching,
@@ -615,10 +608,13 @@ class _ChromeSyncButton extends ConsumerWidget {
             configAsync.asData?.value.storageMode ?? StorageMode.local,
       ),
     );
-    final syncState = ref.watch(syncStateProvider);
-    final statusKind = resolveSyncStatusKind(
-      storageMode: storageMode,
-      syncState: syncState,
+    final statusKind = ref.watch(
+      syncStateProvider.select(
+        (syncState) => resolveSyncStatusKind(
+          storageMode: storageMode,
+          syncState: syncState,
+        ),
+      ),
     );
     final statusLabel = UiDomainMappers.syncStatusLabel(
       statusKind,
@@ -627,7 +623,6 @@ class _ChromeSyncButton extends ConsumerWidget {
 
     return UiButton(
       key: const ValueKey<String>('chrome_sync_button'),
-      variant: UiButtonVariant.secondary,
       density: UiButtonDensity.chrome,
       tone: UiDomainMappers.syncButtonTone(statusKind),
       leadingIcon: UiDomainMappers.syncIcon(statusKind),
@@ -678,30 +673,202 @@ class _ShellBrandButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final tokens = UiThemeTokens.of(context);
     final localizations = AppLocalizations.of(context);
-    return InkWell(
+    return _ShellChromeTapButton(
       key: const ValueKey<String>('chrome_brand_button'),
+      semanticLabel: localizations.appTitle,
+      borderRadius: tokens.radii.md,
+      hoverColor: tokens.colors.bg,
+      padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 4.0),
       onTap: () => ref.read(shellProvider.notifier).openView(ShellView.tasks),
-      borderRadius: BorderRadius.circular(tokens.radii.md),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2.0, vertical: 4.0),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const UiAppLogo(size: 22.0),
-            const SizedBox(width: 9.0),
-            Flexible(
-              child: Text(
-                localizations.appTitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: tokens.typography.brand.copyWith(
-                  color: tokens.colors.ink,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const UiAppLogo(),
+          const SizedBox(width: 9.0),
+          Flexible(
+            child: Text(
+              localizations.appTitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: tokens.typography.brand.copyWith(color: tokens.colors.ink),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Design-system interactive chrome trigger replacing raw Material [InkWell] (`U-A11Y-001`).
+class _ShellChromeTapButton extends StatefulWidget {
+  /// Creates a [_ShellChromeTapButton].
+  const _ShellChromeTapButton({
+    super.key,
+    required this.semanticLabel,
+    required this.borderRadius,
+    required this.hoverColor,
+    required this.padding,
+    required this.onTap,
+    required this.child,
+  });
+
+  /// Corner radius for hover fill and outer keyboard focus ring.
+  final double borderRadius;
+
+  /// Interior button content.
+  final Widget child;
+
+  /// Token hover background color (`bg` for `ink` text, `soft` for `accent` text).
+  final Color hoverColor;
+
+  /// Activation callback invoked on pointer tap or keyboard `Enter`/`Space`.
+  final VoidCallback onTap;
+
+  /// Inner hit-area padding.
+  final EdgeInsetsGeometry padding;
+
+  /// Accessible button label announced by assistive technology.
+  final String semanticLabel;
+
+  @override
+  State<_ShellChromeTapButton> createState() => _ShellChromeTapButtonState();
+}
+
+/// Manages hover fill and `1px` `accent` keyboard focus ring for [_ShellChromeTapButton].
+class _ShellChromeTapButtonState extends State<_ShellChromeTapButton> {
+  bool _isHovered = false;
+  bool _showFocusRing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    return Semantics(
+      button: true,
+      label: widget.semanticLabel,
+      child: FocusableActionDetector(
+        mouseCursor: SystemMouseCursors.click,
+        onShowFocusHighlight: _handleFocusHighlightChanged,
+        actions: _buildActions(),
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => _setHovered(true),
+          onExit: (_) => _setHovered(false),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: widget.onTap,
+            child: _ShellChromeTapSurface(
+              borderRadius: widget.borderRadius,
+              fillColor: _isHovered ? widget.hoverColor : Colors.transparent,
+              showFocusRing: _showFocusRing,
+              padding: widget.padding,
+              duration: tokens.focus.hoverDuration,
+              child: widget.child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Builds keyboard activation actions delegating `Enter` and `Space` to [widget.onTap].
+  Map<Type, Action<Intent>> _buildActions() {
+    return <Type, Action<Intent>>{
+      ActivateIntent: CallbackAction<ActivateIntent>(
+        onInvoke: (_) {
+          widget.onTap();
+          return null;
+        },
+      ),
+      ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(
+        onInvoke: (_) {
+          widget.onTap();
+          return null;
+        },
+      ),
+    };
+  }
+
+  /// Updates keyboard focus ring visibility.
+  void _handleFocusHighlightChanged(bool focused) {
+    if (_showFocusRing != focused) {
+      setState(() => _showFocusRing = focused);
+    }
+  }
+
+  /// Updates pointer hover fill state.
+  void _setHovered(bool hovered) {
+    if (_isHovered != hovered) {
+      setState(() => _isHovered = hovered);
+    }
+  }
+}
+
+/// Visual hover background and `1px` `accent` focus ring surface inside [_ShellChromeTapButton].
+class _ShellChromeTapSurface extends StatelessWidget {
+  /// Creates a [_ShellChromeTapSurface].
+  const _ShellChromeTapSurface({
+    required this.borderRadius,
+    required this.fillColor,
+    required this.showFocusRing,
+    required this.padding,
+    required this.duration,
+    required this.child,
+  });
+
+  /// Corner radius in logical pixels.
+  final double borderRadius;
+
+  /// Interior button content.
+  final Widget child;
+
+  /// Hover color transition duration.
+  final Duration duration;
+
+  /// Background color applied to the button surface.
+  final Color fillColor;
+
+  /// Inner hit-area padding.
+  final EdgeInsetsGeometry padding;
+
+  /// Whether the `1px` `accent` outer keyboard focus ring is visible.
+  final bool showFocusRing;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
+    return Stack(
+      fit: StackFit.passthrough,
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        AnimatedContainer(
+          duration: duration,
+          padding: padding,
+          decoration: BoxDecoration(
+            color: fillColor,
+            borderRadius: BorderRadius.circular(borderRadius),
+          ),
+          child: child,
+        ),
+        if (showFocusRing)
+          Positioned.fill(
+            left: -ringInset,
+            top: -ringInset,
+            right: -ringInset,
+            bottom: -ringInset,
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(borderRadius + ringInset),
+                  border: Border.all(
+                    color: tokens.colors.accent,
+                    width: tokens.focus.ringWidth,
+                  ),
                 ),
               ),
             ),
-          ],
-        ),
-      ),
+          ),
+      ],
     );
   }
 }
@@ -717,7 +884,6 @@ class _ShellDevBadge extends StatelessWidget {
     return UiPill(
       key: const ValueKey<String>('chrome_dev_pill'),
       label: localizations.devBuildBadge,
-      variant: UiPillVariant.badge,
       tone: UiPillTone.warning,
       isMono: true,
     );
@@ -738,29 +904,29 @@ class _MobileActiveFilterButton extends ConsumerWidget {
     final localizations = AppLocalizations.of(context);
     return Tooltip(
       message: localizations.activeFilterClearTooltip,
-      child: InkWell(
+      child: _ShellChromeTapButton(
         key: const ValueKey<String>('mobile_active_filter_button'),
+        semanticLabel: '$labelName (${localizations.activeFilterClearTooltip})',
+        borderRadius: tokens.radii.sm,
+        hoverColor: tokens.colors.soft,
+        padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 6.0),
         onTap: () => ref.read(shellProvider.notifier).selectLabelFilter(null),
-        borderRadius: BorderRadius.circular(tokens.radii.sm),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 6.0),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              const UiAppLogo(size: 20.0),
-              const SizedBox(width: 8.0),
-              Flexible(
-                child: Text(
-                  labelName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: tokens.typography.compactBrand.copyWith(
-                    color: tokens.colors.accent,
-                  ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const UiAppLogo(size: 20.0),
+            const SizedBox(width: 8.0),
+            Flexible(
+              child: Text(
+                labelName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tokens.typography.compactBrand.copyWith(
+                  color: tokens.colors.accent,
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -782,7 +948,6 @@ class _WorkspaceChromeTrigger extends ConsumerWidget {
     );
     return UiButton(
       key: const ValueKey<String>('chrome_workspace_button'),
-      variant: UiButtonVariant.secondary,
       density: UiButtonDensity.chrome,
       leadingIcon: Icons.grid_view_outlined,
       label: workspaceName,
@@ -808,7 +973,6 @@ class _CompactDrawerWorkspaceCard extends ConsumerWidget {
     );
     return UiButton(
       key: const ValueKey<String>('drawer_workspace_button'),
-      variant: UiButtonVariant.secondary,
       density: UiButtonDensity.chrome,
       isFullWidth: true,
       leadingIcon: Icons.grid_view_outlined,
@@ -849,7 +1013,6 @@ class _ShellSearchControl extends ConsumerWidget {
       return UiButton(
         key: const ValueKey<String>('chrome_search_open_button'),
         variant: UiButtonVariant.icon,
-        density: UiButtonDensity.standard,
         leadingIcon: Icons.search_rounded,
         tooltip: localizations.tooltipSearch,
         onPressed: onOpen,
@@ -980,6 +1143,107 @@ class _SidebarTasksSection extends ConsumerWidget {
   }
 }
 
+/// Collapsed Labels sidebar summary watching only label count and active dot color.
+class _SidebarLabelsCollapsedSection extends ConsumerWidget {
+  /// Creates a [_SidebarLabelsCollapsedSection].
+  const _SidebarLabelsCollapsedSection({
+    required this.activeLabelId,
+    required this.isFilterOpen,
+    required this.view,
+  });
+
+  /// Currently selected label filter identifier, if any.
+  final String? activeLabelId;
+
+  /// Whether the sidebar label filter input is open.
+  final bool isFilterOpen;
+
+  /// Active top-level shell view.
+  final ShellView view;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedLabelId = activeLabelId;
+    final summary = ref.watch(
+      taskNotifierProvider.select((boardAsync) {
+        final board = boardAsync.asData?.value;
+        final colorHex = selectedLabelId == null
+            ? null
+            : board?.findLabel(selectedLabelId)?.color;
+        return (count: board?.labels.length ?? 0, colorHex: colorHex);
+      }),
+    );
+
+    return _SidebarLabelsSectionFrame(
+      collapsedActiveColorDot: _colorFromArgb(
+        TaskScheduleHelper.parseLabelColorValue(summary.colorHex),
+      ),
+      collapsedCount: summary.count,
+      filterQuery: '',
+      isCollapsed: true,
+      isFilterOpen: isFilterOpen,
+      items: const <UiSidebarNavItem>[],
+      view: view,
+    );
+  }
+}
+
+/// Expanded Labels sidebar section reading cached `sortedLabels` and O(1) open counts.
+class _SidebarLabelsExpandedSection extends ConsumerWidget {
+  /// Creates an [_SidebarLabelsExpandedSection].
+  const _SidebarLabelsExpandedSection({
+    required this.activeLabelId,
+    required this.expandedLabelId,
+    required this.isFilterOpen,
+    required this.view,
+  });
+
+  /// Currently selected label filter identifier, if any.
+  final String? activeLabelId;
+
+  /// Currently expanded label identifier on the Labels view, if any.
+  final String? expandedLabelId;
+
+  /// Whether the sidebar label filter input is open.
+  final bool isFilterOpen;
+
+  /// Active top-level shell view.
+  final ShellView view;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final filterQuery = isFilterOpen
+        ? ref.watch(sidebarLabelsFilterQueryProvider)
+        : '';
+    final rawBoard =
+        ref.watch(
+          taskNotifierProvider.select((boardAsync) => boardAsync.asData?.value),
+        ) ??
+        TaskBoard.empty();
+    final sortedLabels = rawBoard.sortedLabels;
+
+    return _SidebarLabelsSectionFrame(
+      collapsedActiveColorDot: null,
+      collapsedCount: sortedLabels.length,
+      filterQuery: filterQuery,
+      isCollapsed: false,
+      isFilterOpen: isFilterOpen,
+      items: _buildLabelItems(
+        rawBoard: rawBoard,
+        sortedLabels: sortedLabels,
+        view: view,
+        activeLabelId: activeLabelId,
+        expandedLabelId: expandedLabelId,
+        filterQuery: filterQuery,
+        localizations: localizations,
+        notifier: ref.read(shellProvider.notifier),
+      ),
+      view: view,
+    );
+  }
+}
+
 /// Collapsible, filterable Labels sidebar section (`U-UX-001`).
 class _SidebarLabelsSection extends ConsumerWidget {
   /// Creates a [_SidebarLabelsSection].
@@ -987,7 +1251,6 @@ class _SidebarLabelsSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       shellProvider.select(
         (shell) => (
@@ -1001,30 +1264,70 @@ class _SidebarLabelsSection extends ConsumerWidget {
         ),
       ),
     );
-    final filterQuery = slice.isFilterOpen
-        ? ref.watch(sidebarLabelsFilterQueryProvider)
-        : '';
-    final rawBoard =
-        ref.watch(taskNotifierProvider.select((a) => a.asData?.value)) ??
-        TaskBoard.empty();
+    if (slice.isCollapsed) {
+      return _SidebarLabelsCollapsedSection(
+        activeLabelId: slice.activeLabelId,
+        isFilterOpen: slice.isFilterOpen,
+        view: slice.view,
+      );
+    }
+    return _SidebarLabelsExpandedSection(
+      activeLabelId: slice.activeLabelId,
+      expandedLabelId: slice.expandedLabelId,
+      isFilterOpen: slice.isFilterOpen,
+      view: slice.view,
+    );
+  }
+}
+
+/// Shared [UiSidebarSection] presentation frame for collapsed and expanded Labels sections.
+class _SidebarLabelsSectionFrame extends ConsumerWidget {
+  /// Creates a [_SidebarLabelsSectionFrame].
+  const _SidebarLabelsSectionFrame({
+    required this.collapsedActiveColorDot,
+    required this.collapsedCount,
+    required this.filterQuery,
+    required this.isCollapsed,
+    required this.isFilterOpen,
+    required this.items,
+    required this.view,
+  });
+
+  /// Optional active label color dot shown in the collapsed summary.
+  final Color? collapsedActiveColorDot;
+
+  /// Total workspace label count displayed in the collapsed summary.
+  final int collapsedCount;
+
+  /// Current sidebar label filter query.
+  final String filterQuery;
+
+  /// Whether the Labels sidebar section is collapsed.
+  final bool isCollapsed;
+
+  /// Whether the inline sidebar label filter field is visible.
+  final bool isFilterOpen;
+
+  /// Navigation items rendered when expanded, or empty when collapsed.
+  final List<UiSidebarNavItem> items;
+
+  /// Active top-level shell view.
+  final ShellView view;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
     final notifier = ref.read(shellProvider.notifier);
-    final sortedLabels = TaskBoardEvaluator.sortLabelsAlphabetically(
-      rawBoard.labels,
-    );
-    final activeColor = _resolveActiveLabelColor(
-      sortedLabels,
-      slice.activeLabelId,
-    );
 
     return UiSidebarSection(
       title: localizations.drawerLabels,
       isCollapsible: true,
-      isCollapsed: slice.isCollapsed,
+      isCollapsed: isCollapsed,
       onToggleCollapse: notifier.toggleSidebarLabelsCollapsed,
-      collapsedCountLabel: '${sortedLabels.length}',
-      collapsedActiveColorDot: activeColor,
+      collapsedCountLabel: '$collapsedCount',
+      collapsedActiveColorDot: collapsedActiveColorDot,
       isFilterable: true,
-      isFilterOpen: slice.isFilterOpen,
+      isFilterOpen: isFilterOpen,
       onToggleFilter: notifier.toggleSidebarLabelsFilter,
       filterQuery: filterQuery,
       onFilterChanged: ref
@@ -1034,21 +1337,93 @@ class _SidebarLabelsSection extends ConsumerWidget {
       filterClearTooltip: localizations.tooltipClearSearch,
       filterEmptyText: localizations.sidebarFilterLabelsEmpty,
       onManage: () => notifier.openView(ShellView.labels),
-      isManageActive: slice.view == ShellView.labels,
+      isManageActive: view == ShellView.labels,
       filterTooltip: localizations.sidebarFilterLabelsToggle,
       manageTooltip: localizations.sidebarManageLabels,
       collapseTooltip: localizations.sidebarCollapseLabels,
       expandTooltip: localizations.sidebarExpandLabels,
-      items: _buildLabelItems(
-        rawBoard: rawBoard,
-        sortedLabels: sortedLabels,
-        view: slice.view,
-        activeLabelId: slice.activeLabelId,
-        expandedLabelId: slice.expandedLabelId,
-        filterQuery: filterQuery,
-        localizations: localizations,
-        notifier: notifier,
+      items: items,
+    );
+  }
+}
+
+/// Collapsed Locations sidebar summary watching only total location count.
+class _SidebarLocationsCollapsedSection extends ConsumerWidget {
+  /// Creates a [_SidebarLocationsCollapsedSection].
+  const _SidebarLocationsCollapsedSection({
+    required this.isFilterOpen,
+    required this.view,
+  });
+
+  /// Whether the sidebar location filter input is open.
+  final bool isFilterOpen;
+
+  /// Active top-level shell view.
+  final ShellView view;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final locationCount = ref.watch(
+      taskNotifierProvider.select(
+        (boardAsync) => boardAsync.asData?.value.locations.length ?? 0,
       ),
+    );
+
+    return _SidebarLocationsSectionFrame(
+      collapsedCount: locationCount,
+      filterQuery: '',
+      isCollapsed: true,
+      isFilterOpen: isFilterOpen,
+      items: const <UiSidebarNavItem>[],
+      view: view,
+    );
+  }
+}
+
+/// Expanded Locations sidebar section reading cached `sortedLocations`.
+class _SidebarLocationsExpandedSection extends ConsumerWidget {
+  /// Creates a [_SidebarLocationsExpandedSection].
+  const _SidebarLocationsExpandedSection({
+    required this.expandedLocationId,
+    required this.isFilterOpen,
+    required this.view,
+  });
+
+  /// Currently expanded location identifier on the Locations view, if any.
+  final String? expandedLocationId;
+
+  /// Whether the sidebar location filter input is open.
+  final bool isFilterOpen;
+
+  /// Active top-level shell view.
+  final ShellView view;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final filterQuery = isFilterOpen
+        ? ref.watch(sidebarLocationsFilterQueryProvider)
+        : '';
+    final rawBoard =
+        ref.watch(
+          taskNotifierProvider.select((boardAsync) => boardAsync.asData?.value),
+        ) ??
+        TaskBoard.empty();
+    final sortedLocations = rawBoard.sortedLocations;
+
+    return _SidebarLocationsSectionFrame(
+      collapsedCount: sortedLocations.length,
+      filterQuery: filterQuery,
+      isCollapsed: false,
+      isFilterOpen: isFilterOpen,
+      items: _buildLocationItems(
+        rawBoard: rawBoard,
+        sortedLocations: sortedLocations,
+        view: view,
+        expandedLocationId: expandedLocationId,
+        filterQuery: filterQuery,
+        notifier: ref.read(shellProvider.notifier),
+      ),
+      view: view,
     );
   }
 }
@@ -1060,7 +1435,6 @@ class _SidebarLocationsSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
     final slice = ref.watch(
       shellProvider.select(
         (shell) => (
@@ -1073,25 +1447,63 @@ class _SidebarLocationsSection extends ConsumerWidget {
         ),
       ),
     );
-    final filterQuery = slice.isFilterOpen
-        ? ref.watch(sidebarLocationsFilterQueryProvider)
-        : '';
-    final rawBoard =
-        ref.watch(taskNotifierProvider.select((a) => a.asData?.value)) ??
-        TaskBoard.empty();
-    final notifier = ref.read(shellProvider.notifier);
-    final sortedLocations = TaskBoardEvaluator.sortLocationsAlphabetically(
-      rawBoard.locations,
+    if (slice.isCollapsed) {
+      return _SidebarLocationsCollapsedSection(
+        isFilterOpen: slice.isFilterOpen,
+        view: slice.view,
+      );
+    }
+    return _SidebarLocationsExpandedSection(
+      expandedLocationId: slice.expandedLocationId,
+      isFilterOpen: slice.isFilterOpen,
+      view: slice.view,
     );
+  }
+}
+
+/// Shared [UiSidebarSection] presentation frame for collapsed and expanded Locations sections.
+class _SidebarLocationsSectionFrame extends ConsumerWidget {
+  /// Creates a [_SidebarLocationsSectionFrame].
+  const _SidebarLocationsSectionFrame({
+    required this.collapsedCount,
+    required this.filterQuery,
+    required this.isCollapsed,
+    required this.isFilterOpen,
+    required this.items,
+    required this.view,
+  });
+
+  /// Total workspace location count displayed in the collapsed summary.
+  final int collapsedCount;
+
+  /// Current sidebar location filter query.
+  final String filterQuery;
+
+  /// Whether the Locations sidebar section is collapsed.
+  final bool isCollapsed;
+
+  /// Whether the inline sidebar location filter field is visible.
+  final bool isFilterOpen;
+
+  /// Navigation items rendered when expanded, or empty when collapsed.
+  final List<UiSidebarNavItem> items;
+
+  /// Active top-level shell view.
+  final ShellView view;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final notifier = ref.read(shellProvider.notifier);
 
     return UiSidebarSection(
       title: localizations.drawerLocations,
       isCollapsible: true,
-      isCollapsed: slice.isCollapsed,
+      isCollapsed: isCollapsed,
       onToggleCollapse: notifier.toggleSidebarLocationsCollapsed,
-      collapsedCountLabel: '${sortedLocations.length}',
+      collapsedCountLabel: '$collapsedCount',
       isFilterable: true,
-      isFilterOpen: slice.isFilterOpen,
+      isFilterOpen: isFilterOpen,
       onToggleFilter: notifier.toggleSidebarLocationsFilter,
       filterQuery: filterQuery,
       onFilterChanged: ref
@@ -1101,19 +1513,12 @@ class _SidebarLocationsSection extends ConsumerWidget {
       filterClearTooltip: localizations.tooltipClearSearch,
       filterEmptyText: localizations.sidebarFilterLocationsEmpty,
       onManage: () => notifier.openView(ShellView.locations),
-      isManageActive: slice.view == ShellView.locations,
+      isManageActive: view == ShellView.locations,
       filterTooltip: localizations.sidebarFilterLocationsToggle,
       manageTooltip: localizations.sidebarManageLocations,
       collapseTooltip: localizations.sidebarCollapseLocations,
       expandTooltip: localizations.sidebarExpandLocations,
-      items: _buildLocationItems(
-        rawBoard: rawBoard,
-        sortedLocations: sortedLocations,
-        view: slice.view,
-        expandedLocationId: slice.expandedLocationId,
-        filterQuery: filterQuery,
-        notifier: notifier,
-      ),
+      items: items,
     );
   }
 }
@@ -1251,12 +1656,12 @@ List<UiSidebarNavItem> _buildLabelItems({
   final needle = filterQuery.trim().toLowerCase();
   final items = <UiSidebarNavItem>[];
   if (needle.isEmpty) {
-    var globalOpenCount = 0;
-    for (final task in rawBoard.allTasks) {
-      if (!task.isCompleted) {
-        globalOpenCount++;
-      }
-    }
+    final globalOpenCount =
+        rawBoard.focus.length +
+        rawBoard.ready.length +
+        rawBoard.planned.length +
+        rawBoard.blocked.length +
+        rawBoard.someday.length;
     items.add(
       UiSidebarNavItem(
         id: 'label_all_tasks',
@@ -1392,21 +1797,6 @@ bool _isTasksViewBlocked(
     return true;
   }
   return (boardAsync.isLoading || boardAsync.hasError) && !boardAsync.hasValue;
-}
-
-/// Resolves the color dot for [activeId] when the Labels section is collapsed.
-Color? _resolveActiveLabelColor(List<TdfLabel> sortedLabels, String? activeId) {
-  if (activeId == null) {
-    return null;
-  }
-  for (final label in sortedLabels) {
-    if (label.id == activeId) {
-      return _colorFromArgb(
-        TaskScheduleHelper.parseLabelColorValue(label.color),
-      );
-    }
-  }
-  return null;
 }
 
 /// Initiates native desktop window drag from empty top chrome space.

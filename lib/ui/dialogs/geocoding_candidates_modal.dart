@@ -46,7 +46,6 @@ class _GeocodingCandidatesModal extends StatelessWidget {
     return UiDialogFrame(
       key: const ValueKey<String>('geocoding_candidates_modal'),
       title: localizations.locationSelectCandidateTitle,
-      size: UiDialogSize.medium,
       closeTooltip: localizations.actionClose,
       onClose: onClose,
       body: UiSearchablePicker<GeocodingCandidate>(
@@ -63,7 +62,6 @@ class _GeocodingCandidatesModal extends StatelessWidget {
       footer: UiButton(
         key: const ValueKey<String>('geocoding_candidates_cancel_button'),
         label: localizations.actionCancel,
-        variant: UiButtonVariant.secondary,
         density: UiButtonDensity.compact,
         onPressed: onClose,
       ),

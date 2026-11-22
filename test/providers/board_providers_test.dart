@@ -35,6 +35,7 @@ import 'package:tiertask/providers/location_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/app_version_repository.dart';
+import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
@@ -337,11 +338,7 @@ void main() {
           webDavConfigProvider.overrideWith(_PendingWebDavConfigNotifier.new),
           activeWorkspaceProvider.overrideWith(
             () => _StubActiveWorkspaceNotifier(
-              const AppWorkspace(
-                id: 'tasks',
-                name: 'Tasks',
-                config: WebDavConfig(dueLeadWindow: DueLeadWindow.hours24),
-              ),
+              const AppWorkspace(id: 'tasks', name: 'Tasks'),
             ),
           ),
         ],
@@ -455,9 +452,7 @@ void main() {
             }),
             taskNotifierProvider.overrideWith(() => _StubTaskNotifier(board)),
             webDavConfigProvider.overrideWith(
-              () => _StubWebDavConfigNotifier(
-                const WebDavConfig(dueLeadWindow: DueLeadWindow.hours24),
-              ),
+              () => _StubWebDavConfigNotifier(const WebDavConfig()),
             ),
           ],
         );
@@ -505,6 +500,148 @@ void main() {
         );
       },
     );
+
+    test('skips boundaryTickProvider bump on Alt-Tab inactive->resumed and uncrossed paused->resumed while re-arming timer, and still ticks when boundary crossed or time/day condition resumed from background', () async {
+      var fakeNow = DateTime.utc(2026, 11, 21, 10);
+      final futureBoundary = DateTime.utc(2026, 11, 21, 12);
+      final plainBoard = TaskBoard.empty().addTask(
+        'Deferred Later',
+        id: 't_later',
+        suspendedAt: futureBoundary,
+        currentDate: fakeNow,
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          clockProvider.overrideWithValue(() => fakeNow),
+          taskNotifierProvider.overrideWith(
+            () => _StubTaskNotifier(plainBoard),
+          ),
+          webDavConfigProvider.overrideWith(
+            () => _StubWebDavConfigNotifier(const WebDavConfig()),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      await container.read(webDavConfigProvider.future);
+      final sub = container.listen(boardBoundaryTimerProvider, (_, _) {});
+      addTearDown(sub.close);
+
+      expect(
+        container.read(boardBoundaryTimerProvider),
+        equals(futureBoundary),
+      );
+      final notifier = container.read(boardBoundaryTimerProvider.notifier);
+      final tickBeforeAltTab = container.read(boundaryTickProvider);
+
+      // Desktop Alt-Tab (inactive -> resumed) before boundary must NOT increment boundaryTickProvider.
+      notifier.handleAppLifecycleState(AppLifecycleState.inactive);
+      expect(container.read(boardBoundaryTimerProvider), isNull);
+      fakeNow = DateTime.utc(2026, 11, 21, 10, 5);
+      notifier.handleAppLifecycleState(AppLifecycleState.resumed);
+      expect(
+        container.read(boundaryTickProvider),
+        equals(tickBeforeAltTab),
+        reason: 'Alt-Tab inactive->resumed before scheduled boundary must not bump boundaryTickProvider',
+      );
+      expect(
+        container.read(boardBoundaryTimerProvider),
+        equals(futureBoundary),
+        reason: 'Alt-Tab resume must still re-arm the boundary timer',
+      );
+
+      // paused -> resumed before boundary on board without time/day conditions must NOT bump boundaryTickProvider.
+      notifier.handleAppLifecycleState(AppLifecycleState.paused);
+      fakeNow = DateTime.utc(2026, 11, 21, 11);
+      notifier.handleAppLifecycleState(AppLifecycleState.resumed);
+      expect(
+        container.read(boundaryTickProvider),
+        equals(tickBeforeAltTab),
+        reason: 'paused->resumed before scheduled boundary without time/day conditions must not bump boundaryTickProvider',
+      );
+      expect(
+        container.read(boardBoundaryTimerProvider),
+        equals(futureBoundary),
+      );
+
+      // inactive -> resumed AFTER boundary crossed MUST bump boundaryTickProvider once.
+      notifier.handleAppLifecycleState(AppLifecycleState.inactive);
+      fakeNow = DateTime.utc(2026, 11, 21, 12);
+      notifier.handleAppLifecycleState(AppLifecycleState.resumed);
+      expect(
+        container.read(boundaryTickProvider),
+        equals(tickBeforeAltTab + 1),
+        reason: 'Resuming after crossing scheduled boundary must bump boundaryTickProvider once',
+      );
+      expect(container.read(boardBoundaryTimerProvider), isNull);
+
+      // Further Alt-Tab with no scheduled boundary (null) must NOT bump boundaryTickProvider.
+      notifier.handleAppLifecycleState(AppLifecycleState.inactive);
+      fakeNow = DateTime.utc(2026, 11, 21, 12, 5);
+      notifier.handleAppLifecycleState(AppLifecycleState.resumed);
+      expect(
+        container.read(boundaryTickProvider),
+        equals(tickBeforeAltTab + 1),
+        reason: 'Resuming with no scheduled boundary must not spuriously bump boundaryTickProvider',
+      );
+
+      // Board with a TimeTaskCondition resuming from paused/hidden MUST bump boundaryTickProvider.
+      final timeConditionBoard = TaskBoard.empty().addTask(
+        'Morning Window Task',
+        id: 't_time',
+        conditions: const <TaskCondition>[
+          TimeWindowTaskCondition(
+            startMinutes: 9 * 60,
+            endMinutes: 17 * 60,
+            startToken: '09:00',
+            endToken: '17:00',
+          ),
+        ],
+        currentDate: fakeNow,
+      );
+      final timeContainer = ProviderContainer(
+        overrides: [
+          clockProvider.overrideWithValue(() => fakeNow),
+          taskNotifierProvider.overrideWith(
+            () => _StubTaskNotifier(timeConditionBoard),
+          ),
+          webDavConfigProvider.overrideWith(
+            () => _StubWebDavConfigNotifier(const WebDavConfig()),
+          ),
+        ],
+      );
+      addTearDown(timeContainer.dispose);
+      await timeContainer.read(taskNotifierProvider.future);
+      await timeContainer.read(webDavConfigProvider.future);
+      final timeSub = timeContainer.listen(
+        boardBoundaryTimerProvider,
+        (_, _) {},
+      );
+      addTearDown(timeSub.close);
+
+      final timeNotifier = timeContainer.read(
+        boardBoundaryTimerProvider.notifier,
+      );
+      final tickBeforeTimePause = timeContainer.read(boundaryTickProvider);
+      timeNotifier.handleAppLifecycleState(AppLifecycleState.inactive);
+      timeNotifier.handleAppLifecycleState(AppLifecycleState.resumed);
+      expect(
+        timeContainer.read(boundaryTickProvider),
+        equals(tickBeforeTimePause),
+        reason: 'Quick Alt-Tab inactive->resumed must not bump boundaryTickProvider even with time conditions',
+      );
+
+      timeNotifier.handleAppLifecycleState(AppLifecycleState.paused);
+      fakeNow = DateTime.utc(2026, 11, 21, 18);
+      timeNotifier.handleAppLifecycleState(AppLifecycleState.resumed);
+      expect(
+        timeContainer.read(boundaryTickProvider),
+        equals(tickBeforeTimePause + 1),
+        reason: 'Resuming from paused with TimeTaskCondition must bump boundaryTickProvider to re-evaluate time windows',
+      );
+    });
   });
 
   group('evaluatedBoardProvider', () {
@@ -528,7 +665,6 @@ void main() {
               LocationTaskCondition(locationIds: <String>['office']),
             ],
             dueAt: DateTime.utc(2026, 11, 22, 12),
-            targetTier: TaskTier.planned,
             currentDate: now,
           );
 
@@ -547,9 +683,7 @@ void main() {
           clockProvider.overrideWithValue(() => now),
           taskNotifierProvider.overrideWith(() => _StubTaskNotifier(board)),
           webDavConfigProvider.overrideWith(
-            () => _StubWebDavConfigNotifier(
-              const WebDavConfig(dueLeadWindow: DueLeadWindow.hours24),
-            ),
+            () => _StubWebDavConfigNotifier(const WebDavConfig()),
           ),
           locationStateProvider.overrideWith(() => locationNotifier),
         ],
@@ -658,9 +792,7 @@ void main() {
             () => _StubTaskNotifier(urgentBoard),
           ),
           webDavConfigProvider.overrideWith(
-            () => _StubWebDavConfigNotifier(
-              const WebDavConfig(dueLeadWindow: DueLeadWindow.hours24),
-            ),
+            () => _StubWebDavConfigNotifier(const WebDavConfig()),
           ),
         ],
       );
@@ -679,7 +811,6 @@ void main() {
         'Deferred task',
         id: 't_sus',
         suspendedAt: DateTime.utc(2026, 11, 21, 10),
-        targetTier: TaskTier.planned,
         currentDate: now,
       );
       final tickContainer = ProviderContainer(
@@ -726,10 +857,8 @@ void main() {
         );
         final configurationNotifier = _StubWebDavConfigNotifier(
           const WebDavConfig(
-            themePalette: AppThemePalette.calm,
             themeMode: AppThemeMode.light,
             language: AppLanguage.english,
-            dueLeadWindow: DueLeadWindow.hours24,
             timeZoneMode: AppTimeZoneMode.manual,
           ),
         );
@@ -761,7 +890,6 @@ void main() {
             themeMode: AppThemeMode.dark,
             language: AppLanguage.german,
             diagnosticsEnabled: true,
-            dueLeadWindow: DueLeadWindow.hours24,
             timeZoneMode: AppTimeZoneMode.manual,
           ),
         );
@@ -836,6 +964,82 @@ void main() {
             ?.findTierOfTask('t_due'),
         equals(TaskTier.ready),
         reason: 'While webDavConfigProvider is loading, DueLeadWindow.off from activeWorkspaceProvider must prevent Focus promotion',
+      );
+    });
+
+    test('reuses identical already-evaluated TaskBoard from TaskNotifier when context matches and ignores GPS updates when board has no location conditions', () async {
+      var now = DateTime.utc(2026, 11, 21, 9);
+      final locationNotifier = _StubLocationNotifier(
+        LocationState(
+          status: LocationStatus.found,
+          fix: const LocationFix(latitude: 48.1351, longitude: 11.5820),
+          updatedAt: now,
+        ),
+      );
+      var evaluatedBuilds = 0;
+      final container = ProviderContainer(
+        overrides: [
+          clockProvider.overrideWithValue(() => now),
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(),
+          ),
+          locationStateProvider.overrideWith(() => locationNotifier),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final taskNotifier = container.read(taskNotifierProvider.notifier);
+      expect(await taskNotifier.addTask('Focus 1', id: 'focus00001'), isTrue);
+      expect(await taskNotifier.addTask('Focus 2', id: 'focus00002'), isTrue);
+      expect(await taskNotifier.addTask('Focus 3', id: 'focus00003'), isTrue);
+      expect(
+        await taskNotifier.addTask(
+          'Due Later',
+          id: 'tReuse0001',
+          dueAt: DateTime.utc(2026, 11, 23, 12),
+        ),
+        isTrue,
+      );
+
+      final locSub = container.listen(locationStateProvider, (_, _) {});
+      addTearDown(locSub.close);
+      final rawBoard = container.read(taskNotifierProvider).requireValue;
+      expect(rawBoard.findTierOfTask('tReuse0001'), equals(TaskTier.ready));
+      final sub = container.listen(evaluatedBoardProvider(null), (_, _) {
+        evaluatedBuilds++;
+      });
+      addTearDown(sub.close);
+
+      final evaluated = container.read(evaluatedBoardProvider(null)).value;
+      expect(
+        identical(evaluated, rawBoard),
+        isTrue,
+        reason: 'evaluatedBoardProvider(null) must reuse identical TaskBoard from TaskNotifier when context and boundaries match',
+      );
+
+      // Updating GPS fix on a board with zero location conditions must NOT recompute evaluatedBoardProvider.
+      final buildsBeforeGps = evaluatedBuilds;
+      locationNotifier.setLocationState(
+        LocationState(
+          status: LocationStatus.found,
+          fix: const LocationFix(latitude: 52.52, longitude: 13.405),
+          updatedAt: now,
+        ),
+      );
+      expect(
+        evaluatedBuilds,
+        equals(buildsBeforeGps),
+        reason: 'GPS updates must not rebuild evaluatedBoardProvider when board has no location conditions',
+      );
+
+      // Advancing past due lead boundary and bumping tick MUST re-evaluate and promote task.
+      now = DateTime.utc(2026, 11, 22, 13);
+      container.read(boundaryTickProvider.notifier).increment();
+      final promotedBoard = container.read(evaluatedBoardProvider(null)).value;
+      expect(
+        promotedBoard?.findTierOfTask('tReuse0001'),
+        equals(TaskTier.focus),
       );
     });
   });
@@ -1066,6 +1270,35 @@ void main() {
         countingService.serializeCalls,
         equals(2),
         reason: 'Disposed rawTdfPreviewProvider must perform zero serializations on subsequent board updates',
+      );
+    });
+
+    test('computes exact UTF-8 byte count and line count across 1-byte, 2-byte, 3-byte, and 4-byte surrogate Unicode text', () async {
+      const unicodeDocument =
+          'tdf 0.8.0\n# ASCII\n# Übung ß\n# Euro € 漢字\n# Clef \u{1D11E}\n';
+      final container = ProviderContainer(
+        overrides: [
+          taskNotifierProvider.overrideWith(
+            () => _StubTaskNotifier(TaskBoard.empty()),
+          ),
+          tdfServiceProvider.overrideWithValue(
+            _OversizedTdfService(unicodeDocument),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(taskNotifierProvider.future);
+
+      final preview = container.read(rawTdfPreviewProvider);
+      expect(preview.isLimitExceeded, isFalse);
+      expect(
+        preview.byteCount,
+        equals(utf8.encode(unicodeDocument).length),
+        reason: 'Single-pass UTF-8 measurement must match utf8.encode length for 1/2/3/4-byte sequences',
+      );
+      expect(
+        preview.lineCount,
+        equals('\n'.allMatches(unicodeDocument).length),
       );
     });
   });

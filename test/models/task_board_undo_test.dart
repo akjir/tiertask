@@ -26,10 +26,10 @@ import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/services/tdf_serializer.dart';
 
 void main() {
-  final t0 = DateTime.utc(2026, 11, 1, 9, 0);
-  final t1 = DateTime.utc(2026, 11, 1, 10, 0);
-  final t2 = DateTime.utc(2026, 11, 1, 11, 0);
-  final t3 = DateTime.utc(2026, 11, 1, 12, 0);
+  final t0 = DateTime.utc(2026, 11, 1, 9);
+  final t1 = DateTime.utc(2026, 11, 1, 10);
+  final t2 = DateTime.utc(2026, 11, 1, 11);
+  final t3 = DateTime.utc(2026, 11, 1, 12);
 
   test('TaskUndoEntry and TaskUndoOutcome enforce value equality, hashCode, and maxUndoEntries = 10', () {
     expect(TaskBoardUndo.maxUndoEntries, equals(10));
@@ -80,7 +80,7 @@ void main() {
             id: 'block1OkD2',
             targetTier: TaskTier.focus,
             isPriority: true,
-            dueAt: DateTime.utc(2026, 11, 5, 18, 0),
+            dueAt: DateTime.utc(2026, 11, 5, 18),
             currentDate: t0,
           )
           .addTask(
@@ -95,7 +95,7 @@ void main() {
         title: 'Already Satisfied Dependent',
         createdAt: t0,
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'block1OkD2', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'block1OkD2'),
         ],
       );
       final unsatisfiedTask = TaskItem(
@@ -175,7 +175,7 @@ void main() {
         reason: 'completions must remain monotonic (2, never reverted to 1)',
       );
       expect(restored.isPriority, isTrue);
-      expect(restored.dueAt, equals(DateTime.utc(2026, 11, 5, 18, 0)));
+      expect(restored.dueAt, equals(DateTime.utc(2026, 11, 5, 18)));
       expect(restored.title, equals('Blocker Task Renamed'));
       expect(restored.note, equals('Added note after completion'));
       expect(restored.links, hasLength(1));
@@ -202,9 +202,7 @@ void main() {
       );
       expect(
         outcome.board.findTask('alreadOkD2')!.dependencies.single,
-        equals(
-          const TdfTaskDependency(taskId: 'block1OkD2', requiredCompletion: 1),
-        ),
+        equals(const TdfTaskDependency(taskId: 'block1OkD2')),
         reason: 'Previously satisfied dependent must remain unblocked at :1',
       );
     });
@@ -215,12 +213,12 @@ void main() {
         id: 'recur1OkD2',
         targetTier: TaskTier.focus,
         isPriority: true,
-        dueAt: DateTime.utc(2026, 11, 2, 9, 0),
+        dueAt: DateTime.utc(2026, 11, 2, 9),
         repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.weeks),
         subtasksAutoFinish: true,
         subtasks: const <SubtaskItem>[
           SubtaskItem(title: 'Step 1', isCompleted: true),
-          SubtaskItem(title: 'Step 2', isCompleted: false),
+          SubtaskItem(title: 'Step 2'),
         ],
         currentDate: t0,
       );
@@ -239,14 +237,14 @@ void main() {
       );
       final rescheduled = afterAutoFinish.findTask('recur1OkD2')!;
       expect(rescheduled.completions, equals(1));
-      expect(rescheduled.dueAt, equals(DateTime.utc(2026, 11, 9, 9, 0)));
+      expect(rescheduled.dueAt, equals(DateTime.utc(2026, 11, 9, 9)));
       expect(rescheduled.subtasks.every((step) => !step.isCompleted), isTrue);
 
       final outcome = TaskBoardUndo.apply(afterAutoFinish, entry, utcNow: t2);
       expect(outcome, isNotNull);
       final restored = outcome!.board.findTask('recur1OkD2')!;
       expect(restored.completions, equals(1));
-      expect(restored.dueAt, equals(DateTime.utc(2026, 11, 2, 9, 0)));
+      expect(restored.dueAt, equals(DateTime.utc(2026, 11, 2, 9)));
       expect(restored.suspendedAt, isNull);
       expect(restored.subtasks[0].isCompleted, isTrue);
       expect(
@@ -321,12 +319,7 @@ void main() {
             targetTier: TaskTier.ready,
             currentDate: t0,
           )
-          .addTask(
-            'Task C',
-            id: 'taskC0OkD2',
-            targetTier: TaskTier.planned,
-            currentDate: t0,
-          );
+          .addTask('Task C', id: 'taskC0OkD2', currentDate: t0);
       // Force explicit tiers (A=Focus priority, B=Ready, C=Planned):
       final seeded = TaskBoard.evaluate(
         tasks: <TaskItem>[
@@ -464,12 +457,7 @@ void main() {
       board = board.deleteTask('taskD0OkD2', currentDate: t1);
 
       // Add unrelated new task E in the interim:
-      board = board.addTask(
-        'Task E',
-        id: 'taskE0OkD2',
-        targetTier: TaskTier.planned,
-        currentDate: t2,
-      );
+      board = board.addTask('Task E', id: 'taskE0OkD2', currentDate: t2);
       expect(
         board.queueTaskIds,
         equals(const <String>['taskB0OkD2', 'taskE0OkD2']),
@@ -540,7 +528,7 @@ void main() {
         title: 'Completed 40 Days Ago',
         isCompleted: true,
         completions: 4,
-        createdAt: DateTime.utc(2026, 9, 1),
+        createdAt: DateTime.utc(2026, 9),
         completedAt: DateTime.utc(2026, 9, 15),
       );
 
@@ -549,7 +537,6 @@ void main() {
         labels: <TdfLabel>[workLabel],
         locations: const <TdfLocation>[office, home],
         evaluationTime: t0,
-        pruneExpiredCompleted: false,
       );
 
       final entryOverride = TaskBoardUndo.capture(
@@ -790,7 +777,7 @@ void main() {
         title: 'Satisfied at 1',
         createdAt: t0,
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'pre001OkD2', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'pre001OkD2'),
         ],
       );
       final depResolvedNow = TaskItem(
@@ -829,10 +816,7 @@ void main() {
       expect(
         stripped,
         equals(const <String, TdfTaskDependency>{
-          'depSatOkD2': TdfTaskDependency(
-            taskId: 'pre001OkD2',
-            requiredCompletion: 1,
-          ),
+          'depSatOkD2': TdfTaskDependency(taskId: 'pre001OkD2'),
           'depResOkD2': TdfTaskDependency(
             taskId: 'pre001OkD2',
             requiredCompletion: 2,
@@ -953,7 +937,7 @@ void main() {
       );
 
       // 2. Complete & Delete undo with future vs expired suspendedAt + suspendedNote + dependent re-insertion:
-      final futureDeferral = DateTime.utc(2026, 11, 2, 9, 0);
+      final futureDeferral = DateTime.utc(2026, 11, 2, 9);
       final expiredDeferral = DateTime.utc(2026, 11, 1, 11, 30);
       final targetFuture = TaskItem(
         id: 'delFutOkD2',
@@ -962,7 +946,7 @@ void main() {
         modifiedAt: t0,
         suspendedAt: futureDeferral,
         suspendedNote: 'Keep future note',
-        dueAt: DateTime.utc(2026, 11, 5, 17, 0),
+        dueAt: DateTime.utc(2026, 11, 5, 17),
         isDuePassive: true,
         dueNote: 'Passive cutoff note',
         history: hist,
@@ -974,7 +958,7 @@ void main() {
         modifiedAt: t0,
         suspendedAt: expiredDeferral,
         suspendedNote: 'Must strip with expired deferral',
-        dueAt: DateTime.utc(2026, 11, 5, 17, 0),
+        dueAt: DateTime.utc(2026, 11, 5, 17),
         dueNote: 'Active cutoff note',
         history: hist,
       );
@@ -1066,7 +1050,7 @@ void main() {
         createdAt: t0,
         modifiedAt: t0,
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'trgLimOkD2', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'trgLimOkD2'),
         ],
       );
       final beforeDepLim = TaskBoard.evaluate(
@@ -1392,8 +1376,8 @@ void main() {
   group('TDF 0.8.0 Schedule Anchor (dueAnchor) Undo Restoration & Concurrent Edit Guards', () {
     test('restores snapshotTask.dueAnchor across Mode 2 recurring complete, delete, and downgrade undo and rejects post-capture dueAnchor edits', () {
       final berlin = TdfTimeZoneContext.named('Europe/Berlin');
-      final jan31Now = DateTime.utc(2026, 1, 31, 10, 0);
-      final jan31Anchor = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
+      final jan31Now = DateTime.utc(2026, 1, 31, 10);
+      final jan31Anchor = TdfLocalDateTime(2026, 1, 31, 18);
 
       // 1. Mode 2 recurring task starting with dueAnchor == null completed onto clamped Feb 28 (synthesizing dueAnchor = Jan 31):
       // Undo must restore dueAt = Jan 31 AND dueAnchor = null!
@@ -1403,7 +1387,7 @@ void main() {
         isPriority: true,
         createdAt: jan31Now,
         modifiedAt: jan31Now,
-        dueAt: DateTime.utc(2026, 1, 31, 17, 0, 0),
+        dueAt: DateTime.utc(2026, 1, 31, 17),
         repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.months),
       );
       final boardJan = TaskBoard.evaluate(
@@ -1422,7 +1406,7 @@ void main() {
       );
       expect(
         boardFeb.findTask('m2NullAnc1')!.dueAt,
-        equals(DateTime.utc(2026, 2, 28, 17, 0, 0)),
+        equals(DateTime.utc(2026, 2, 28, 17)),
       );
       expect(
         boardFeb.findTask('m2NullAnc1')!.dueAnchor,
@@ -1447,7 +1431,7 @@ void main() {
       expect(undoneJan, isNotNull);
       expect(
         undoneJan!.board.findTask('m2NullAnc1')!.dueAt,
-        equals(DateTime.utc(2026, 1, 31, 17, 0, 0)),
+        equals(DateTime.utc(2026, 1, 31, 17)),
       );
       expect(
         undoneJan.board.findTask('m2NullAnc1')!.dueAnchor,
@@ -1457,7 +1441,7 @@ void main() {
 
       // 2. Mode 2 recurring task on clamped Feb 28 (dueAnchor = Jan 31) completed onto Mar 31 (advancing dueAnchor = Mar 31):
       // Undo must restore dueAt = Feb 28 AND dueAnchor = Jan 31!
-      final febNow = DateTime.utc(2026, 2, 28, 10, 0);
+      final febNow = DateTime.utc(2026, 2, 28, 10);
       final boardMar = boardFeb.completeTask(
         'm2NullAnc1',
         currentDate: febNow,
@@ -1465,7 +1449,7 @@ void main() {
       );
       expect(
         boardMar.findTask('m2NullAnc1')!.dueAnchor,
-        equals(TdfLocalDateTime(2026, 3, 31, 18, 0, 0)),
+        equals(TdfLocalDateTime(2026, 3, 31, 18)),
       );
       final febEntry = TaskBoardUndo.capture(
         sequence: 21,
@@ -1483,7 +1467,7 @@ void main() {
       expect(undoneFeb, isNotNull);
       expect(
         undoneFeb!.board.findTask('m2NullAnc1')!.dueAt,
-        equals(DateTime.utc(2026, 2, 28, 17, 0, 0)),
+        equals(DateTime.utc(2026, 2, 28, 17)),
       );
       expect(
         undoneFeb.board.findTask('m2NullAnc1')!.dueAnchor,
@@ -1494,7 +1478,7 @@ void main() {
       // Post-capture external edit to dueAnchor on Mode 2 completed task guards/skips undo:
       final marExternallyEdited = boardMar.updateTask(
         'm2NullAnc1',
-        dueAnchor: TdfLocalDateTime(2026, 3, 30, 18, 0, 0),
+        dueAnchor: TdfLocalDateTime(2026, 3, 30, 18),
         currentDate: febNow.add(const Duration(minutes: 30)),
         timeZone: berlin,
       );
@@ -1515,7 +1499,7 @@ void main() {
         title: 'Urgent Clamped Deadline',
         createdAt: febNow,
         modifiedAt: febNow,
-        dueAt: DateTime.utc(2026, 2, 28, 17, 0, 0),
+        dueAt: DateTime.utc(2026, 2, 28, 17),
         dueAnchor: jan31Anchor,
         dueNote: 'Clamped deadline',
       );
@@ -1621,7 +1605,7 @@ void main() {
       );
       final oneOffAnchorEdited = oneOffDone.updateTask(
         'urgClamp01',
-        dueAnchor: TdfLocalDateTime(2026, 2, 28, 18, 0, 0),
+        dueAnchor: TdfLocalDateTime(2026, 2, 28, 18),
         currentDate: febNow.add(const Duration(minutes: 6)),
         timeZone: berlin,
       );
@@ -1668,7 +1652,7 @@ void main() {
     });
 
     test('undo delete preserves isDuePassive on Completed tasks, guards fromWallClock underflow, aggregates multiple LocationTaskCondition rules, and handles 9999 timestamp overflow', () {
-      final t0 = DateTime.utc(2026, 9, 1, 10, 0, 0);
+      final t0 = DateTime.utc(2026, 9, 1, 10);
       final t1 = t0.add(const Duration(minutes: 1));
       final t2 = t1.add(const Duration(minutes: 1));
 
@@ -1681,7 +1665,7 @@ void main() {
         createdAt: t0,
         completedAt: t0,
         modifiedAt: t0,
-        dueAt: DateTime.utc(2026, 9, 5, 12, 0, 0),
+        dueAt: DateTime.utc(2026, 9, 5, 12),
         isDuePassive: true,
       );
       final boardDone = TaskBoard.evaluate(
@@ -1712,7 +1696,7 @@ void main() {
       );
 
       // 2. Mode 2 undo without boardAfter when snapshotDue is 0001-01-01T00:00:00Z in UTC-5 does not throw FormatException:
-      final minUtc = DateTime.utc(1, 1, 1, 0, 0, 0);
+      final minUtc = DateTime.utc(1);
       final minTask = TaskItem(
         id: 'minDue0001',
         title: 'Min Boundary Mode 2',
@@ -1723,8 +1707,8 @@ void main() {
       );
       final rolledTask = minTask.copyWith(
         completions: 1,
-        dueAt: DateTime.utc(1, 1, 2, 0, 0, 0),
-        dueAnchor: TdfLocalDateTime(1, 1, 2, 0, 0, 0),
+        dueAt: DateTime.utc(1, 1, 2),
+        dueAnchor: TdfLocalDateTime(1, 1, 2),
         modifiedAt: DateTime.utc(1, 1, 1, 0, 0, 1),
       );
       final boardMinBefore = TaskBoard.evaluate(
@@ -1753,7 +1737,7 @@ void main() {
         TaskBoardUndo.apply(
           boardMinAfter,
           minEntry,
-          utcNow: DateTime.utc(1, 1, 1, 0, 5, 0),
+          utcNow: DateTime.utc(1, 1, 1, 0, 5),
           timeZone: TdfTimeZoneContext.fixedOffset(const Duration(hours: -5)),
         ),
         isNull,
@@ -1833,7 +1817,6 @@ void main() {
       final maxUtc = DateTime.utc(9999, 12, 31, 23, 59, 59);
       final maxDeletedBoard = afterDeleteDone.copyWith(
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           tasks: <TdfDeletedTaskRecord>[
             TdfDeletedTaskRecord(
               taskId: 'donePass01',
@@ -1847,6 +1830,672 @@ void main() {
         TaskBoardUndo.apply(maxDeletedBoard, deleteEntry, utcNow: maxUtc),
         isNull,
         reason: 'Undo _tryNextTimestamp must catch TdfException on 9999 overflow and skip gracefully',
+      );
+    });
+
+    test('computes exact canonical block count when deleted/queue blocks are default-empty at 4095 and 4096 entities', () {
+      // 1. 4096 Someday tasks + empty deletedBlock + empty queueBlock == 4096 canonical blocks (<= maxTdfBlocksPerDoc):
+      final tasks4096 = <TaskItem>[
+        for (var i = 0; i < maxTdfBlocksPerDoc; i++)
+          TaskItem(
+            id: 'sm${i.toString().padLeft(4, '0')}OkD2',
+            title: 'Someday $i',
+            createdAt: t0,
+            modifiedAt: t0,
+          ),
+      ];
+      final board4096Before = TaskBoard.evaluate(
+        tasks: tasks4096,
+        evaluationTime: t0,
+      );
+      expect(board4096Before.deletedBlock.isDefaultEmpty, isTrue);
+      expect(board4096Before.queueBlock.isDefaultEmpty, isTrue);
+
+      final board4096After = board4096Before.completeTask(
+        'sm0000OkD2',
+        currentDate: t1,
+      );
+      final completeEntry4096 = TaskBoardUndo.capture(
+        sequence: 40,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: board4096Before,
+        boardAfter: board4096After,
+        taskBefore: board4096Before.findTask('sm0000OkD2')!,
+      );
+      final undone4096 = TaskBoardUndo.apply(
+        board4096After,
+        completeEntry4096,
+        utcNow: t2,
+      );
+      expect(
+        undone4096,
+        isNotNull,
+        reason: '4096 simple tasks with empty deleted/queue blocks emit exactly 4096 blocks and must not be falsely rejected',
+      );
+      expect(undone4096!.board.findTask('sm0000OkD2')!.isCompleted, isFalse);
+
+      // 2. 4095 tasks + non-empty queueBlock (1) + empty deletedBlock (0) == 4096 canonical blocks (<= maxTdfBlocksPerDoc):
+      final tasks4095 = <TaskItem>[
+        TaskItem(
+          id: 'qt0000OkD2',
+          title: 'Queued Focus 0',
+          isPriority: true,
+          createdAt: t0,
+          modifiedAt: t0,
+        ),
+        for (var i = 1; i < maxTdfBlocksPerDoc - 1; i++)
+          TaskItem(
+            id: 'qt${i.toString().padLeft(4, '0')}OkD2',
+            title: 'Queued $i',
+            createdAt: t0,
+            modifiedAt: t0,
+          ),
+      ];
+      final board4095Before = TaskBoard.evaluate(
+        tasks: tasks4095,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['qt0000OkD2', 'qt0001OkD2'],
+        ),
+        evaluationTime: t0,
+      );
+      final board4095After = board4095Before.downgradeTask(
+        'qt0000OkD2',
+        currentDate: t1,
+      );
+      final downgradeEntry4095 = TaskBoardUndo.capture(
+        sequence: 41,
+        kind: TaskUndoActionKind.downgrade,
+        boardBefore: board4095Before,
+        boardAfter: board4095After,
+        taskBefore: board4095Before.findTask('qt0000OkD2')!,
+      );
+      final undone4095 = TaskBoardUndo.apply(
+        board4095After,
+        downgradeEntry4095,
+        utcNow: t2,
+      );
+      expect(
+        undone4095,
+        isNotNull,
+        reason: '4095 simple tasks plus 1 queue block and empty deletedBlock equal 4096 blocks and must succeed',
+      );
+      expect(undone4095!.board.findTask('qt0000OkD2')!.isPriority, isTrue);
+
+      // 3. 4096 tasks + non-empty queueBlock (1) == 4097 canonical blocks (> maxTdfBlocksPerDoc):
+      final board4096Queued = TaskBoard.evaluate(
+        tasks: tasks4096,
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['sm0000OkD2', 'sm0001OkD2'],
+        ),
+        evaluationTime: t0,
+      );
+      final downgraded4096Queued = board4096Queued.downgradeTask(
+        'sm0000OkD2',
+        currentDate: t1,
+      );
+      final entry4096Queued = TaskBoardUndo.capture(
+        sequence: 42,
+        kind: TaskUndoActionKind.downgrade,
+        boardBefore: board4096Queued,
+        boardAfter: downgraded4096Queued,
+        taskBefore: board4096Queued.findTask('sm0000OkD2')!,
+      );
+      expect(
+        TaskBoardUndo.apply(downgraded4096Queued, entry4096Queued, utcNow: t2),
+        isNull,
+        reason: '4096 tasks plus 1 non-empty queue block (4097 blocks) must exceed maxTdfBlocksPerDoc and return null',
+      );
+    });
+
+    test('preserves concurrent post-downgrade deferral, deadline, and untouched passive edits during downgrade undo', () {
+      // 1. Focus (priority) -> Ready downgrade, followed by concurrent deferral (suspendedAt + suspendedNote) and deadline (dueAt + dueNote):
+      final baseTask = TaskItem(
+        id: 'dwnCnc0001',
+        title: 'Concurrent Target',
+        isPriority: true,
+        createdAt: t0,
+        modifiedAt: t0,
+      );
+      final otherTask = TaskItem(
+        id: 'dwnOth0001',
+        title: 'Other Focus Task',
+        createdAt: t0,
+        modifiedAt: t0,
+      );
+      final boardBefore = TaskBoard.evaluate(
+        tasks: <TaskItem>[baseTask, otherTask],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['dwnCnc0001', 'dwnOth0001'],
+        ),
+        evaluationTime: t0,
+      );
+      final downgraded = boardBefore.downgradeTask(
+        'dwnCnc0001',
+        currentDate: t1,
+      );
+      expect(downgraded.findTask('dwnCnc0001')!.isPriority, isFalse);
+
+      final entryWithAfter = TaskBoardUndo.capture(
+        sequence: 50,
+        kind: TaskUndoActionKind.downgrade,
+        boardBefore: boardBefore,
+        boardAfter: downgraded,
+        taskBefore: baseTask,
+      );
+
+      final futureSnooze = DateTime.utc(2026, 11, 5, 9);
+      final newDeadline = DateTime.utc(2026, 11, 8, 17);
+      final withConcurrentSchedule = downgraded.updateTask(
+        'dwnCnc0001',
+        suspendedAt: futureSnooze,
+        suspendedNote: 'Waiting on vendor',
+        dueAt: newDeadline,
+        dueNote: 'Contract deadline',
+        isDuePassive: true,
+        currentDate: t2,
+      );
+
+      final undoneSchedule = TaskBoardUndo.apply(
+        withConcurrentSchedule,
+        entryWithAfter,
+        utcNow: t3,
+      );
+      expect(undoneSchedule, isNotNull);
+      final restoredSchedule = undoneSchedule!.board.findTask('dwnCnc0001')!;
+      expect(
+        restoredSchedule.isPriority,
+        isTrue,
+        reason: 'Downgrade undo must still restore priority modified by the downgrade',
+      );
+      expect(
+        restoredSchedule.suspendedAt,
+        equals(futureSnooze),
+        reason: 'Downgrade undo must preserve post-downgrade suspendedAt edit',
+      );
+      expect(
+        restoredSchedule.suspendedNote,
+        equals('Waiting on vendor'),
+        reason:
+            'Downgrade undo must preserve post-downgrade suspendedNote edit',
+      );
+      expect(
+        restoredSchedule.dueAt,
+        equals(newDeadline),
+        reason: 'Downgrade undo must preserve post-downgrade dueAt edit',
+      );
+      expect(
+        restoredSchedule.dueNote,
+        equals('Contract deadline'),
+        reason: 'Downgrade undo must preserve post-downgrade dueNote edit',
+      );
+      expect(
+        restoredSchedule.isDuePassive,
+        isTrue,
+        reason: 'Downgrade undo must preserve isDuePassive set on post-downgrade deadline',
+      );
+
+      // 2. Concurrent isSuspendedForever edit after downgrade is preserved even when captured without boardAfter:
+      final entryWithoutAfter = TaskBoardUndo.capture(
+        sequence: 51,
+        kind: TaskUndoActionKind.downgrade,
+        boardBefore: boardBefore,
+        taskBefore: baseTask,
+      );
+      final withForever = downgraded.updateTask(
+        'dwnCnc0001',
+        isSuspendedForever: true,
+        suspendedNote: 'On hold indefinitely',
+        currentDate: t2,
+      );
+      final undoneForever = TaskBoardUndo.apply(
+        withForever,
+        entryWithoutAfter,
+        utcNow: t3,
+      );
+      expect(undoneForever, isNotNull);
+      final restoredForever = undoneForever!.board.findTask('dwnCnc0001')!;
+      expect(
+        restoredForever.isSuspendedForever,
+        isTrue,
+        reason: 'Downgrade undo must preserve post-downgrade isSuspendedForever edit',
+      );
+      expect(
+        restoredForever.suspendedNote,
+        equals('On hold indefinitely'),
+        reason: 'Downgrade undo must preserve suspendedNote on post-downgrade indefinite hold',
+      );
+
+      // 3. Non-urgent deadline where downgrade did NOT touch dueNote/isDuePassive: concurrent dueNote + isDuePassive edits are preserved:
+      final nonUrgentDue = DateTime.utc(2026, 11, 20, 12);
+      final nonUrgentTask = TaskItem(
+        id: 'dwnNonUrg1',
+        title: 'Non-Urgent Priority Task',
+        isPriority: true,
+        createdAt: t0,
+        modifiedAt: t0,
+        dueAt: nonUrgentDue,
+        dueNote: 'Initial note',
+      );
+      final nonUrgentBefore = TaskBoard.evaluate(
+        tasks: <TaskItem>[nonUrgentTask, otherTask],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['dwnNonUrg1', 'dwnOth0001'],
+        ),
+        evaluationTime: t0,
+      );
+      final nonUrgentDowngraded = nonUrgentBefore.downgradeTask(
+        'dwnNonUrg1',
+        currentDate: t1,
+      );
+      expect(nonUrgentDowngraded.findTask('dwnNonUrg1')!.isDuePassive, isFalse);
+      final nonUrgentEntry = TaskBoardUndo.capture(
+        sequence: 52,
+        kind: TaskUndoActionKind.downgrade,
+        boardBefore: nonUrgentBefore,
+        boardAfter: nonUrgentDowngraded,
+        taskBefore: nonUrgentTask,
+      );
+      final nonUrgentEdited = nonUrgentDowngraded.updateTask(
+        'dwnNonUrg1',
+        dueNote: 'Edited note after downgrade',
+        isDuePassive: true,
+        currentDate: t2,
+      );
+      final nonUrgentUndone = TaskBoardUndo.apply(
+        nonUrgentEdited,
+        nonUrgentEntry,
+        utcNow: t3,
+      );
+      expect(nonUrgentUndone, isNotNull);
+      final restoredNonUrgent = nonUrgentUndone!.board.findTask('dwnNonUrg1')!;
+      expect(restoredNonUrgent.isPriority, isTrue);
+      expect(
+        restoredNonUrgent.dueNote,
+        equals('Edited note after downgrade'),
+        reason: 'Downgrade undo must preserve post-downgrade dueNote edit',
+      );
+      expect(
+        restoredNonUrgent.isDuePassive,
+        isTrue,
+        reason: 'Downgrade undo must preserve post-downgrade isDuePassive edit when downgrade did not modify isDuePassive',
+      );
+
+      // 4. Clearing a deadline after downgrade is preserved on downgrade undo (not resurrected from snapshotTask):
+      final clearedDueAfterDowngrade = nonUrgentDowngraded.updateTask(
+        'dwnNonUrg1',
+        clearDueAt: true,
+        currentDate: t2,
+      );
+      final undoneClearedDue = TaskBoardUndo.apply(
+        clearedDueAfterDowngrade,
+        nonUrgentEntry,
+        utcNow: t3,
+      );
+      expect(undoneClearedDue, isNotNull);
+      final restoredClearedDue = undoneClearedDue!.board.findTask(
+        'dwnNonUrg1',
+      )!;
+      expect(restoredClearedDue.isPriority, isTrue);
+      expect(
+        restoredClearedDue.dueAt,
+        isNull,
+        reason: 'Downgrade undo must not resurrect a deadline cleared after downgrade',
+      );
+      expect(
+        restoredClearedDue.dueNote,
+        isNull,
+        reason: 'Downgrade undo must not resurrect a dueNote cleared after downgrade',
+      );
+
+      // 5. TaskUndoEntry equality and hashCode distinguish postActionIsPriority and postActionIsDuePassive:
+      final entryDiffPassive = TaskUndoEntry(
+        sequence: nonUrgentEntry.sequence,
+        kind: nonUrgentEntry.kind,
+        snapshotTask: nonUrgentEntry.snapshotTask,
+        wasQueued: nonUrgentEntry.wasQueued,
+        queueOrderSnapshot: nonUrgentEntry.queueOrderSnapshot,
+        hadOnlyScopedLabels: nonUrgentEntry.hadOnlyScopedLabels,
+        hasPostActionDueAnchor: nonUrgentEntry.hasPostActionDueAnchor,
+        postActionDueAnchor: nonUrgentEntry.postActionDueAnchor,
+        postActionIsDuePassive: true,
+        postActionIsPriority: nonUrgentEntry.postActionIsPriority,
+      );
+      expect(nonUrgentEntry, isNot(equals(entryDiffPassive)));
+    });
+
+    test('capture omits queueOrderSnapshot when wasQueued is false, reuses unmodifiable queue list when true, and TaskUndoOutcome compares boards structurally', () {
+      final now = DateTime.utc(2026, 11, 15, 12);
+      final queuedTask = TaskItem(
+        id: 'tskQue0001',
+        title: 'Queued task',
+        createdAt: now,
+      );
+      final somedayTask = TaskItem(
+        id: 'tskSom0001',
+        title: 'Someday task',
+        createdAt: now,
+      );
+      final boardA = TaskBoard.evaluate(
+        tasks: <TaskItem>[queuedTask, somedayTask],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now,
+          taskIds: const <String>['tskQue0001'],
+        ),
+        evaluationTime: now,
+      );
+      final boardB = TaskBoard.evaluate(
+        tasks: <TaskItem>[queuedTask, somedayTask],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now,
+          taskIds: const <String>['tskQue0001'],
+        ),
+        evaluationTime: now,
+      );
+
+      final queuedEntry = TaskBoardUndo.capture(
+        sequence: 1,
+        kind: TaskUndoActionKind.delete,
+        boardBefore: boardA,
+        taskBefore: queuedTask,
+      );
+      expect(queuedEntry.wasQueued, isTrue);
+      expect(
+        identical(queuedEntry.queueOrderSnapshot, boardA.queueBlock.taskIds),
+        isTrue,
+        reason: 'Queued undo capture must reuse already-unmodifiable queueBlock.taskIds',
+      );
+
+      final unqueuedEntry = TaskBoardUndo.capture(
+        sequence: 2,
+        kind: TaskUndoActionKind.delete,
+        boardBefore: boardA,
+        taskBefore: somedayTask,
+      );
+      expect(unqueuedEntry.wasQueued, isFalse);
+      expect(
+        unqueuedEntry.queueOrderSnapshot,
+        isEmpty,
+        reason: 'Unqueued undo capture must not retain an unused queueOrderSnapshot copy',
+      );
+
+      final outcomeA = TaskUndoOutcome(board: boardA);
+      final outcomeB = TaskUndoOutcome(board: boardB);
+      expect(outcomeA, equals(outcomeB));
+      expect(outcomeA.hashCode, equals(outcomeB.hashCode));
+    });
+
+    test('isTaskChangedModuloBlockCleanup, didTaskQueuePlacementChange, and pruneInvalidatedEntries detect structural and payload invalidation', () {
+      final tEarly = DateTime.utc(2026, 11, 1, 9);
+      final tCheck = DateTime.utc(2026, 11, 1, 10);
+
+      // 1. isTaskChangedModuloBlockCleanup:
+      final openWithExpiredBlock = TaskItem(
+        id: 'chkTask001',
+        title: 'Task A',
+        createdAt: tEarly,
+        modifiedAt: tEarly,
+        suspendedAt: tEarly.add(const Duration(minutes: 30)),
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'donePrereq'),
+        ],
+      );
+      final openCleaned = openWithExpiredBlock.copyWith(
+        clearSuspendedAt: true,
+        dependencies: const <TdfTaskDependency>[],
+        modifiedAt: tCheck,
+      );
+      final openEdited = openCleaned.copyWith(title: 'Task A Edited');
+      final donePrereq = TaskItem(
+        id: 'donePrereq',
+        title: 'Done Prereq',
+        isCompleted: true,
+        completions: 1,
+        createdAt: tEarly,
+        completedAt: tEarly,
+        modifiedAt: tEarly,
+      );
+      final completedCopy = openCleaned.toCompleted(tCheck);
+
+      expect(
+        TaskBoardUndo.isTaskChangedModuloBlockCleanup(openCleaned, openCleaned),
+        isFalse,
+        reason: 'Identical task snapshots are unchanged',
+      );
+      expect(
+        TaskBoardUndo.isTaskChangedModuloBlockCleanup(null, openCleaned),
+        isTrue,
+        reason: 'Added task counts as changed',
+      );
+      expect(
+        TaskBoardUndo.isTaskChangedModuloBlockCleanup(openCleaned, null),
+        isTrue,
+        reason: 'Removed task counts as changed',
+      );
+      expect(
+        TaskBoardUndo.isTaskChangedModuloBlockCleanup(
+          openCleaned,
+          completedCopy,
+        ),
+        isTrue,
+        reason: 'Completion transition counts as changed',
+      );
+      expect(
+        TaskBoardUndo.isTaskChangedModuloBlockCleanup(
+          completedCopy,
+          completedCopy,
+        ),
+        isFalse,
+        reason: 'Identical completed snapshots are unchanged',
+      );
+      expect(
+        TaskBoardUndo.isTaskChangedModuloBlockCleanup(
+          openWithExpiredBlock,
+          openCleaned,
+          liveTasksById: <String, TaskItem>{
+            'chkTask001': openCleaned,
+            'donePrereq': donePrereq,
+          },
+          nowUtc: tCheck,
+        ),
+        isFalse,
+        reason: 'Expired deferral and resolved dependency cleanup alone must not count as a change',
+      );
+      expect(
+        TaskBoardUndo.isTaskChangedModuloBlockCleanup(
+          openWithExpiredBlock,
+          openEdited,
+          liveTasksById: <String, TaskItem>{
+            'chkTask001': openEdited,
+            'donePrereq': donePrereq,
+          },
+          nowUtc: tCheck,
+        ),
+        isTrue,
+        reason: 'Title edit beyond block cleanup must count as changed',
+      );
+
+      // 2. didTaskQueuePlacementChange:
+      TaskBoard boardWithQueue(List<String> queueIds) => TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          for (final id in const <String>[
+            'qTask00001',
+            'qTask00002',
+            'qTask00003',
+            'qTask00004',
+          ])
+            TaskItem(
+              id: id,
+              title: 'Task $id',
+              createdAt: tEarly,
+              modifiedAt: tEarly,
+            ),
+        ],
+        queueBlock: TdfQueueBlock(modifiedAt: tEarly, taskIds: queueIds),
+        evaluationTime: tEarly,
+      );
+
+      final qBase = boardWithQueue(const <String>['qTask00001', 'qTask00002']);
+      final qUnrelatedAdded = boardWithQueue(const <String>[
+        'qTask00003',
+        'qTask00001',
+        'qTask00004',
+        'qTask00002',
+      ]);
+      final qSwapped = boardWithQueue(const <String>[
+        'qTask00002',
+        'qTask00001',
+      ]);
+      final qRemoved = boardWithQueue(const <String>['qTask00002']);
+
+      expect(
+        TaskBoardUndo.didTaskQueuePlacementChange(
+          qBase,
+          qUnrelatedAdded,
+          'qTask00001',
+        ),
+        isFalse,
+        reason: 'Adding unrelated queued tasks preserves relative placement of shared members',
+      );
+      expect(
+        TaskBoardUndo.didTaskQueuePlacementChange(
+          qBase,
+          qSwapped,
+          'qTask00001',
+        ),
+        isTrue,
+        reason: 'Reordering shared queued tasks changes queue placement',
+      );
+      expect(
+        TaskBoardUndo.didTaskQueuePlacementChange(
+          qBase,
+          qRemoved,
+          'qTask00001',
+        ),
+        isTrue,
+        reason: 'Evicting task from queue changes queue placement',
+      );
+      expect(
+        TaskBoardUndo.didTaskQueuePlacementChange(qBase, qBase, 'qTask00004'),
+        isFalse,
+        reason: 'Task absent from both queues has unchanged placement',
+      );
+
+      // 3. pruneInvalidatedEntries:
+      final emptyResult = TaskBoardUndo.pruneInvalidatedEntries(
+        const <TaskUndoEntry>[],
+        previousBoard: qBase,
+        nextBoard: qSwapped,
+        nowUtc: tCheck,
+      );
+      expect(emptyResult.retained, isEmpty);
+      expect(emptyResult.pruned, isEmpty);
+
+      final taskA = TaskItem(
+        id: 'prnTask001',
+        title: 'Task A',
+        createdAt: tEarly,
+        modifiedAt: tEarly,
+      );
+      final taskB = TaskItem(
+        id: 'prnTask002',
+        title: 'Task B',
+        isPriority: true,
+        createdAt: tEarly,
+        modifiedAt: tEarly,
+      );
+      final dependentOfA = TaskItem(
+        id: 'prnDep0001',
+        title: 'Blocked By A',
+        createdAt: tEarly,
+        modifiedAt: tEarly,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'prnTask001'),
+        ],
+      );
+      final taskCleanOnly = openWithExpiredBlock;
+      final boardBeforePrune = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          taskA,
+          taskB,
+          dependentOfA,
+          taskCleanOnly,
+          donePrereq,
+        ],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: tEarly,
+          taskIds: const <String>['prnTask001', 'prnTask002', 'chkTask001'],
+        ),
+        evaluationTime: tEarly,
+      );
+
+      final boardAfterA = boardBeforePrune.completeTask(
+        'prnTask001',
+        currentDate: t1,
+      );
+      final entryCompleteA = TaskBoardUndo.capture(
+        sequence: 101,
+        kind: TaskUndoActionKind.complete,
+        boardBefore: boardBeforePrune,
+        boardAfter: boardAfterA,
+        taskBefore: taskA,
+      );
+      final boardAfterDowngradeB = boardAfterA.downgradeTask(
+        'prnTask002',
+        currentDate: t2,
+      );
+      final entryDowngradeB = TaskBoardUndo.capture(
+        sequence: 102,
+        kind: TaskUndoActionKind.downgrade,
+        boardBefore: boardAfterA,
+        boardAfter: boardAfterDowngradeB,
+        taskBefore: boardAfterA.findTask('prnTask002')!,
+      );
+      final entryCleanOnly = TaskBoardUndo.capture(
+        sequence: 103,
+        kind: TaskUndoActionKind.delete,
+        boardBefore: boardAfterDowngradeB,
+        taskBefore: boardAfterDowngradeB.findTask('chkTask001')!,
+      );
+
+      // External sync edits dependentOfA (invalidating entryCompleteA), reorders prnTask002 in queue (invalidating entryDowngradeB), and only cleans expired blocks on chkTask001 (retaining entryCleanOnly):
+      final boardNextExternal = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          boardAfterDowngradeB.findTask('prnTask001')!,
+          boardAfterDowngradeB.findTask('prnTask002')!,
+          boardAfterDowngradeB
+              .findTask('prnDep0001')!
+              .copyWith(
+                title: 'Externally Edited Dependent',
+                modifiedAt: tCheck,
+              ),
+          openCleaned,
+          donePrereq,
+        ],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: tCheck,
+          taskIds: const <String>['prnTask002', 'chkTask001'],
+        ),
+        evaluationTime: tCheck,
+      );
+      final prunedResult = TaskBoardUndo.pruneInvalidatedEntries(
+        <TaskUndoEntry>[entryCompleteA, entryDowngradeB, entryCleanOnly],
+        previousBoard: boardAfterDowngradeB,
+        nextBoard: boardNextExternal,
+        nowUtc: tCheck,
+      );
+      expect(
+        prunedResult.pruned.map((entry) => entry.sequence),
+        equals(<int>[101, 102]),
+        reason: 'Dependent edit and downgrade queue reorder must invalidate their undo entries',
+      );
+      expect(
+        prunedResult.retained.map((entry) => entry.sequence),
+        equals(<int>[103]),
+        reason: 'Cleanup-only change on target must retain its undo entry',
       );
     });
   });

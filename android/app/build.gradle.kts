@@ -1,8 +1,32 @@
+import java.io.File
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.isFile) {
+    keystorePropertiesFile.inputStream().use { keystoreProperties.load(it) }
+}
+
+fun resolveSigningProperty(propertyKey: String, envVar: String): String? {
+    return keystoreProperties.getProperty(propertyKey)?.trim()?.takeIf { it.isNotEmpty() }
+        ?: System.getenv(envVar)?.trim()?.takeIf { it.isNotEmpty() }
+}
+
+val releaseStorePath = resolveSigningProperty("storeFile", "TIERTASK_KEYSTORE_PATH")
+val releaseStorePassword = resolveSigningProperty("storePassword", "TIERTASK_KEYSTORE_PASSWORD")
+val releaseKeyAlias = resolveSigningProperty("keyAlias", "TIERTASK_KEY_ALIAS")
+val releaseKeyPassword = resolveSigningProperty("keyPassword", "TIERTASK_KEY_PASSWORD")
+val hasReleaseSigning =
+    releaseStorePath != null &&
+        releaseStorePassword != null &&
+        releaseKeyAlias != null &&
+        releaseKeyPassword != null
 
 fun runGitCommand(workDir: File, vararg args: String): String? {
     return try {
@@ -50,10 +74,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "de.akjir.tiertask"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
@@ -69,14 +90,39 @@ android {
         )
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                val configuredPath = requireNotNull(releaseStorePath)
+                val candidateFile = File(configuredPath)
+                storeFile = if (candidateFile.isAbsolute) {
+                    candidateFile
+                } else {
+                    rootProject.file(configuredPath)
+                }
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
+        }
+    }
+
     buildTypes {
         debug {
             applicationIdSuffix = ".dev"
         }
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

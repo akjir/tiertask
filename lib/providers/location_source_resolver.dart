@@ -24,6 +24,7 @@ import '../models/tdf_location.dart';
 import '../services/plus_code_service.dart';
 import 'config_providers.dart';
 import 'location_providers.dart';
+import 'task_schedule_helper.dart';
 
 /// Provides [LocationSourceResolver] for Plus Code decoding, forward geocoding, and foreground GPS lookup.
 final locationSourceResolverProvider = Provider<LocationSourceResolver>(
@@ -189,21 +190,20 @@ class LocationSourceResolver {
 
   /// Checks whether [latitude] and [longitude] are finite WGS-84 coordinates.
   bool isValidCoordinates(double latitude, double longitude) =>
-      !latitude.isNaN &&
-      !latitude.isInfinite &&
-      latitude >= -90.0 &&
-      latitude <= 90.0 &&
-      !longitude.isNaN &&
-      !longitude.isInfinite &&
-      longitude >= -180.0 &&
-      longitude <= 180.0;
+      TaskScheduleHelper.isValidCoordinates(latitude, longitude);
 
   /// Reads the current GPS coordinates, triggering [LocationNotifier.refreshLocation] when absent.
   Future<({double latitude, double longitude})?>
   resolveCurrentGpsPosition() async {
+    if (!_ref.mounted) {
+      return null;
+    }
     var fix = _ref.read(locationStateProvider).fix;
     if (fix == null || !fix.hasCoordinates) {
       await _ref.read(locationStateProvider.notifier).refreshLocation();
+      if (!_ref.mounted) {
+        return null;
+      }
       fix = _ref.read(locationStateProvider).fix;
     }
     if ((fix?.latitude, fix?.longitude) case (

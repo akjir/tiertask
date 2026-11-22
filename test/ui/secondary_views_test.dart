@@ -27,6 +27,7 @@ import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/providers/board_providers.dart';
 import 'package:tiertask/providers/floating_notice_providers.dart';
 import 'package:tiertask/providers/log_viewer_providers.dart';
 import 'package:tiertask/providers/shell_providers.dart';
@@ -34,7 +35,9 @@ import 'package:tiertask/providers/sync_providers.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/ui/layout/ui_page_header.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/primitives/ui_field.dart';
 import 'package:tiertask/ui/primitives/ui_pill.dart';
 import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
 import 'package:tiertask/ui/tokens/ui_typography_tokens.dart';
@@ -166,7 +169,7 @@ void main() {
 
   setUp(() {
     lastCopiedText = null;
-    AppLogger.resetForTesting(clock: () => DateTime.utc(2026, 11, 21, 12, 0));
+    AppLogger.resetForTesting(clock: () => DateTime.utc(2026, 11, 21, 12));
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
           if (call.method == 'Clipboard.setData') {
@@ -195,10 +198,7 @@ void main() {
         final container = await pumpLeafWidget(
           tester,
           const Scaffold(body: LogViewerView()),
-          config: const WebDavConfig(
-            diagnosticsEnabled: false,
-            logStorageMode: StorageMode.local,
-          ),
+          config: const WebDavConfig(),
         );
 
         AppLogger.setEnabled(
@@ -340,11 +340,9 @@ void main() {
           equals('Diagnostic log copied to clipboard.'),
         );
 
-        final levelDropdown = find.descendant(
-          of: find.byKey(const ValueKey<String>('log_viewer_level_filter')),
-          matching: find.byType(DropdownButton<String>),
+        await tester.tap(
+          find.byKey(const ValueKey<String>('log_viewer_level_filter')),
         );
-        await tester.tap(levelDropdown);
         await tester.pumpAndSettle();
         await tester.tap(find.text('WARN').last);
         await tester.pumpAndSettle();
@@ -733,10 +731,7 @@ void main() {
         await pumpLeafWidget(
           tester,
           const Scaffold(body: LogViewerView()),
-          config: const WebDavConfig(
-            diagnosticsEnabled: true,
-            logStorageMode: StorageMode.local,
-          ),
+          config: const WebDavConfig(diagnosticsEnabled: true),
         );
         await tester.pumpAndSettle();
 
@@ -826,10 +821,7 @@ void main() {
         await pumpLeafWidget(
           tester,
           const Scaffold(body: LogViewerView()),
-          config: const WebDavConfig(
-            diagnosticsEnabled: true,
-            logStorageMode: StorageMode.local,
-          ),
+          config: const WebDavConfig(diagnosticsEnabled: true),
         );
         await tester.pumpAndSettle();
 
@@ -1027,10 +1019,7 @@ void main() {
           await pumpLeafWidget(
             tester,
             const Scaffold(body: LogViewerView()),
-            config: const WebDavConfig(
-              diagnosticsEnabled: true,
-              logStorageMode: StorageMode.local,
-            ),
+            config: const WebDavConfig(diagnosticsEnabled: true),
           );
           await tester.pumpAndSettle();
 
@@ -1101,10 +1090,7 @@ void main() {
           await pumpLeafWidget(
             tester,
             const Scaffold(body: LogViewerView()),
-            config: const WebDavConfig(
-              diagnosticsEnabled: true,
-              logStorageMode: StorageMode.local,
-            ),
+            config: const WebDavConfig(diagnosticsEnabled: true),
             surfaceSize: desktopSize,
           );
           await tester.pumpAndSettle();
@@ -1164,10 +1150,7 @@ void main() {
         await pumpLeafWidget(
           tester,
           const Scaffold(body: LogViewerView()),
-          config: const WebDavConfig(
-            diagnosticsEnabled: true,
-            logStorageMode: StorageMode.local,
-          ),
+          config: const WebDavConfig(diagnosticsEnabled: true),
           surfaceSize: const Size(390, 700),
         );
         await tester.pumpAndSettle();
@@ -1194,6 +1177,118 @@ void main() {
           compactAllRect.bottom,
           lessThanOrEqualTo(compactFirstPillRect.top),
           reason: 'All/None buttons must remain in the subsystem header row above the pills on compact viewports',
+        );
+      },
+    );
+
+    testWidgets(
+      'scopes log appends to console and metadata counts with fixed itemExtent and RepaintBoundary',
+      (tester) async {
+        AppLogger.setEnabled(
+          true,
+          minimumLevel: LogLevel.debug,
+          persistToDisk: false,
+          metadata: const LogMetadata(
+            appVersion: '0.4.0+4',
+            platform: 'linux',
+            workspaceId: 'work',
+          ),
+        );
+        AppLogger.info(LogTag.domain, 'initial scoped log entry');
+
+        await pumpLeafWidget(
+          tester,
+          const Scaffold(body: LogViewerView()),
+          config: const WebDavConfig(diagnosticsEnabled: true),
+          surfaceSize: const Size(1280, 800),
+        );
+        await tester.pumpAndSettle();
+
+        final consoleFinder = find.byKey(
+          const ValueKey<String>('log_viewer_console'),
+        );
+        expect(
+          find.descendant(
+            of: consoleFinder,
+            matching: find.byType(RepaintBoundary),
+          ),
+          findsWidgets,
+          reason:
+              'Log console panel must isolate repaints in a RepaintBoundary',
+        );
+        final listView = tester.widget<ListView>(
+          find.descendant(of: consoleFinder, matching: find.byType(ListView)),
+        );
+        expect(
+          listView.itemExtent,
+          isNotNull,
+          reason: 'Log console ListView must specify a fixed itemExtent for O(1) jumping',
+        );
+
+        final headerBefore = tester.widget<UiPageHeader>(
+          find.byType(UiPageHeader),
+        );
+        final levelFieldBefore = tester.widget<UiField>(
+          find.byKey(const ValueKey<String>('log_viewer_level_filter')),
+        );
+        final subsystemPillBefore = tester.widget<UiPill>(
+          find.byKey(const ValueKey<String>('log_viewer_subsystem_tdf')),
+        );
+        final copyButtonBefore = tester.widget<UiButton>(
+          find.byKey(const ValueKey<String>('log_viewer_copy_button')),
+        );
+
+        AppLogger.info(LogTag.domain, 'incremental scoped log entry');
+        await tester.pumpAndSettle();
+
+        expect(
+          find.textContaining('incremental scoped log entry'),
+          findsOneWidget,
+        );
+        expect(
+          find.text('Entries: 3 | Warnings: 0 | Errors: 0'),
+          findsOneWidget,
+        );
+
+        expect(
+          identical(
+            tester.widget<UiPageHeader>(find.byType(UiPageHeader)),
+            headerBefore,
+          ),
+          isTrue,
+          reason: 'Appending a log line must not rebuild UiPageHeader',
+        );
+        expect(
+          identical(
+            tester.widget<UiField>(
+              find.byKey(const ValueKey<String>('log_viewer_level_filter')),
+            ),
+            levelFieldBefore,
+          ),
+          isTrue,
+          reason: 'Appending a log line must not rebuild level filter select',
+        );
+        expect(
+          identical(
+            tester.widget<UiPill>(
+              find.byKey(const ValueKey<String>('log_viewer_subsystem_tdf')),
+            ),
+            subsystemPillBefore,
+          ),
+          isTrue,
+          reason:
+              'Appending a log line must not rebuild subsystem toggle pills',
+        );
+        expect(
+          identical(
+            tester.widget<UiButton>(
+              find.byKey(const ValueKey<String>('log_viewer_copy_button')),
+            ),
+            copyButtonBefore,
+          ),
+          isTrue,
+          reason:
+              'Appending a log line must not rebuild unchanged toolbar actions',
         );
       },
     );
@@ -1238,20 +1333,33 @@ void main() {
           const ValueKey<String>('raw_tdf_code_block'),
         );
         expect(codeBlockFinder, findsOneWidget);
-        final selectableText = tester.widget<SelectableText>(
+        expect(
           find.descendant(
             of: codeBlockFinder,
-            matching: find.byType(SelectableText),
+            matching: find.byType(SelectionArea),
           ),
+          findsOneWidget,
+          reason: 'Raw TDF code block must expose a SelectionArea',
         );
-        expect(selectableText.data, contains('tdf 0.8.0'));
-        expect(selectableText.data, contains('task alpha-1'));
+        final headerLineFinder = find.descendant(
+          of: codeBlockFinder,
+          matching: find.textContaining('tdf 0.8.0'),
+        );
+        expect(headerLineFinder, findsOneWidget);
         expect(
-          selectableText.style?.fontSize,
+          find.descendant(
+            of: codeBlockFinder,
+            matching: find.textContaining('task alpha-1 {'),
+          ),
+          findsOneWidget,
+        );
+        final headerLineText = tester.widget<Text>(headerLineFinder);
+        expect(
+          headerLineText.style?.fontSize,
           equals(UiTypographyTokens.standard.rawCode.fontSize),
         );
         expect(
-          selectableText.style?.fontFamily,
+          headerLineText.style?.fontFamily,
           equals(UiTypographyTokens.standard.rawCode.fontFamily),
         );
 
@@ -1264,7 +1372,10 @@ void main() {
         await tester.tap(copyButtonFinder);
         await tester.pumpAndSettle();
 
-        expect(lastCopiedText, equals(selectableText.data));
+        expect(
+          lastCopiedText,
+          equals(container.read(rawTdfPreviewProvider).content),
+        );
         expect(
           container.read(floatingNoticeProvider)?.message,
           equals('TDF document copied to clipboard.'),
@@ -1272,6 +1383,72 @@ void main() {
         expect(
           container.read(floatingNoticeProvider)?.tone,
           equals(FloatingNoticeTone.success),
+        );
+      },
+    );
+
+    testWidgets(
+      'virtualizes large TDF documents with fixed itemExtent and RepaintBoundary',
+      (tester) async {
+        final tasks = <TaskItem>[
+          for (var i = 0; i < 200; i++)
+            TaskItem(
+              id: 't${i.toString().padLeft(4, '0')}',
+              title: 'Virtualized TDF task #$i',
+              note: 'Note payload line for task $i',
+            ),
+        ];
+        final largeBoard = TaskBoard(planned: tasks);
+
+        await pumpLeafWidget(
+          tester,
+          const Scaffold(body: RawTdfView()),
+          board: largeBoard,
+          surfaceSize: const Size(1280, 720),
+        );
+
+        final codeBlockFinder = find.byKey(
+          const ValueKey<String>('raw_tdf_code_block'),
+        );
+        expect(codeBlockFinder, findsOneWidget);
+        expect(
+          find.descendant(
+            of: codeBlockFinder,
+            matching: find.byType(RepaintBoundary),
+          ),
+          findsWidgets,
+          reason:
+              'Raw TDF code block must isolate repaints in a RepaintBoundary',
+        );
+        final listView = tester.widget<ListView>(
+          find.descendant(of: codeBlockFinder, matching: find.byType(ListView)),
+        );
+        expect(
+          listView.itemExtent,
+          isNotNull,
+          reason:
+              'Raw TDF ListView must set a fixed itemExtent for O(1) scrolling',
+        );
+        final mountedLines = tester
+            .widgetList<Text>(
+              find.descendant(
+                of: find.descendant(
+                  of: codeBlockFinder,
+                  matching: find.byType(ListView),
+                ),
+                matching: find.byType(Text),
+              ),
+            )
+            .length;
+        expect(
+          mountedLines,
+          greaterThan(0),
+          reason: 'Visible TDF lines must render inside ListView.builder',
+        );
+        expect(
+          mountedLines,
+          lessThan(100),
+          reason: 'Virtualized RawTdfView must mount only visible + cached lines instead of all ~1000 lines',
         );
       },
     );
@@ -1551,9 +1728,11 @@ void main() {
                   required taskResolutions,
                   required labelResolutions,
                   required locationResolutions,
-                }) async {
+                }) {
                   resolveCalls++;
-                  throw const LocalFileException('Disk write failed.');
+                  return Future<TaskBoard>.error(
+                    const LocalFileException('Disk write failed.'),
+                  );
                 },
           ),
         );

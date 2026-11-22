@@ -15,6 +15,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals, mapEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
@@ -56,11 +57,9 @@ import '../tokens/ui_breakpoints.dart';
 import '../tokens/ui_theme_tokens.dart';
 import '../ui_domain_mappers.dart';
 import '../widgets/entity_label_picker.dart';
+import '../widgets/entity_reveal_scroll_controller.dart';
 import 'task_card.dart';
 import 'task_draft_card.dart';
-
-/// Duration used for smooth `Scrollable.ensureVisible` entity card reveals (`U-LAYOUT-007`).
-const Duration _revealDuration = Duration(milliseconds: 220);
 
 /// Operational banner kinds displayed in priority order above the task list (`U-UX-007`).
 enum _TasksBannerKind {
@@ -209,7 +208,6 @@ class _FileReadDiagnosticRowDetails extends StatelessWidget {
             ),
             UiPill(
               label: line.isReadable ? okLabel : unreadableLabel,
-              variant: UiPillVariant.badge,
               tone: line.isReadable ? UiPillTone.success : UiPillTone.danger,
             ),
           ],
@@ -280,6 +278,54 @@ class _FullScreenFileReadError {
   final String title;
 }
 
+/// Immutable value-equality board slice watched by [_TasksQuickAddDockState].
+@immutable
+class _QuickAddBoardSlice {
+  /// Creates a [_QuickAddBoardSlice].
+  const _QuickAddBoardSlice({
+    required this.isLoading,
+    required this.hasFullError,
+    required this.sortedLabels,
+    required this.openLabelCounts,
+  });
+
+  /// Whether initial board loading failed without cached data.
+  final bool hasFullError;
+
+  /// Whether initial board loading is still in progress without cached data.
+  final bool isLoading;
+
+  /// Precomputed open task counts keyed by label identifier.
+  final Map<String, int> openLabelCounts;
+
+  /// Alphabetically sorted workspace labels.
+  final List<TdfLabel> sortedLabels;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is _QuickAddBoardSlice &&
+        other.isLoading == isLoading &&
+        other.hasFullError == hasFullError &&
+        listEquals(other.sortedLabels, sortedLabels) &&
+        mapEquals(other.openLabelCounts, openLabelCounts);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    isLoading,
+    hasFullError,
+    Object.hashAll(sortedLabels),
+    Object.hashAllUnordered(
+      openLabelCounts.entries.map(
+        (entry) => Object.hash(entry.key, entry.value),
+      ),
+    ),
+  );
+}
+
 /// Renders the design-system [UiQuickComposer] bound to shell expansion and popover handlers.
 class _QuickAddComposerSurface extends ConsumerWidget {
   /// Creates a [_QuickAddComposerSurface].
@@ -328,7 +374,6 @@ class _QuickAddComposerSurface extends ConsumerWidget {
       maxLength: maxTdfTextLength,
       enabled: !isBusy,
       expandDraftLabel: localizations.actionOpenAsDraft,
-      isCollapsibleOnCompact: true,
       isCompactExpanded: compactComposerOpen,
       onCompactExpandedChanged: shellNotifier.setCompactComposerOpen,
       compactTriggerLabel: '+ ${localizations.actionNewTaskCompact}',
@@ -547,7 +592,6 @@ class _QuickAddLabelPopoverHeader extends StatelessWidget {
         const Spacer(),
         UiButton(
           label: localizations.actionDone,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           onPressed: onClose,
         ),
@@ -756,6 +800,7 @@ class _TasksBoardContext {
     required this.localNow,
     required this.activeFix,
     required this.currentLocalDateTimeHint,
+    required this.resolveSearchMatches,
   });
 
   /// Active foreground GPS fix when status is [LocationStatus.found], or `null`.
@@ -784,6 +829,9 @@ class _TasksBoardContext {
 
   /// Current evaluation UTC timestamp.
   final DateTime nowUtc;
+
+  /// Cached Global Search lookup returning matching `(task, tier)` entries for [board].
+  final List<_VisibleTaskEntry> Function(String query) resolveSearchMatches;
 
   /// Lookup map of all workspace tasks by identifier for prerequisite evaluation.
   final Map<String, TaskItem> tasksById;
@@ -932,7 +980,6 @@ class _TasksFullScreenErrorBanner extends StatelessWidget {
           key: const ValueKey<String>('tasks_full_error_settings_button'),
           label: localizations.actionSettings,
           leadingIcon: Icons.settings_outlined,
-          variant: UiButtonVariant.secondary,
           onPressed: onOpenSettings,
         ),
         UiButton(
@@ -1103,14 +1150,10 @@ class _TasksListSliver extends ConsumerWidget {
   const _TasksListSliver({
     required this.boardContext,
     required this.resolveRevealCardKey,
-    required this.onPruneRevealKeys,
   });
 
   /// Shared evaluated board snapshot.
   final _TasksBoardContext boardContext;
-
-  /// Callback pruning stale owned reveal keys for task IDs no longer in the visible list.
-  final ValueChanged<Set<String>> onPruneRevealKeys;
 
   /// Callback resolving stable [GlobalKey]s for reveal targeting.
   final GlobalKey Function(String taskId) resolveRevealCardKey;
@@ -1121,15 +1164,9 @@ class _TasksListSliver extends ConsumerWidget {
     final searchQuery = shellState.searchOpen
         ? ref.watch(searchQueryProvider)
         : '';
-    final visibleEntries = _collectVisibleTasks(
-      board: boardContext.board,
-      activeTier: shellState.activeTier,
-      searchOpen: shellState.searchOpen,
-      searchQuery: searchQuery,
-    );
-    onPruneRevealKeys(<String>{
-      for (final entry in visibleEntries) entry.task.id,
-    });
+    final visibleEntries = shellState.searchOpen
+        ? boardContext.resolveSearchMatches(searchQuery)
+        : _collectTierTasks(boardContext.board, shellState.activeTier);
     if (visibleEntries.isEmpty && !shellState.isTaskDraftOpen) {
       return _TasksEmptySliver(
         activeTier: shellState.activeTier,
@@ -1243,7 +1280,7 @@ class _TasksPageHeaderSection extends ConsumerWidget {
     String searchQuery,
   ) {
     final visibleCount = shellState.searchOpen
-        ? _countSearchMatches(boardContext.board, searchQuery)
+        ? boardContext.resolveSearchMatches(searchQuery).length
         : boardContext.board.tasksForTier(shellState.activeTier).length;
     final wipLimit = shellState.searchOpen
         ? null
@@ -1451,7 +1488,6 @@ class _TasksQuickAddDockState extends ConsumerState<TasksQuickAddDock> {
       showCompactLabelPickerSheet(
         context,
         title: localizations.taskLabelsSectionTitle,
-        taskId: null,
         initialSelectedLabelIds: selectedIds,
         onToggleLabel: _handleToggleDraftLabel,
         onCreateLabel: _handleCreateAndAssignLabel,
@@ -1536,15 +1572,11 @@ class _TasksScrollableBody extends StatelessWidget {
     required this.scrollController,
     required this.boardContext,
     required this.resolveRevealCardKey,
-    required this.onPruneRevealKeys,
     required this.onRetrySync,
   });
 
   /// Shared evaluated board snapshot.
   final _TasksBoardContext boardContext;
-
-  /// Callback pruning stale owned card reveal keys.
-  final ValueChanged<Set<String>> onPruneRevealKeys;
 
   /// Callback retrying synchronization from status banners.
   final VoidCallback onRetrySync;
@@ -1576,7 +1608,6 @@ class _TasksScrollableBody extends StatelessWidget {
           sliver: _TasksListSliver(
             boardContext: boardContext,
             resolveRevealCardKey: resolveRevealCardKey,
-            onPruneRevealKeys: onPruneRevealKeys,
           ),
         ),
       ],
@@ -1643,7 +1674,6 @@ class _TasksStatusBanner extends StatelessWidget {
       _TasksBannerKind.unconfiguredWebDav => <Widget>[
         UiButton(
           label: banner.primaryActionLabel ?? localizations.actionConfigure,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           onPressed: () => onOpenView(ShellView.settings),
         ),
@@ -1652,14 +1682,12 @@ class _TasksStatusBanner extends StatelessWidget {
       _TasksBannerKind.partialFileRead => <Widget>[
         UiButton(
           label: banner.primaryActionLabel ?? localizations.actionRetry,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           isLoading: isSyncing,
           onPressed: isSyncing ? null : onRetrySync,
         ),
         UiButton(
           label: banner.secondaryActionLabel ?? localizations.actionSettings,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           onPressed: () => onOpenView(ShellView.settings),
         ),
@@ -1745,17 +1773,46 @@ class _TasksStatusBanners extends ConsumerWidget {
   }
 }
 
-/// Manages smooth entity reveal scrolling, draft scroll-to-top, and pruned card keys for [TasksView].
-class _TasksViewState extends ConsumerState<TasksView> {
-  final Map<String, GlobalKey> _ownedCardKeys = <String, GlobalKey>{};
+/// Manages smooth entity reveal scrolling, draft scroll-to-top, memoized lookups, and pruned card keys for [TasksView].
+class _TasksViewState extends ConsumerState<TasksView>
+    with EntityRevealScrollMixin<TasksView> {
+  Map<String, TdfLabel> _cachedLabelsById = const <String, TdfLabel>{};
+  Map<String, TdfLocation> _cachedLocationsById = const <String, TdfLocation>{};
+  TaskBoard? _cachedLookupBoard;
+  TaskBoard? _cachedSearchBoard;
+  List<_VisibleTaskEntry> _cachedSearchMatches = const <_VisibleTaskEntry>[];
+  String? _cachedSearchNeedle;
+  Map<String, TaskItem> _cachedTasksById = const <String, TaskItem>{};
+
+  @override
+  ScrollController? get externalScrollController => widget.scrollController;
+
+  @override
+  GlobalKey Function(String entityId)? get revealCardKeyBuilder =>
+      widget.revealCardKeyBuilder;
+
+  @override
+  EntityDraftKind get revealDraftKind => EntityDraftKind.task;
+
+  @override
+  EntityKind get revealEntityKind => EntityKind.task;
 
   @override
   void initState() {
     super.initState();
-    final pendingReveal = ref.read(shellProvider).revealEntityRequest;
-    if (pendingReveal != null && pendingReveal.kind == EntityKind.task) {
-      _scheduleRevealTask(pendingReveal.id);
-    }
+    initRevealScroll();
+  }
+
+  @override
+  void didUpdateWidget(covariant TasksView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    handleScrollControllerSwap(oldWidget.scrollController);
+  }
+
+  @override
+  void dispose() {
+    disposeRevealScroll();
+    super.dispose();
   }
 
   @override
@@ -1776,11 +1833,11 @@ class _TasksViewState extends ConsumerState<TasksView> {
     if (fullScreenError == null &&
         evaluatedAsync.isLoading &&
         !evaluatedAsync.hasValue) {
-      _ownedCardKeys.clear();
+      schedulePruneOwnedCardKeys();
       return const _TasksLoadingBody();
     }
     if (fullScreenError case final errorReport?) {
-      _ownedCardKeys.clear();
+      schedulePruneOwnedCardKeys();
       return _TasksFullScreenErrorBody(
         errorReport: errorReport,
         onOpenSettings: _openSettings,
@@ -1788,22 +1845,28 @@ class _TasksViewState extends ConsumerState<TasksView> {
       );
     }
     return _TasksScrollableBody(
-      scrollController: widget.scrollController,
+      scrollController: effectiveScrollController,
       boardContext: _buildBoardContext(
         board: evaluatedAsync.asData?.value ?? TaskBoard.empty(),
         activeLabelId: activeLabelId,
       ),
-      resolveRevealCardKey: _resolveRevealCardKey,
-      onPruneRevealKeys: _pruneOwnedCardKeys,
+      resolveRevealCardKey: resolveRevealCardKey,
       onRetrySync: _triggerSyncNow,
     );
   }
 
-  /// Builds the shared [_TasksBoardContext] snapshot for the current evaluated [board].
+  @override
+  List<String> collectVisibleEntityIds() {
+    final visibleEntries = _collectCurrentVisibleTasks();
+    return <String>[for (final entry in visibleEntries) entry.task.id];
+  }
+
+  /// Builds the shared [_TasksBoardContext] snapshot for the current evaluated [board], reusing memoized lookup maps.
   _TasksBoardContext _buildBoardContext({
     required TaskBoard board,
     required String? activeLabelId,
   }) {
+    _syncLookupCache(board);
     final configuration = _readCurrentConfig(ref);
     final nowUtc = ref.read(clockProvider)().toUtc();
     final locationState = ref.read(locationStateProvider);
@@ -1813,15 +1876,9 @@ class _TasksViewState extends ConsumerState<TasksView> {
     return _TasksBoardContext(
       board: board,
       activeLabelId: activeLabelId,
-      labelsById: <String, TdfLabel>{
-        for (final label in board.labels) label.id: label,
-      },
-      locationsById: <String, TdfLocation>{
-        for (final location in board.locations) location.id: location,
-      },
-      tasksById: <String, TaskItem>{
-        for (final task in board.allTasks) task.id: task,
-      },
+      labelsById: _cachedLabelsById,
+      locationsById: _cachedLocationsById,
+      tasksById: _cachedTasksById,
       configuration: configuration,
       nowUtc: nowUtc,
       localNow: configuration.toLocalWallClock(nowUtc),
@@ -1830,24 +1887,23 @@ class _TasksViewState extends ConsumerState<TasksView> {
         nowUtc,
         configuration,
       ),
+      resolveSearchMatches: (query) => _resolveSearchMatches(board, query),
     );
   }
 
-  /// Scrolls the list to top when a Task Draft Card transitions from closed to open.
-  void _handleActiveDraftChanged(
-    EntityDraftKind? previous,
-    EntityDraftKind? next,
-  ) {
-    if (next == EntityDraftKind.task && previous != EntityDraftKind.task) {
-      _scrollToTop();
+  /// Collects the currently visible task entries matching active tier or Global Search state.
+  List<_VisibleTaskEntry> _collectCurrentVisibleTasks() {
+    final shellState = ref.read(shellProvider);
+    final board =
+        ref
+            .read(evaluatedBoardProvider(shellState.activeLabelId))
+            .asData
+            ?.value ??
+        TaskBoard.empty();
+    if (shellState.searchOpen) {
+      return _resolveSearchMatches(board, ref.read(searchQueryProvider));
     }
-  }
-
-  /// Schedules reveal scrolling when the shell requests focusing a task card.
-  void _handleRevealEntityRequested(EntityRef? previous, EntityRef? next) {
-    if (next != null && next.kind == EntityKind.task) {
-      _scheduleRevealTask(next.id);
-    }
+    return _collectTierTasks(board, shellState.activeTier);
   }
 
   /// Opens the Settings view from the full-screen file-read error banner.
@@ -1855,74 +1911,61 @@ class _TasksViewState extends ConsumerState<TasksView> {
     ref.read(shellProvider.notifier).openView(ShellView.settings);
   }
 
-  /// Prunes owned card [GlobalKey]s for task IDs no longer present in [visibleTaskIds].
-  void _pruneOwnedCardKeys(Set<String> visibleTaskIds) {
-    if (widget.revealCardKeyBuilder != null || _ownedCardKeys.isEmpty) {
-      return;
-    }
-    _ownedCardKeys.removeWhere((taskId, _) => !visibleTaskIds.contains(taskId));
-  }
-
-  /// Registers reveal and draft-open shell listeners for [TasksView].
+  /// Registers reveal, draft-open, and list-scope listeners for [TasksView].
   void _registerShellListeners() {
-    ref.listen<EntityRef?>(
-      shellProvider.select((shell) => shell.revealEntityRequest),
-      _handleRevealEntityRequested,
+    registerRevealShellListeners();
+    ref.listen<({TaskTier tier, bool searchOpen, String? labelId})>(
+      shellProvider.select(
+        (shell) => (
+          tier: shell.activeTier,
+          searchOpen: shell.searchOpen,
+          labelId: shell.activeLabelId,
+        ),
+      ),
+      (previous, next) {
+        if (previous != null && previous != next) {
+          schedulePruneOwnedCardKeys();
+        }
+      },
     );
-    ref.listen<EntityDraftKind?>(
-      shellProvider.select((shell) => shell.activeDraft),
-      _handleActiveDraftChanged,
-    );
-  }
-
-  /// Resolves the stable [GlobalKey] for revealing [taskId].
-  GlobalKey _resolveRevealCardKey(String taskId) {
-    if (widget.revealCardKeyBuilder case final builder?) {
-      return builder(taskId);
-    }
-    return _ownedCardKeys.putIfAbsent(taskId, GlobalKey.new);
-  }
-
-  /// Schedules a post-frame `Scrollable.ensureVisible` reveal for [taskId] and clears the shell request.
-  void _scheduleRevealTask(String taskId) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
+    ref.listen<String>(searchQueryProvider, (_, _) {
+      if (hasOwnedCardKeys) {
+        schedulePruneOwnedCardKeys();
       }
-      final revealKey = _resolveRevealCardKey(taskId);
-      final cardContext = revealKey.currentContext;
-      if (cardContext != null) {
-        unawaited(
-          Scrollable.ensureVisible(
-            cardContext,
-            duration: _revealDuration,
-            curve: Curves.easeOut,
-            alignment: 0.15,
-          ),
-        );
-      }
-      ref.read(shellProvider.notifier).clearRevealRequest();
     });
   }
 
-  /// Scrolls the main task list smoothly to top (`0.0`) when opening a Task Draft Card (`U-CARD-006`).
-  void _scrollToTop() {
-    final controller = widget.scrollController;
-    if (controller == null || !controller.hasClients) {
+  /// Returns cached Global Search matches for [board] and [query], scanning all tiers at most once per pair.
+  List<_VisibleTaskEntry> _resolveSearchMatches(TaskBoard board, String query) {
+    final needle = query.trim().toLowerCase();
+    if (identical(_cachedSearchBoard, board) && _cachedSearchNeedle == needle) {
+      return _cachedSearchMatches;
+    }
+    final matches = _collectSearchMatches(board, needle);
+    _cachedSearchBoard = board;
+    _cachedSearchNeedle = needle;
+    _cachedSearchMatches = matches;
+    return matches;
+  }
+
+  /// Refreshes memoized board lookup maps when [board] changes identity and schedules stale key pruning.
+  void _syncLookupCache(TaskBoard board) {
+    if (identical(_cachedLookupBoard, board)) {
       return;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !controller.hasClients) {
-        return;
-      }
-      unawaited(
-        controller.animateTo(
-          0.0,
-          duration: _revealDuration,
-          curve: Curves.easeOut,
-        ),
-      );
+    _cachedLookupBoard = board;
+    _cachedLabelsById = Map<String, TdfLabel>.unmodifiable(<String, TdfLabel>{
+      for (final label in board.labels) label.id: label,
     });
+    _cachedLocationsById = Map<String, TdfLocation>.unmodifiable(
+      <String, TdfLocation>{
+        for (final location in board.locations) location.id: location,
+      },
+    );
+    _cachedTasksById = Map<String, TaskItem>.unmodifiable(<String, TaskItem>{
+      for (final task in board.allTasks) task.id: task,
+    });
+    schedulePruneOwnedCardKeys();
   }
 
   /// Triggers immediate synchronization or initial load retry through [SyncActionsNotifier].
@@ -1947,14 +1990,6 @@ typedef _ListShellSlice = ({
   TaskTier activeTier,
   bool searchOpen,
   bool isTaskDraftOpen,
-});
-
-/// Narrow board slice watched by [_TasksQuickAddDockState].
-typedef _QuickAddBoardSlice = ({
-  bool isLoading,
-  bool hasFullError,
-  List<TdfLabel> sortedLabels,
-  Map<String, int> openLabelCounts,
 });
 
 /// Narrow sync state slice watched by [_TasksStatusBanners].
@@ -2085,49 +2120,24 @@ List<_TasksBannerEntry> _buildStatusBanners({
   return banners;
 }
 
-/// Collects `(task, tier)` entries for [activeTier] or across all six tiers in Global Search.
-List<_VisibleTaskEntry> _collectVisibleTasks({
-  required TaskBoard board,
-  required TaskTier activeTier,
-  required bool searchOpen,
-  required String searchQuery,
-}) {
-  if (!searchOpen) {
-    final tasks = board.tasksForTier(activeTier);
-    return <_VisibleTaskEntry>[
-      for (final task in tasks) (task: task, tier: activeTier),
-    ];
-  }
-  final needle = searchQuery.trim().toLowerCase();
+/// Collects matching `(task, tier)` entries across all six tiers for lowercase [needle].
+List<_VisibleTaskEntry> _collectSearchMatches(TaskBoard board, String needle) {
   final results = <_VisibleTaskEntry>[];
   for (final tier in TaskTier.values) {
     _appendTierSearchMatches(board.tasksForTier(tier), tier, needle, results);
   }
-  return results;
+  return List<_VisibleTaskEntry>.unmodifiable(results);
 }
 
-/// Counts tasks across all six tiers matching [searchQuery].
-int _countSearchMatches(TaskBoard board, String searchQuery) {
-  final needle = searchQuery.trim().toLowerCase();
-  var count = 0;
-  for (final tier in TaskTier.values) {
-    count += _countTierSearchMatches(board.tasksForTier(tier), needle);
-  }
-  return count;
-}
-
-/// Counts tasks in [tierTasks] matching lowercase [needle].
-int _countTierSearchMatches(List<TaskItem> tierTasks, String needle) {
-  if (needle.isEmpty) {
-    return tierTasks.length;
-  }
-  var count = 0;
-  for (final task in tierTasks) {
-    if (_matchesSearchQuery(task, needle)) {
-      count++;
-    }
-  }
-  return count;
+/// Collects `(task, tier)` entries for a single [activeTier].
+List<_VisibleTaskEntry> _collectTierTasks(
+  TaskBoard board,
+  TaskTier activeTier,
+) {
+  final tasks = board.tasksForTier(activeTier);
+  return <_VisibleTaskEntry>[
+    for (final task in tasks) (task: task, tier: activeTier),
+  ];
 }
 
 /// Checks whether [task] matches lowercase Global Search query [needle].
@@ -2273,7 +2283,7 @@ _QuickAddBoardSlice _selectQuickAddBoardSlice(
   AsyncValue<TaskBoard> boardAsync,
 ) {
   final board = boardAsync.asData?.value;
-  return (
+  return _QuickAddBoardSlice(
     isLoading: boardAsync.isLoading && !boardAsync.hasValue,
     hasFullError: boardAsync.hasError && !boardAsync.hasValue,
     sortedLabels: board?.sortedLabels ?? const <TdfLabel>[],

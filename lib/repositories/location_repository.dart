@@ -16,11 +16,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:flutter/services.dart';
 
 import '../models/location_state.dart';
-import '../models/tdf_error.dart';
 import '../services/app_logger.dart';
 import '../services/plus_code_service.dart';
 
@@ -124,6 +124,9 @@ class PlatformLocationRepository implements LocationRepository {
   /// Time-to-live for cached desktop GeoIP fallback results.
   static const Duration geoIpCacheTtl = Duration(minutes: 30);
 
+  /// Negative backoff duration suppressing repeated GeoIP fetches after both endpoints fail.
+  static const Duration geoIpFailureBackoff = Duration(minutes: 5);
+
   /// Native platform channel for foreground location queries.
   static const MethodChannel locationChannel = MethodChannel(
     'de.akjir.tiertask/location',
@@ -147,8 +150,15 @@ class PlatformLocationRepository implements LocationRepository {
   /// Timeout applied to native platform channel invocations.
   static const Duration nativeChannelTimeout = Duration(seconds: 12);
 
-  /// User-Agent header sent with Nominatim and GeoIP requests.
-  static const String userAgentHeader = 'TierTask/1.0';
+  /// User-Agent header sent with Nominatim, Wi-Fi MLS, and GeoIP requests.
+  static const String userAgentHeader =
+      'TierTask/0.5.0 (+https://github.com/akjir/tiertask)';
+
+  /// Time-to-live for cached Wi-Fi BSSID MLS positioning results.
+  static const Duration wifiCacheTtl = Duration(minutes: 15);
+
+  static const int _maxDrainBytes = 65536;
+  static const int _maxRedirects = 5;
 
   /// Timeout applied to outbound HTTP connections and responses.
   final Duration connectionTimeout;
@@ -156,23 +166,35 @@ class PlatformLocationRepository implements LocationRepository {
   /// Maximum allowed HTTP response size in bytes.
   final int maxResponseBytes;
 
-  /// Minimum interval enforced between consecutive [searchLocations] HTTP calls.
+  /// Minimum interval enforced between consecutive Nominatim `/search` and `/reverse` HTTP calls.
   final Duration minSearchInterval;
 
   DateTime? _cachedGeoIpAt;
   LocationFix? _cachedGeoIpFix;
+  DateTime? _cachedWifiAt;
+  String? _cachedWifiBssidKey;
+  LocationFix? _cachedWifiFix;
   final MethodChannel _channel;
+  HttpClient? _client;
   final HttpClient Function() _clientFactory;
   final DateTime Function() _clock;
   final Uri _fallbackGeoIpUri;
+  DateTime? _geoIpFailedAt;
   final Uri _geoIpUri;
   LocationFix? _lastGeocodedFix;
-  DateTime? _lastSearchAt;
+  DateTime? _lastNominatimRequestAt;
+  Future<void> _nominatimQueue = Future<void>.value();
   final Uri Function(double latitude, double longitude)
   _reverseGeocodeUriBuilder;
   final Uri Function(String query) _searchGeocodeUriBuilder;
-  bool _searchInFlight = false;
   final Uri _wifiGeolocateUri;
+
+  /// Closes the pooled [HttpClient] and releases underlying socket connections.
+  void close({bool force = false}) {
+    final active = _client;
+    _client = null;
+    active?.close(force: force);
+  }
 
   @override
   Future<LocationFix?> determineLocation({bool forceRefresh = false}) async {
@@ -192,7 +214,8 @@ class PlatformLocationRepository implements LocationRepository {
       );
       return resolved;
     }
-    if (await _resolveWifiAccessPointsFix(nativeMap) case final wifiFix?) {
+    if (await _resolveWifiAccessPointsFix(nativeMap, forceRefresh: forceRefresh)
+        case final wifiFix?) {
       final resolved = await _resolvePlaceNameForNativeFix(wifiFix);
       AppLogger.event(
         LogLevel.info,
@@ -222,20 +245,14 @@ class PlatformLocationRepository implements LocationRepository {
 
   @override
   Future<List<GeocodingCandidate>> searchLocations(String query) async {
-    if (query.length > maxSearchQueryLength || _searchInFlight) {
+    if (query.length > maxSearchQueryLength) {
       return const <GeocodingCandidate>[];
     }
-    final normalizedQuery = PlusCodeService.normalizeSingleLineText(
-      query,
-      maxScalarValues: maxSearchQueryLength,
-    );
+    final normalizedQuery = PlusCodeService.normalizeSingleLineText(query);
     if (normalizedQuery.isEmpty) {
       return const <GeocodingCandidate>[];
     }
-    _searchInFlight = true;
-    try {
-      await _waitForSearchRateLimit();
-      _lastSearchAt = _clock();
+    return _runRateLimitedNominatim<List<GeocodingCandidate>>(() async {
       final stopwatch = Stopwatch()..start();
       final uri = _searchGeocodeUriBuilder(normalizedQuery);
       final jsonList = await _fetchJsonList(uri);
@@ -250,9 +267,28 @@ class PlatformLocationRepository implements LocationRepository {
         },
       );
       return candidates;
-    } finally {
-      _searchInFlight = false;
+    });
+  }
+
+  /// Returns the lazily initialized pooled [HttpClient] configured with [connectionTimeout].
+  HttpClient _acquireClient() {
+    if (_client case final existing?) {
+      return existing;
     }
+    final created = _clientFactory()..connectionTimeout = connectionTimeout;
+    _client = created;
+    return created;
+  }
+
+  /// Builds a deterministic cache key from the sorted lowercase BSSIDs in [accessPoints].
+  static String _buildWifiBssidCacheKey(
+    List<Map<String, Object?>> accessPoints,
+  ) {
+    final macAddresses = <String>[
+      for (final entry in accessPoints)
+        if (entry['macAddress'] case final String mac) mac.toLowerCase(),
+    ]..sort();
+    return macAddresses.join(',');
   }
 
   /// Builds the default OpenStreetMap Nominatim reverse-geocoding URI for [latitude] and [longitude].
@@ -277,6 +313,51 @@ class PlatformLocationRepository implements LocationRepository {
       'limit': '$maxGeocodingCandidates',
       'q': query,
     });
+  }
+
+  /// Drains up to [_maxDrainBytes] from [response] within [deadline] so keep-alive sockets return cleanly to the pool.
+  Future<void> _drainResponseSafely(
+    HttpClientResponse response,
+    DateTime deadline,
+    HttpClient client,
+  ) async {
+    if (response.contentLength > _maxDrainBytes) {
+      _resetPooledClient(client);
+      return;
+    }
+    final iterator = StreamIterator<List<int>>(response);
+    var completedNormally = false;
+    var drainedBytes = 0;
+    try {
+      while (await iterator.moveNext().timeout(_remainingTimeout(deadline))) {
+        drainedBytes += iterator.current.length;
+        if (drainedBytes > _maxDrainBytes) {
+          _resetPooledClient(client);
+          return;
+        }
+      }
+      completedNormally = true;
+    } finally {
+      if (!completedNormally) {
+        unawaited(iterator.cancel());
+      }
+    }
+  }
+
+  /// Waits for [previous] in the Nominatim FIFO queue, enforces [minSearchInterval], and runs [action].
+  Future<T> _executeQueuedNominatim<T>(
+    Future<void> previous,
+    Completer<void> gate,
+    Future<T> Function() action,
+  ) async {
+    await previous;
+    try {
+      await _waitForNominatimRateLimit();
+      _lastNominatimRequestAt = _clock();
+      return await action();
+    } finally {
+      gate.complete();
+    }
   }
 
   /// Extracts a [LocationFix] from the native channel map when status is `'found'` and coordinates are valid.
@@ -319,31 +400,62 @@ class PlatformLocationRepository implements LocationRepository {
     return sanitized;
   }
 
-  /// Performs a bounded HTTP GET to [uri] and returns the decoded JSON value, or `null` on error.
+  /// Performs a bounded HTTP GET to [uri] with explicit redirect validation and returns the decoded JSON value, or `null` on error.
   Future<Object?> _fetchDecodedJson(Uri uri) async {
     if (uri.scheme != 'https' && uri.scheme != 'http') {
       return null;
     }
-    final client = _clientFactory();
-    client.connectionTimeout = connectionTimeout;
+    final deadline = DateTime.now().add(connectionTimeout);
+    final client = _acquireClient();
+    var currentUri = uri;
     try {
-      final request = await client.getUrl(uri).timeout(connectionTimeout);
-      request.headers.set(HttpHeaders.userAgentHeader, userAgentHeader);
-      request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      final response = await request.close().timeout(connectionTimeout);
-      if (response.statusCode != HttpStatus.ok) {
-        return null;
+      for (var hop = 0; hop <= _maxRedirects; hop++) {
+        final request = await client
+            .getUrl(currentUri)
+            .timeout(_remainingTimeout(deadline));
+        request.followRedirects = false;
+        request.headers.set(HttpHeaders.userAgentHeader, userAgentHeader);
+        request.headers.set(HttpHeaders.acceptHeader, 'application/json');
+        final response = await request.close().timeout(
+          _remainingTimeout(deadline),
+        );
+        if (_isRedirectStatus(response.statusCode)) {
+          await _drainResponseSafely(response, deadline, client);
+          if (hop == _maxRedirects) {
+            return null;
+          }
+          final nextUri = _resolveRedirectUri(
+            currentUri: currentUri,
+            locationHeader: response.headers.value(HttpHeaders.locationHeader),
+          );
+          if (nextUri == null) {
+            return null;
+          }
+          currentUri = nextUri;
+          continue;
+        }
+        if (response.statusCode != HttpStatus.ok) {
+          await _drainResponseSafely(response, deadline, client);
+          return null;
+        }
+        final body = await _readBoundedUtf8Body(
+          response,
+          deadline: deadline,
+          client: client,
+        );
+        if (body == null) {
+          return null;
+        }
+        return jsonDecode(body);
       }
-      final body = await _readBoundedUtf8Body(response);
-      if (body == null) {
-        return null;
-      }
-      return jsonDecode(body);
+      return null;
+    } on TimeoutException {
+      _resetPooledClient(client);
+      AppLogger.warn(LogTag.storage, 'HTTP GET JSON fetch timed out');
+      return null;
     } on Object {
       AppLogger.warn(LogTag.storage, 'HTTP GET JSON fetch failed');
       return null;
-    } finally {
-      client.close(force: true);
     }
   }
 
@@ -389,6 +501,14 @@ class PlatformLocationRepository implements LocationRepository {
       return null;
     }
   }
+
+  /// Returns `true` when [statusCode] is an HTTP redirect status (`301`, `302`, `303`, `307`, `308`).
+  static bool _isRedirectStatus(int statusCode) =>
+      statusCode == HttpStatus.movedPermanently ||
+      statusCode == HttpStatus.found ||
+      statusCode == HttpStatus.seeOther ||
+      statusCode == HttpStatus.temporaryRedirect ||
+      statusCode == HttpStatus.permanentRedirect;
 
   /// Joins [locality] and [country] into a human-readable place label.
   static String? _joinPlaceParts(String? locality, String? country) {
@@ -506,10 +626,7 @@ class PlatformLocationRepository implements LocationRepository {
     if (rawName is! String) {
       return null;
     }
-    final displayName = PlusCodeService.normalizeSingleLineText(
-      rawName,
-      maxScalarValues: maxTdfTextLength,
-    );
+    final displayName = PlusCodeService.normalizeSingleLineText(rawName);
     if (displayName.isEmpty) {
       return null;
     }
@@ -567,7 +684,7 @@ class PlatformLocationRepository implements LocationRepository {
     );
   }
 
-  /// Performs a bounded HTTP POST of [payload] to [uri] and decodes a JSON object map, or returns `null` on error.
+  /// Performs a bounded HTTP POST of [payload] to [uri] with explicit `Content-Length` and decodes a JSON object map, or returns `null` on error.
   Future<Map<String, Object?>?> _postJsonMap(
     Uri uri,
     Map<String, Object?> payload,
@@ -575,20 +692,44 @@ class PlatformLocationRepository implements LocationRepository {
     if (uri.scheme != 'https' && uri.scheme != 'http') {
       return null;
     }
-    final client = _clientFactory();
-    client.connectionTimeout = connectionTimeout;
+    final deadline = DateTime.now().add(connectionTimeout);
+    final client = _acquireClient();
     try {
-      final request = await client.postUrl(uri).timeout(connectionTimeout);
+      final request = await client
+          .postUrl(uri)
+          .timeout(_remainingTimeout(deadline));
+      request.followRedirects = false;
       request.headers.set(HttpHeaders.userAgentHeader, userAgentHeader);
       request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');
-      request.add(utf8.encode(jsonEncode(payload)));
-      final response = await request.close().timeout(connectionTimeout);
+      final bytes = utf8.encode(jsonEncode(payload));
+      request.contentLength = bytes.length;
+      request.add(bytes);
+      final response = await request.close().timeout(
+        _remainingTimeout(deadline),
+      );
       if (response.statusCode != HttpStatus.ok) {
+        await _drainResponseSafely(response, deadline, client);
+        AppLogger.event(
+          LogLevel.warn,
+          LogTag.storage,
+          'location.post_failed',
+          fields: <String, Object?>{'status': response.statusCode},
+        );
         return null;
       }
-      final body = await _readBoundedUtf8Body(response);
+      final body = await _readBoundedUtf8Body(
+        response,
+        deadline: deadline,
+        client: client,
+      );
       if (body == null) {
+        AppLogger.event(
+          LogLevel.warn,
+          LogTag.storage,
+          'location.post_failed',
+          fields: const <String, Object?>{'reason': 'oversized_response'},
+        );
         return null;
       }
       final Object? decoded = jsonDecode(body);
@@ -596,29 +737,78 @@ class PlatformLocationRepository implements LocationRepository {
         return decoded;
       }
       return null;
+    } on TimeoutException {
+      _resetPooledClient(client);
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.storage,
+        'location.post_failed',
+        fields: const <String, Object?>{'reason': 'timeout'},
+      );
+      return null;
     } on Object {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.storage,
+        'location.post_failed',
+        fields: const <String, Object?>{'reason': 'request_error'},
+      );
       return null;
-    } finally {
-      client.close(force: true);
     }
   }
 
-  /// Reads at most [maxResponseBytes] from [response] and decodes UTF-8 text.
-  Future<String?> _readBoundedUtf8Body(HttpClientResponse response) async {
+  /// Reads at most [maxResponseBytes] from [response] within [deadline] using [BytesBuilder] and decodes UTF-8 text.
+  Future<String?> _readBoundedUtf8Body(
+    HttpClientResponse response, {
+    required DateTime deadline,
+    required HttpClient client,
+  }) async {
     if (response.contentLength > maxResponseBytes) {
+      _resetPooledClient(client);
       return null;
     }
-    final bytes = <int>[];
-    await for (final chunk in response.timeout(connectionTimeout)) {
-      if (bytes.length + chunk.length > maxResponseBytes) {
-        return null;
+    final iterator = StreamIterator<List<int>>(response);
+    final builder = BytesBuilder(copy: false);
+    var completedNormally = false;
+    try {
+      while (await iterator.moveNext().timeout(_remainingTimeout(deadline))) {
+        final chunk = iterator.current;
+        if (builder.length + chunk.length > maxResponseBytes) {
+          _resetPooledClient(client);
+          return null;
+        }
+        builder.add(chunk);
       }
-      bytes.addAll(chunk);
+      completedNormally = true;
+      return utf8.decode(builder.takeBytes(), allowMalformed: true);
+    } finally {
+      if (!completedNormally) {
+        unawaited(iterator.cancel());
+      }
     }
-    return utf8.decode(bytes, allowMalformed: true);
   }
 
-  /// Resolves a desktop GeoIP fallback [LocationFix] respecting the 30-minute [geoIpCacheTtl].
+  /// Computes remaining wall-clock budget before [deadline], throwing [TimeoutException] when exhausted.
+  Duration _remainingTimeout(DateTime deadline) {
+    final remaining = deadline.difference(DateTime.now());
+    if (remaining <= Duration.zero) {
+      throw TimeoutException(
+        'Location HTTP request deadline exceeded',
+        connectionTimeout,
+      );
+    }
+    return remaining;
+  }
+
+  /// Force-closes [client] and clears [_client] so subsequent calls create a fresh connection pool.
+  void _resetPooledClient(HttpClient client) {
+    if (identical(_client, client)) {
+      _client = null;
+    }
+    client.close(force: true);
+  }
+
+  /// Resolves a desktop GeoIP fallback [LocationFix] respecting the 30-minute [geoIpCacheTtl] and 5-minute [geoIpFailureBackoff].
   Future<LocationFix?> _resolveGeoIpFallback({
     required bool forceRefresh,
   }) async {
@@ -632,6 +822,11 @@ class PlatformLocationRepository implements LocationRepository {
           return cachedFix;
         }
       }
+      if (_geoIpFailedAt case final failedAt?) {
+        if (now.difference(failedAt) < geoIpFailureBackoff) {
+          return null;
+        }
+      }
     }
     final stopwatch = Stopwatch()..start();
     final jsonMap = await _fetchJsonMap(_geoIpUri);
@@ -643,6 +838,9 @@ class PlatformLocationRepository implements LocationRepository {
     if (resolved != null) {
       _cachedGeoIpFix = resolved;
       _cachedGeoIpAt = now;
+      _geoIpFailedAt = null;
+    } else {
+      _geoIpFailedAt = now;
     }
     AppLogger.event(
       resolved != null ? LogLevel.info : LogLevel.warn,
@@ -656,7 +854,7 @@ class PlatformLocationRepository implements LocationRepository {
     return resolved;
   }
 
-  /// Resolves or reuses a cached place name for [nativeFix] using the 100-meter displacement threshold.
+  /// Resolves or reuses a cached place name for [nativeFix] using the 100-meter displacement threshold and unified Nominatim rate limit.
   Future<LocationFix> _resolvePlaceNameForNativeFix(
     LocationFix nativeFix,
   ) async {
@@ -682,19 +880,22 @@ class PlatformLocationRepository implements LocationRepository {
       final latitude?,
       final longitude?,
     )) {
-      final stopwatch = Stopwatch()..start();
-      final uri = _reverseGeocodeUriBuilder(latitude, longitude);
-      final jsonMap = await _fetchJsonMap(uri);
-      final placeName = _parseReverseGeocodePlaceName(jsonMap);
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.storage,
-        'location.geocode',
-        fields: <String, Object?>{
-          'results': placeName != null ? 1 : 0,
-          'elapsed_ms': stopwatch.elapsedMilliseconds,
-        },
-      );
+      final placeName = await _runRateLimitedNominatim<String?>(() async {
+        final stopwatch = Stopwatch()..start();
+        final uri = _reverseGeocodeUriBuilder(latitude, longitude);
+        final jsonMap = await _fetchJsonMap(uri);
+        final resolvedName = _parseReverseGeocodePlaceName(jsonMap);
+        AppLogger.event(
+          LogLevel.info,
+          LogTag.storage,
+          'location.geocode',
+          fields: <String, Object?>{
+            'results': resolvedName != null ? 1 : 0,
+            'elapsed_ms': stopwatch.elapsedMilliseconds,
+          },
+        );
+        return resolvedName;
+      });
       if (placeName != null) {
         final enriched = LocationFix(
           latitude: latitude,
@@ -709,10 +910,44 @@ class PlatformLocationRepository implements LocationRepository {
     return nativeFix;
   }
 
-  /// Resolves a street-level [LocationFix] from visible Wi-Fi BSSIDs reported in [nativeMap], or `null` if unavailable.
+  /// Resolves and validates a redirect [locationHeader] relative to [currentUri], returning `null` on HTTPS-to-HTTP downgrade or malformed URI.
+  Uri? _resolveRedirectUri({
+    required Uri currentUri,
+    required String? locationHeader,
+  }) {
+    final trimmed = locationHeader?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    final Uri nextUri;
+    try {
+      nextUri = currentUri.resolve(trimmed);
+    } on FormatException {
+      return null;
+    }
+    final scheme = nextUri.scheme.toLowerCase();
+    if ((scheme != 'http' && scheme != 'https') ||
+        nextUri.host.isEmpty ||
+        nextUri.userInfo.isNotEmpty) {
+      return null;
+    }
+    if (currentUri.scheme.toLowerCase() == 'https' && scheme != 'https') {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.storage,
+        'location.redirect_blocked',
+        fields: const <String, Object?>{'reason': 'cleartext_downgrade'},
+      );
+      return null;
+    }
+    return nextUri;
+  }
+
+  /// Resolves a street-level [LocationFix] from visible Wi-Fi BSSIDs reported in [nativeMap], caching results by sorted BSSID set for [wifiCacheTtl].
   Future<LocationFix?> _resolveWifiAccessPointsFix(
-    Map<String, Object?>? nativeMap,
-  ) async {
+    Map<String, Object?>? nativeMap, {
+    required bool forceRefresh,
+  }) async {
     if (nativeMap == null) {
       return null;
     }
@@ -722,11 +957,38 @@ class PlatformLocationRepository implements LocationRepository {
     if (accessPoints.length < 2) {
       return null;
     }
+    final now = _clock();
+    final bssidKey = _buildWifiBssidCacheKey(accessPoints);
+    if (!forceRefresh) {
+      if ((_cachedWifiFix, _cachedWifiAt) case (
+        final cachedFix?,
+        final cachedAt?,
+      )) {
+        if (_cachedWifiBssidKey == bssidKey &&
+            now.difference(cachedAt) < wifiCacheTtl) {
+          return cachedFix;
+        }
+      }
+    }
     final responseMap = await _postJsonMap(_wifiGeolocateUri, <String, Object?>{
       'considerIp': false,
       'wifiAccessPoints': accessPoints,
     });
-    return _parseWifiGeolocateFix(responseMap);
+    final resolved = _parseWifiGeolocateFix(responseMap);
+    if (resolved != null) {
+      _cachedWifiBssidKey = bssidKey;
+      _cachedWifiFix = resolved;
+      _cachedWifiAt = now;
+    }
+    return resolved;
+  }
+
+  /// Enqueues [action] onto the unified Nominatim FIFO queue enforcing [minSearchInterval] across `/search` and `/reverse`.
+  Future<T> _runRateLimitedNominatim<T>(Future<T> Function() action) {
+    final previous = _nominatimQueue;
+    final gate = Completer<void>();
+    _nominatimQueue = gate.future;
+    return _executeQueuedNominatim<T>(previous, gate, action);
   }
 
   /// Sanitizes a single raw Wi-Fi access point [item] into a map with `macAddress` and optional integer `signalStrength`, or returns `null` when invalid.
@@ -745,12 +1007,12 @@ class PlatformLocationRepository implements LocationRepository {
     return entry;
   }
 
-  /// Waits for any remaining [minSearchInterval] cooldown since [_lastSearchAt].
-  Future<void> _waitForSearchRateLimit() async {
+  /// Waits for any remaining [minSearchInterval] cooldown since [_lastNominatimRequestAt].
+  Future<void> _waitForNominatimRateLimit() async {
     if (minSearchInterval <= Duration.zero) {
       return;
     }
-    if (_lastSearchAt case final lastAt?) {
+    if (_lastNominatimRequestAt case final lastAt?) {
       final elapsed = _clock().difference(lastAt);
       if (elapsed < minSearchInterval) {
         await Future<void>.delayed(minSearchInterval - elapsed);

@@ -110,5 +110,67 @@ void main() {
         expect(find.byTooltip('Move down'), findsNothing);
       },
     );
+
+    testWidgets(
+      'virtualizes large maxHeight lists lazily without shrinkWrap while keeping compact height for small lists',
+      (tester) async {
+        var largeBuiltCount = 0;
+        final largeItems = <String>[
+          for (var i = 0; i < 500; i++) 'History entry #$i',
+        ];
+
+        await pumpUiWidget(
+          tester,
+          SingleChildScrollView(
+            child: SizedBox(
+              width: 480.0,
+              child: UiOrderedItemList<String>(
+                items: largeItems,
+                maxHeight: 200.0,
+                itemKey: (item, index) => ValueKey<String>('large_$index'),
+                itemBuilder: (_, item, _, _) {
+                  largeBuiltCount++;
+                  return Text(item);
+                },
+              ),
+            ),
+          ),
+        );
+
+        final largeListView = tester.widget<ListView>(find.byType(ListView));
+        expect(
+          largeListView.shrinkWrap,
+          isFalse,
+          reason: 'maxHeight list overflowing viewport must disable shrinkWrap for lazy virtualization',
+        );
+        expect(
+          largeBuiltCount,
+          lessThan(40),
+          reason: '500-item bounded ordered list must lazily build only visible + cached rows',
+        );
+
+        await pumpUiWidget(
+          tester,
+          SingleChildScrollView(
+            child: SizedBox(
+              width: 480.0,
+              child: UiOrderedItemList<String>(
+                items: const <String>['One', 'Two'],
+                maxHeight: 200.0,
+                itemKey: (item, index) => ValueKey<String>('small_$index'),
+                itemBuilder: (_, item, _, _) => Text(item),
+              ),
+            ),
+          ),
+        );
+
+        expect(
+          tester.getSize(find.byType(ListView)).height,
+          lessThan(200.0),
+          reason:
+              'Small bounded ordered list must retain compact content height',
+        );
+      },
+    );
   });
 }

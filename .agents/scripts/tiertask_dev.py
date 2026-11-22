@@ -28,6 +28,7 @@ import subprocess
 import sys
 import time
 from typing import Any
+import xml.etree.ElementTree as ET
 
 
 GPL_HEADER_LINES = [
@@ -76,6 +77,8 @@ _STRING_LITERAL_RE = re.compile(r"(['\"])((?:\\.|(?!\1).)*)\1")
 _VALUE_KEY_RE = re.compile(r"(?:ValueKey|Key)\(\s*['\"]([^'\"$]+)['\"]\s*\)")
 _PLACEHOLDER_RE = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 _IGNORE_COMMENT_RE = re.compile(r"//\s*ignore(?:_for_file)?:")
+_BAD_CERT_CALLBACK_RE = re.compile(r"\bbadCertificateCallback\b")
+_ANDROID_NS = "{http://schemas.android.com/apk/res/android}"
 _L10N_MEMBER_TOKEN_RE = re.compile(r"\.([a-z][A-Za-z0-9_]*)\b")
 _L10N_BARE_TOKEN_RE = re.compile(r"\b([a-z][A-Za-z0-9_]*)\b")
 _EMOJI_RE = re.compile(
@@ -127,22 +130,42 @@ def _find_matching_brace_line(
     paren_depth = 0
     opened = False
     in_str: str | None = None
+    is_raw = False
     for idx in range(start_idx, len(lines)):
         line = lines[idx]
         i = 0
-        while i < len(line):
+        length = len(line)
+        while i < length:
             ch = line[i]
             if in_str is not None:
-                if ch == "\\":
+                if not is_raw and ch == "\\":
                     i += 2
                     continue
                 if line.startswith(in_str, i):
                     i += len(in_str)
                     in_str = None
+                    is_raw = False
                     continue
                 i += 1
                 continue
+            if (
+                ch == "r"
+                and i + 1 < length
+                and line[i + 1] in ("'", '"')
+                and (i == 0 or not (line[i - 1].isalnum() or line[i - 1] in ("_", "$")))
+            ):
+                is_raw = True
+                i += 1
+                ch = line[i]
+                if line[i : i + 3] in ("'''", '"""'):
+                    in_str = line[i : i + 3]
+                    i += 3
+                else:
+                    in_str = ch
+                    i += 1
+                continue
             if ch in ("'", '"'):
+                is_raw = False
                 if line[i : i + 3] in ("'''", '"""'):
                     in_str = line[i : i + 3]
                     i += 3
@@ -150,7 +173,7 @@ def _find_matching_brace_line(
                 in_str = ch
                 i += 1
                 continue
-            if ch == "/" and i + 1 < len(line) and line[i + 1] == "/":
+            if ch == "/" and i + 1 < length and line[i + 1] == "/":
                 break
             if not opened:
                 if ch == "(":
@@ -509,7 +532,7 @@ def find_in_repo(root: Path, query: str, layer: str | None = None) -> list[str]:
     spec_dir = root / "spec"
     if spec_dir.exists():
         md_targets.extend(sorted(spec_dir.glob("*.md")))
-    md_targets.extend([root / "TDF_SPEC.md", root / "ARCHITECTURE.md"])
+    md_targets.append(root / "ARCHITECTURE.md")
     for md in md_targets:
         if not md.exists():
             continue
@@ -626,6 +649,7 @@ def _extract_top_symbols(file_path: Path) -> list[str]:
 
 _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
     "lib/main.dart": [
+        "test/main_test.dart",
         "test/ui/tier_task_shell_screen_test.dart",
         "test/ui/real_mechanics_test.dart",
     ],
@@ -633,9 +657,13 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
         "test/l10n/tier_localization_extension_test.dart",
     ],
     "lib/models/task_board.dart": [
+        "test/models/task_board_downgrade_test.dart",
         "test/models/task_board_evaluation_test.dart",
         "test/models/task_board_lifecycle_test.dart",
+        "test/models/task_board_mutation_test.dart",
         "test/models/task_board_occurrence_rules_test.dart",
+        "test/models/task_board_sync_test.dart",
+        "test/models/task_board_undo_test.dart",
     ],
     "lib/models/task_board_evaluator.dart": [
         "test/models/task_board_evaluation_test.dart",
@@ -650,11 +678,24 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
         "test/models/task_board_downgrade_test.dart",
         "test/models/task_board_mutation_test.dart",
     ],
+    "lib/models/task_board_recovery.dart": [
+        "test/models/task_board_sync_test.dart",
+        "test/models/tdf_v080_merge_conformance_test.dart",
+    ],
     "lib/models/task_board_sync.dart": [
         "test/models/task_board_sync_test.dart",
         "test/models/tdf_v080_merge_conformance_test.dart",
     ],
+    "lib/models/task_board_sync_scoping.dart": [
+        "test/models/task_board_sync_test.dart",
+        "test/providers/sync_providers_test.dart",
+    ],
     "lib/models/task_board_reconciler.dart": [
+        "test/models/task_board_sync_test.dart",
+        "test/models/tdf_v080_merge_conformance_test.dart",
+    ],
+    "lib/models/tdf_entity_merger.dart": [
+        "test/models/task_board_occurrence_rules_test.dart",
         "test/models/task_board_sync_test.dart",
         "test/models/tdf_v080_merge_conformance_test.dart",
     ],
@@ -680,7 +721,12 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
         "test/models/tdf_primitives_test.dart",
         "test/models/tdf_v080_merge_conformance_test.dart",
     ],
-    "lib/models/webdav_config.dart": ["test/models/tdf_primitives_test.dart"],
+    "lib/models/webdav_config.dart": [
+        "test/models/settings_codec_test.dart",
+        "test/models/tdf_primitives_test.dart",
+        "test/providers/config_providers_test.dart",
+        "test/repositories/settings_repository_test.dart",
+    ],
     "lib/services/sha256_service.dart": ["test/services/sha256_service_test.dart"],
     "lib/services/tdf_service.dart": [
         "test/services/tdf_service_parser_test.dart",
@@ -711,8 +757,27 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
         "test/repositories/host_file_lock_test.dart",
         "test/repositories/local_file_repository_test.dart",
     ],
-    "lib/repositories/local_file_operations.dart": ["test/repositories/local_file_repository_test.dart"],
+    "lib/repositories/posix_file_lock_bindings.dart": [
+        "test/repositories/host_file_lock_test.dart",
+    ],
+    "lib/repositories/win32_file_lock_bindings.dart": [
+        "test/repositories/host_file_lock_test.dart",
+    ],
+    "lib/repositories/local_file_operations.dart": [
+        "test/repositories/local_file_operations_test.dart",
+        "test/repositories/local_file_repository_test.dart",
+    ],
+    "lib/providers/sync_error_formatter.dart": [
+        "test/providers/task_schedule_helper_test.dart",
+        "test/providers/sync_providers_test.dart",
+        "test/providers/settings_draft_providers_test.dart",
+    ],
+    "lib/providers/task_condition_draft_helper.dart": [
+        "test/providers/task_schedule_helper_test.dart",
+    ],
     "lib/providers/location_providers.dart": [
+        "test/providers/location_providers_test.dart",
+        "test/providers/location_source_resolver_test.dart",
         "test/providers/workspace_providers_test.dart",
         "test/ui/real_mechanics_test.dart",
     ],
@@ -729,6 +794,18 @@ _SUBSYSTEM_TEST_MAP: dict[str, list[str]] = {
     "lib/ui/widgets/entity_card_chrome.dart": [
         "test/ui/entity_section_widgets_test.dart",
         "test/ui/tasks_view_test.dart",
+        "test/ui/locations_view_test.dart",
+    ],
+    "lib/ui/widgets/entity_inline_name_editor.dart": [
+        "test/ui/entity_section_widgets_test.dart",
+        "test/ui/tasks_view_test.dart",
+        "test/ui/labels_view_test.dart",
+        "test/ui/locations_view_test.dart",
+    ],
+    "lib/ui/widgets/entity_reveal_scroll_controller.dart": [
+        "test/ui/entity_section_widgets_test.dart",
+        "test/ui/tasks_view_test.dart",
+        "test/ui/labels_view_test.dart",
         "test/ui/locations_view_test.dart",
     ],
     "lib/ui/widgets/entity_note_section.dart": [
@@ -1102,7 +1179,6 @@ def generate_architecture_tree(root: Path) -> str:
         "CHANGELOG.md",
         "LICENSE",
         "README.md",
-        "TDF_SPEC.md",
         "analysis_options.yaml",
         "install.sh",
         "l10n.yaml",
@@ -1276,7 +1352,7 @@ def _check_markdown_rules(root: Path, fix: bool) -> list[str]:
     """Checks Markdown files for CRLF line endings, horizontal rules (---), and emojis."""
     issues: list[str] = []
     md_files: list[Path] = []
-    for name in ("README.md", "ARCHITECTURE.md", "AGENTS.md", "CHANGELOG.md", "TDF_SPEC.md"):
+    for name in ("README.md", "ARCHITECTURE.md", "AGENTS.md", "CHANGELOG.md"):
         p = root / name
         if p.exists():
             md_files.append(p)
@@ -1290,7 +1366,7 @@ def _check_markdown_rules(root: Path, fix: bool) -> list[str]:
     for p in md_files:
         rel = p.relative_to(root).as_posix()
         raw = p.read_bytes()
-        is_tdf_spec = rel == "TDF_SPEC.md" or (rel.startswith("spec/TDF_SPEC") and rel.endswith(".md"))
+        is_tdf_spec = rel.startswith("spec/TDF_SPEC") and rel.endswith(".md")
         if not is_tdf_spec and b"\r\n" in raw:
             if fix:
                 raw = raw.replace(b"\r\n", b"\n")
@@ -1458,6 +1534,158 @@ def _check_acyclic_dag(root: Path) -> list[str]:
     return list(dict.fromkeys(issues))
 
 
+def _scan_dart_lib_code(text: str) -> tuple[list[int], dict[int, str]]:
+    """Scans Dart source text and returns block-comment start lines and code-only text per line.
+
+    Respects single-quoted, double-quoted, triple-quoted, and raw strings as well as
+    `${...}` string interpolations and `//` line comments so `'/*'` inside strings
+    never false-positives as a block comment.
+    """
+    block_comment_lines: list[int] = []
+    code_chars: dict[int, list[str]] = {}
+    stack: list[list[Any]] = []
+    line_no = 1
+    i = 0
+    length = len(text)
+
+    while i < length:
+        ch = text[i]
+        if stack and stack[-1][0] == "str":
+            _, delim, is_raw = stack[-1]
+            if not is_raw and ch == "\\":
+                if i + 1 < length and text[i + 1] == "\n":
+                    line_no += 1
+                i += 2
+                continue
+            if not is_raw and ch == "$" and i + 1 < length and text[i + 1] == "{":
+                stack.append(["interp", 1])
+                i += 2
+                continue
+            if text.startswith(delim, i):
+                i += len(delim)
+                stack.pop()
+                continue
+            if ch == "\n":
+                line_no += 1
+                if len(delim) == 1:
+                    stack.pop()
+            i += 1
+            continue
+
+        if ch == "\n":
+            line_no += 1
+            i += 1
+            continue
+
+        if (
+            ch == "r"
+            and i + 1 < length
+            and text[i + 1] in ("'", '"')
+            and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] in ("_", "$")))
+        ):
+            q = text[i + 1]
+            delim = text[i + 1 : i + 4] if text[i + 1 : i + 4] in ("'''", '"""') else q
+            stack.append(["str", delim, True])
+            code_chars.setdefault(line_no, []).append(" ")
+            i += 1 + len(delim)
+            continue
+
+        if ch in ("'", '"'):
+            delim = text[i : i + 3] if text[i : i + 3] in ("'''", '"""') else ch
+            stack.append(["str", delim, False])
+            code_chars.setdefault(line_no, []).append(" ")
+            i += len(delim)
+            continue
+
+        if ch == "/" and i + 1 < length and text[i + 1] == "/":
+            nl = text.find("\n", i + 2)
+            if nl == -1:
+                break
+            line_no += 1
+            i = nl + 1
+            continue
+
+        if ch == "/" and i + 1 < length and text[i + 1] == "*":
+            block_comment_lines.append(line_no)
+            code_chars.setdefault(line_no, []).append(" ")
+            block_depth = 1
+            i += 2
+            while i < length and block_depth > 0:
+                if text[i] == "\n":
+                    line_no += 1
+                    i += 1
+                elif text[i] == "/" and i + 1 < length and text[i + 1] == "*":
+                    block_depth += 1
+                    i += 2
+                elif text[i] == "*" and i + 1 < length and text[i + 1] == "/":
+                    block_depth -= 1
+                    i += 2
+                else:
+                    i += 1
+            continue
+
+        if stack and stack[-1][0] == "interp":
+            if ch == "{":
+                stack[-1][1] += 1
+            elif ch == "}":
+                stack[-1][1] -= 1
+                if stack[-1][1] == 0:
+                    stack.pop()
+                    i += 1
+                    continue
+
+        code_chars.setdefault(line_no, []).append(ch)
+        i += 1
+
+    code_by_line = {ln: "".join(chars) for ln, chars in code_chars.items()}
+    return block_comment_lines, code_by_line
+
+
+def _check_android_manifest_security(root: Path) -> list[str]:
+    """Enforces AndroidManifest.xml security invariants (P-TRANSPORT-SECURITY)."""
+    manifest_rel = "android/app/src/main/AndroidManifest.xml"
+    manifest_path = root / manifest_rel
+    if not manifest_path.exists():
+        return []
+    issues: list[str] = []
+    try:
+        tree = ET.parse(manifest_path)
+    except ET.ParseError as error:
+        return [f"P-TRANSPORT-SECURITY: Invalid XML in `{manifest_rel}` ({error})"]
+    application = tree.getroot().find("application")
+    if application is None:
+        return [f"P-TRANSPORT-SECURITY: Missing `<application>` element in `{manifest_rel}`"]
+    if application.attrib.get(f"{_ANDROID_NS}usesCleartextTraffic") != "false":
+        issues.append(
+            f'P-TRANSPORT-SECURITY: `{manifest_rel}` <application> must set `android:usesCleartextTraffic="false"`'
+        )
+    if application.attrib.get(f"{_ANDROID_NS}allowBackup") != "false":
+        issues.append(
+            f'P-TRANSPORT-SECURITY: `{manifest_rel}` <application> must set `android:allowBackup="false"`'
+        )
+    for variant in ("debug", "profile"):
+        variant_rel = f"android/app/src/{variant}/AndroidManifest.xml"
+        variant_path = root / variant_rel
+        if not variant_path.exists():
+            continue
+        try:
+            variant_app = ET.parse(variant_path).getroot().find("application")
+        except ET.ParseError as error:
+            issues.append(f"P-TRANSPORT-SECURITY: Invalid XML in `{variant_rel}` ({error})")
+            continue
+        if variant_app is None:
+            continue
+        if variant_app.attrib.get(f"{_ANDROID_NS}usesCleartextTraffic") == "true":
+            issues.append(
+                f'P-TRANSPORT-SECURITY: `{variant_rel}` <application> must not enable `android:usesCleartextTraffic="true"`'
+            )
+        if variant_app.attrib.get(f"{_ANDROID_NS}allowBackup") == "true":
+            issues.append(
+                f'P-TRANSPORT-SECURITY: `{variant_rel}` <application> must not enable `android:allowBackup="true"`'
+            )
+    return issues
+
+
 def run_static_checks(root: Path, fix: bool = False) -> list[str]:
     """Runs fast static compliance checks for AGENTS.md rules, L10N, and ARCHITECTURE.md."""
     if fix:
@@ -1465,6 +1693,7 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
 
     issues: list[str] = []
     issues.extend(_check_markdown_rules(root, fix=fix))
+    issues.extend(_check_android_manifest_security(root))
     for forbidden_dir in _RETIRED_DIRS:
         if (root / forbidden_dir).exists():
             issues.append(
@@ -1488,9 +1717,21 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
             else:
                 issues.append(f"P-LICENSE-HEADER: Missing verbatim GPL-3.0 header in `{rel}`")
 
-        is_non_repo_lib = rel.startswith("lib/") and not rel.startswith("lib/repositories/")
+        is_lib = rel.startswith("lib/")
+        is_non_repo_lib = is_lib and not rel.startswith("lib/repositories/")
         is_ui = rel.startswith("lib/ui/")
         is_ds = _design_system_layer_rank(rel) is not None
+        if is_lib:
+            block_comment_lines, code_by_line = _scan_dart_lib_code(text)
+            for block_line in block_comment_lines:
+                issues.append(
+                    f"P-LANG-RULES: Forbidden `/* ... */` block comment in `{rel}:{block_line}`"
+                )
+            for code_line_no, code_text in sorted(code_by_line.items()):
+                if _BAD_CERT_CALLBACK_RE.search(code_text):
+                    issues.append(
+                        f"P-TRANSPORT-SECURITY: Forbidden `badCertificateCallback` usage in `{rel}:{code_line_no}`"
+                    )
         lines = text.splitlines()
         for idx, line in enumerate(lines, 1):
             if _IGNORE_COMMENT_RE.search(line):
@@ -1499,8 +1740,13 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
                 issues.append(f"P-FILE-SIZE: Forbidden `export`/`part` directive in `{rel}:{idx}`")
             m_import = _DART_IMPORT_RE.match(line)
             if is_non_repo_lib:
-                if m_import and m_import.group(1) in ("dart:io", "dart:ffi"):
-                    issues.append(f"P-IO-ISOLATION: Forbidden `{m_import.group(1)}` import in `{rel}:{idx}`")
+                if m_import:
+                    uri = m_import.group(1)
+                    if (
+                        uri in ("dart:io", "dart:ffi", "package:flutter_secure_storage")
+                        or uri.startswith("package:flutter_secure_storage/")
+                    ):
+                        issues.append(f"P-IO-ISOLATION: Forbidden `{uri}` import in `{rel}:{idx}`")
                 if "HttpClient" in line and not line.strip().startswith("//"):
                     issues.append(f"P-WEBDAV-API: Forbidden `HttpClient` usage outside repositories in `{rel}:{idx}`")
             if is_ui and m_import:
@@ -1543,24 +1789,48 @@ def run_static_checks(root: Path, fix: bool = False) -> list[str]:
 
 
 def compute_code_digest(root: Path) -> str:
-    """Computes a SHA-256 digest over all code, test, ARB, and build configuration files."""
+    """Computes a SHA-256 digest over all code, test, ARB, conformance, asset, and build files."""
     hasher = hashlib.sha256()
     candidates: set[Path] = set()
     config_files = (
         "pubspec.yaml",
         "l10n.yaml",
         "analysis_options.yaml",
+        ".agents/scripts/tiertask_dev.py",
+        "android/build.gradle.kts",
+        "android/settings.gradle.kts",
+        "android/gradle.properties",
+        "android/app/build.gradle.kts",
+        "android/app/proguard-rules.pro",
     )
     for name in config_files:
         p = root / name
         if p.exists():
             candidates.add(p)
     candidates.update(_iter_dart_files(root, include_generated=True))
-    for sub in ("lib", "test", "linux", "windows", "android/app/src"):
+    tracked_suffixes = (
+        ".dart",
+        ".arb",
+        ".cc",
+        ".cpp",
+        ".h",
+        ".kt",
+        ".cmake",
+        ".kts",
+        ".xml",
+        ".txt",
+        ".rc",
+        ".manifest",
+        ".tdf",
+        ".json",
+        ".png",
+        ".svg",
+    )
+    for sub in ("lib", "test", "linux", "windows", "android/app/src", "spec/conformance", "assets"):
         base = root / sub
         if base.exists():
             for p in sorted(base.rglob("*")):
-                if p.is_file() and p.suffix in (".dart", ".arb", ".cc", ".cpp", ".h", ".kt", ".cmake", ".kts"):
+                if p.is_file() and p.suffix in tracked_suffixes:
                     candidates.add(p)
     for p in sorted(candidates):
         rel = p.relative_to(root).as_posix()
@@ -1592,12 +1862,15 @@ def _changed_files_from_git(root: Path) -> list[str]:
 
 
 def _is_code_relevant_change(rel_path: str) -> bool:
-    """Returns True when a changed path affects code, tests, or builds."""
+    """Returns True when a changed path affects code, tests, conformance fixtures, or builds."""
     norm = Path(rel_path).as_posix()
-    return norm.startswith(("lib/", "test/", "linux/", "windows/", "android/")) or norm in (
+    return norm.startswith(
+        ("lib/", "test/", "linux/", "windows/", "android/", "spec/conformance/", "assets/")
+    ) or norm in (
         "pubspec.yaml",
         "l10n.yaml",
         "analysis_options.yaml",
+        ".agents/scripts/tiertask_dev.py",
     )
 
 
@@ -1608,6 +1881,20 @@ def resolve_impacted_tests(root: Path, changed_files: list[str]) -> list[str]:
         norm_rel = Path(rel).as_posix()
         if _is_test_dart(norm_rel) and norm_rel.endswith("_test.dart") and (root / norm_rel).exists():
             impacted.add(norm_rel)
+        elif norm_rel.startswith("lib/l10n/") and norm_rel.endswith(".arb"):
+            l10n_dir = root / "test" / "l10n"
+            if l10n_dir.exists():
+                for test_file in sorted(l10n_dir.glob("*_test.dart")):
+                    impacted.add(test_file.relative_to(root).as_posix())
+            deps = compute_dependencies(root, "lib/l10n/app_localizations.dart")
+            impacted.update(deps["reverse_tests"])
+        elif norm_rel.startswith("spec/conformance/"):
+            for suite in (
+                "test/services/tdf_v080_conformance_test.dart",
+                "test/models/tdf_v080_merge_conformance_test.dart",
+            ):
+                if (root / suite).exists():
+                    impacted.add(suite)
         elif norm_rel.startswith("lib/") and norm_rel.endswith(".dart") and (root / norm_rel).exists():
             mirrors = _find_mirror_tests(root, norm_rel)
             if mirrors:
@@ -1758,6 +2045,7 @@ def _discover_latest_log_file(root: Path) -> Path | None:
     search_dirs = [
         root,
         home / ".local" / "share" / "tiertask",
+        home / ".local" / "share" / "tiertask-dev",
         home / ".config" / "tiertask",
     ]
     for directory in search_dirs:

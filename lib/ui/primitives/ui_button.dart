@@ -149,37 +149,13 @@ class UiButton extends StatefulWidget {
   State<UiButton> createState() => _UiButtonState();
 }
 
-/// Manages hover, keyboard focus ring, and optional loading rotation for [UiButton].
-class _UiButtonState extends State<UiButton>
-    with SingleTickerProviderStateMixin {
-  /// Optional continuous rotation controller active only when `widget.isLoading` is true.
-  AnimationController? _spinController;
-
-  /// Whether keyboard focus ring is currently visible.
-  bool _showFocusRing = false;
-
+/// Manages pointer hover and keyboard focus-ring state for [UiButton] without holding an idle ticker.
+class _UiButtonState extends State<UiButton> {
   /// Whether pointer hover highlight is currently active.
   bool _isHovered = false;
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _syncSpinController();
-  }
-
-  @override
-  void didUpdateWidget(covariant UiButton oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.isLoading != widget.isLoading) {
-      _syncSpinController();
-    }
-  }
-
-  @override
-  void dispose() {
-    _spinController?.dispose();
-    super.dispose();
-  }
+  /// Whether keyboard focus ring is currently visible.
+  bool _showFocusRing = false;
 
   @override
   Widget build(BuildContext context) {
@@ -194,13 +170,13 @@ class _UiButtonState extends State<UiButton>
       enabled: enabled,
     );
     final content = _UiButtonSurface(
+      enabled: enabled,
       height: height,
       minWidth: widget.variant == UiButtonVariant.icon ? height : 0.0,
       padding: _resolvePadding(tokens),
       radius: radius,
       backgroundColor: style.background,
       borderColor: style.border,
-      foregroundColor: style.foreground,
       showFocusRing: _showFocusRing && enabled,
       isFullWidth: widget.isFullWidth,
       child: _UiButtonContent(
@@ -210,7 +186,7 @@ class _UiButtonState extends State<UiButton>
         foregroundColor: style.foreground,
         iconSize: _resolveIconSize(tokens),
         textStyle: _resolveTextStyle(tokens, style.foreground),
-        spinAnimation: widget.isLoading ? _spinController : null,
+        isLoading: widget.isLoading,
       ),
     );
 
@@ -436,27 +412,56 @@ class _UiButtonState extends State<UiButton>
     };
     return base.copyWith(color: foreground, fontWeight: _resolveFontWeight());
   }
+}
 
-  /// Starts, pauses, or updates the lazily allocated loading rotation animation controller.
-  void _syncSpinController() {
-    if (!widget.isLoading) {
-      _spinController?.stop();
-      _spinController?.reset();
-      return;
+/// Isolated spinning leading icon mounted ONLY while [UiButton.isLoading] is `true`.
+class _UiButtonLoadingSpinner extends StatefulWidget {
+  /// Creates a [_UiButtonLoadingSpinner].
+  const _UiButtonLoadingSpinner({required this.child});
+
+  /// Icon glyph rotated continuously while mounted.
+  final Widget child;
+
+  @override
+  State<_UiButtonLoadingSpinner> createState() =>
+      _UiButtonLoadingSpinnerState();
+}
+
+/// Owns the single rotation [AnimationController] for [_UiButtonLoadingSpinner].
+class _UiButtonLoadingSpinnerState extends State<_UiButtonLoadingSpinner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final targetDuration = UiThemeTokens.of(context).focus.spinDuration;
+    if (_controller.duration != targetDuration) {
+      _controller.duration = targetDuration;
+      _controller.repeat();
     }
-    final duration = UiThemeTokens.of(context).focus.spinDuration;
-    final existing = _spinController;
-    if (existing == null) {
-      _spinController = AnimationController(vsync: this, duration: duration)
-        ..repeat();
-      return;
-    }
-    if (existing.duration != duration) {
-      existing.duration = duration;
-    }
-    if (!existing.isAnimating) {
-      existing.repeat();
-    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: RotationTransition(turns: _controller, child: widget.child),
+    );
   }
 }
 
@@ -484,13 +489,13 @@ class _UiButtonPalette {
 class _UiButtonSurface extends StatelessWidget {
   /// Creates a [_UiButtonSurface].
   const _UiButtonSurface({
+    required this.enabled,
     required this.height,
     required this.minWidth,
     required this.padding,
     required this.radius,
     required this.backgroundColor,
     required this.borderColor,
-    required this.foregroundColor,
     required this.showFocusRing,
     required this.isFullWidth,
     required this.child,
@@ -505,8 +510,8 @@ class _UiButtonSurface extends StatelessWidget {
   /// Button interior content.
   final Widget child;
 
-  /// Foreground color.
-  final Color foregroundColor;
+  /// Whether hover transitions and focus ring overlays can occur.
+  final bool enabled;
 
   /// Minimum height in logical pixels.
   final double height;
@@ -529,24 +534,35 @@ class _UiButtonSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
+    final decoration = BoxDecoration(
+      color: backgroundColor,
+      borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: borderColor, width: tokens.radii.borderWidth),
+    );
+    final constraints = BoxConstraints(
+      minHeight: height,
+      minWidth: isFullWidth ? double.infinity : minWidth,
+    );
+    if (!enabled) {
+      return ConstrainedBox(
+        constraints: constraints,
+        child: Container(
+          alignment: Alignment.center,
+          padding: padding,
+          decoration: decoration,
+          child: child,
+        ),
+      );
+    }
+
     final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
     final box = ConstrainedBox(
-      constraints: BoxConstraints(
-        minHeight: height,
-        minWidth: isFullWidth ? double.infinity : minWidth,
-      ),
+      constraints: constraints,
       child: AnimatedContainer(
         duration: tokens.focus.hoverDuration,
         alignment: Alignment.center,
         padding: padding,
-        decoration: BoxDecoration(
-          color: backgroundColor,
-          borderRadius: BorderRadius.circular(radius),
-          border: Border.all(
-            color: borderColor,
-            width: tokens.radii.borderWidth,
-          ),
-        ),
+        decoration: decoration,
         child: child,
       ),
     );
@@ -589,7 +605,7 @@ class _UiButtonContent extends StatelessWidget {
     required this.foregroundColor,
     required this.iconSize,
     required this.textStyle,
-    required this.spinAnimation,
+    required this.isLoading,
   });
 
   /// Active foreground icon and text color.
@@ -598,14 +614,14 @@ class _UiButtonContent extends StatelessWidget {
   /// Icon glyph dimension.
   final double iconSize;
 
+  /// Whether [leadingIcon] should mount [_UiButtonLoadingSpinner].
+  final bool isLoading;
+
   /// Optional text label.
   final String? label;
 
   /// Optional leading icon glyph.
   final IconData? leadingIcon;
-
-  /// Optional continuous spin animation for [leadingIcon].
-  final Animation<double>? spinAnimation;
 
   /// Resolved label text style.
   final TextStyle textStyle;
@@ -620,11 +636,7 @@ class _UiButtonContent extends StatelessWidget {
       final glyph = ExcludeSemantics(
         child: Icon(icon, size: iconSize, color: foregroundColor),
       );
-      if (spinAnimation case final turns?) {
-        leadingWidget = RotationTransition(turns: turns, child: glyph);
-      } else {
-        leadingWidget = glyph;
-      }
+      leadingWidget = isLoading ? _UiButtonLoadingSpinner(child: glyph) : glyph;
     }
 
     return Row(

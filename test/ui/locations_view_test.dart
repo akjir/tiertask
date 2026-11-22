@@ -26,6 +26,7 @@ import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/providers/entity_actions_provider.dart';
 import 'package:tiertask/providers/floating_notice_providers.dart';
 import 'package:tiertask/providers/location_providers.dart';
 import 'package:tiertask/providers/shell_providers.dart';
@@ -37,6 +38,41 @@ import 'package:tiertask/ui/views/locations_view.dart';
 
 import 'test_helpers.dart';
 
+class _ControlledGeocodingRepository extends FakeLocationRepository {
+  Completer<List<GeocodingCandidate>>? nextSearchCompleter;
+
+  @override
+  Future<List<GeocodingCandidate>> searchLocations(String query) async {
+    searchCallCount++;
+    lastSearchQuery = query;
+    if (nextSearchCompleter case final completer?) {
+      return completer.future;
+    }
+    return searchResults;
+  }
+}
+
+class _ThrowingSaveCoordsEntityActionsNotifier extends EntityActionsNotifier {
+  int saveCoordinatesCalls = 0;
+
+  @override
+  Future<ActionResult> saveLocationCoordinates(
+    String locationId, {
+    required LocationSourceType sourceType,
+    required String rawSource,
+    required String rawLatitude,
+    required String rawLongitude,
+    required String rawRadius,
+    Locale? locale,
+  }) async {
+    saveCoordinatesCalls++;
+    if (saveCoordinatesCalls == 1) {
+      throw StateError('Simulated coordinate save throw');
+    }
+    return const ActionSucceeded();
+  }
+}
+
 class _DelayedAddLocationTaskNotifier extends FakeTaskNotifier {
   _DelayedAddLocationTaskNotifier(super.initialBoard, this.completer);
 
@@ -44,7 +80,7 @@ class _DelayedAddLocationTaskNotifier extends FakeTaskNotifier {
   int addLocationCallCount = 0;
 
   @override
-  Future<void> addLocation(
+  Future<bool> addLocation(
     String name, {
     required double latitude,
     required double longitude,
@@ -56,7 +92,7 @@ class _DelayedAddLocationTaskNotifier extends FakeTaskNotifier {
   }) async {
     addLocationCallCount++;
     await completer.future;
-    await super.addLocation(
+    return super.addLocation(
       name,
       id: id,
       latitude: latitude,
@@ -954,5 +990,289 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+
+    testWidgets(
+      'defers internal ScrollController disposal when external scrollController attaches',
+      (tester) async {
+        final externalController = ScrollController();
+        addTearDown(externalController.dispose);
+
+        var useExternal = false;
+        late StateSetter rebuildHost;
+
+        await pumpLeafWidget(
+          tester,
+          Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) {
+                rebuildHost = setState;
+                return LocationsView(
+                  scrollController: useExternal ? externalController : null,
+                );
+              },
+            ),
+          ),
+          board: TaskBoard(
+            locations: const <TdfLocation>[
+              TdfLocation(
+                id: 'loc_a',
+                name: 'Office',
+                latitude: 52.52,
+                longitude: 13.405,
+                radius: 200.0,
+              ),
+            ],
+          ),
+        );
+
+        rebuildHost(() => useExternal = true);
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Swapping LocationsView from internal to external ScrollController must defer disposal',
+        );
+        expect(externalController.hasClients, isTrue);
+      },
+    );
+
+    testWidgets(
+      'ignores stale geocoding write-back after cancelling edit mid-flight and guards concurrent clicks',
+      (tester) async {
+        final firstSearchCompleter = Completer<List<GeocodingCandidate>>();
+        final locationRepository = _ControlledGeocodingRepository()
+          ..nextSearchCompleter = firstSearchCompleter;
+        const location = TdfLocation(
+          id: 'loc_stale',
+          name: 'Studio',
+          latitude: 10.123456,
+          longitude: 20.654321,
+          radius: 150.0,
+        );
+
+        await pumpLeafWidget(
+          tester,
+          const Scaffold(body: LocationsView()),
+          board: TaskBoard(locations: const <TdfLocation>[location]),
+          locationRepository: locationRepository,
+        );
+
+        await tester.tap(find.text('Studio'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(
+            const ValueKey<String>('location_edit_coords_button_loc_stale'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Address'));
+        await tester.pumpAndSettle();
+        final sourceInput = find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('location_coords_loc_stale_source_field'),
+          ),
+          matching: find.byType(TextField),
+        );
+        await tester.enterText(sourceInput, 'Alexanderplatz Berlin');
+
+        final resolveButton = find.byKey(
+          const ValueKey<String>('location_coords_loc_stale_resolve_button'),
+        );
+        await tester.tap(resolveButton);
+        await tester.pump();
+        expect(locationRepository.searchCallCount, equals(1));
+
+        // Concurrent click while resolution is in flight must be ignored.
+        await tester.tap(resolveButton, warnIfMissed: false);
+        await tester.pump();
+        expect(
+          locationRepository.searchCallCount,
+          equals(1),
+          reason: 'Concurrent Resolve taps while resolving must be ignored',
+        );
+
+        // Cancel coordinates edit while geocoding is still suspended, then re-open edit.
+        await tester.tap(find.text('Cancel'));
+        await tester.pump();
+        await tester.tap(
+          find.byKey(
+            const ValueKey<String>('location_edit_coords_button_loc_stale'),
+          ),
+        );
+        await tester.pump();
+
+        // Complete the stale geocoding request from the previous edit session.
+        firstSearchCompleter.complete(const <GeocodingCandidate>[
+          GeocodingCandidate(
+            displayName: 'Berlin, Germany',
+            latitude: 52.520008,
+            longitude: 13.404954,
+          ),
+        ]);
+        await tester.pumpAndSettle();
+
+        final latitudeField = tester.widget<UiField>(
+          find.byKey(
+            const ValueKey<String>('location_coords_loc_stale_latitude_field'),
+          ),
+        );
+        final longitudeField = tester.widget<UiField>(
+          find.byKey(
+            const ValueKey<String>('location_coords_loc_stale_longitude_field'),
+          ),
+        );
+        expect(
+          latitudeField.controller?.text,
+          equals('10.123456'),
+          reason: 'Stale geocoding result from a cancelled edit must not overwrite latitude',
+        );
+        expect(
+          longitudeField.controller?.text,
+          equals('20.654321'),
+          reason: 'Stale geocoding result from a cancelled edit must not overwrite longitude',
+        );
+
+        // Cancelling mid-flight when multiple candidates return must not open a ghost disambiguation modal.
+        final secondSearchCompleter = Completer<List<GeocodingCandidate>>();
+        locationRepository.nextSearchCompleter = secondSearchCompleter;
+        await tester.tap(find.text('Address'));
+        await tester.pumpAndSettle();
+        await tester.enterText(sourceInput, 'Springfield');
+        await tester.tap(resolveButton);
+        await tester.pump();
+        expect(locationRepository.searchCallCount, equals(2));
+
+        await tester.tap(find.text('Cancel'));
+        await tester.pump();
+
+        secondSearchCompleter.complete(const <GeocodingCandidate>[
+          GeocodingCandidate(
+            displayName: 'Springfield, Illinois',
+            latitude: 39.781721,
+            longitude: -89.650148,
+          ),
+          GeocodingCandidate(
+            displayName: 'Springfield, Oregon',
+            latitude: 44.046236,
+            longitude: -123.022029,
+          ),
+        ]);
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Springfield, Illinois'),
+          findsNothing,
+          reason: 'Cancelled geocoding request must not open a stale disambiguation modal',
+        );
+      },
+    );
+
+    testWidgets(
+      'resets submitting state via try/finally when saving location coordinates throws',
+      (tester) async {
+        late _ThrowingSaveCoordsEntityActionsNotifier spyActions;
+        const location = TdfLocation(
+          id: 'loc_throw',
+          name: 'Warehouse',
+          latitude: 48.137154,
+          longitude: 11.576124,
+          radius: 250.0,
+        );
+
+        await pumpLeafWidget(
+          tester,
+          ProviderScope(
+            overrides: [
+              entityActionsProvider.overrideWith(() {
+                spyActions = _ThrowingSaveCoordsEntityActionsNotifier();
+                return spyActions;
+              }),
+            ],
+            child: const Scaffold(body: LocationsView()),
+          ),
+          board: TaskBoard(locations: const <TdfLocation>[location]),
+        );
+
+        await tester.tap(find.text('Warehouse'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(
+            const ValueKey<String>('location_edit_coords_button_loc_throw'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final capturedErrors = <Object>[];
+        await runZonedGuarded(() async {
+          await tester.tap(find.text('Save'));
+          await tester.pump();
+        }, (error, _) => capturedErrors.add(error));
+        await tester.pump();
+
+        expect(capturedErrors, hasLength(1));
+        expect(capturedErrors.single, isA<StateError>());
+        expect(spyActions.saveCoordinatesCalls, equals(1));
+        expect(
+          tester
+              .widget<UiButton>(find.widgetWithText(UiButton, 'Save'))
+              .isLoading,
+          isFalse,
+          reason: 'Throwing during location coordinates save must reset _isSubmitting in finally',
+        );
+
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(spyActions.saveCoordinatesCalls, equals(2));
+      },
+    );
+
+    testWidgets('does not rebuild LocationsView on unrelated task mutations', (
+      tester,
+    ) async {
+      final board = TaskBoard(
+        focus: <TaskItem>[
+          TaskItem(
+            id: 'tsk_1',
+            title: 'Task without location changes',
+            note: 'Before',
+          ),
+        ],
+        locations: const <TdfLocation>[
+          TdfLocation(
+            id: 'loc_1',
+            name: 'Office',
+            latitude: 48.1351,
+            longitude: 11.5820,
+            radius: 150.0,
+          ),
+        ],
+      );
+
+      final container = await pumpLeafWidget(
+        tester,
+        const Scaffold(body: LocationsView()),
+        board: board,
+      );
+
+      final scrollViewBefore = tester.widget<CustomScrollView>(
+        find.byType(CustomScrollView),
+      );
+
+      await container
+          .read(taskNotifierProvider.notifier)
+          .updateTask('tsk_1', note: 'After');
+      await tester.pump();
+
+      final scrollViewAfter = tester.widget<CustomScrollView>(
+        find.byType(CustomScrollView),
+      );
+      expect(
+        identical(scrollViewAfter, scrollViewBefore),
+        isTrue,
+        reason: 'Unrelated task note edit must not rebuild LocationsView when sortedLocations values are unchanged',
+      );
+    });
   });
 }

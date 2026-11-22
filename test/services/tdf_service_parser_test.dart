@@ -221,7 +221,7 @@ int _countLfLines(String text) {
 
 void main() {
   const tdfService = TdfService();
-  final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
+  final fixedDate = DateTime.utc(2026, 11, 1, 12);
 
   group('TdfService 0.8.0 Lexical Scanner, Parser & Canonical Serializer', () {
     test('reproduces byte-exact canonical output and SHA-256 digests for Section 1.5 and Vectors 1 through 4 (TDF-SER-005)', () {
@@ -239,12 +239,12 @@ void main() {
       );
       final section15Board = tdfService.parseBytes(
         section15Bytes,
-        evaluationTime: DateTime.utc(2026, 11, 16, 10, 0),
+        evaluationTime: DateTime.utc(2026, 11, 16, 10),
         timeZone: TdfTimeZoneContext.europeBerlin,
       );
       expect(
         section15Board.findTask('8jKaCdOkD2')?.dueAnchor,
-        equals(TdfLocalDateTime(2026, 11, 20, 18, 0, 0)),
+        equals(TdfLocalDateTime(2026, 11, 20, 18)),
       );
       expect(
         tdfService.serialize(section15Board),
@@ -529,19 +529,19 @@ task 333333OkD2 {
       final board = tdfService.parse(dueVariantsDoc, evaluationTime: fixedDate);
 
       final task1 = board.findTask('111111OkD2');
-      expect(task1?.dueAt, equals(DateTime.utc(2026, 11, 20, 0, 0, 0)));
+      expect(task1?.dueAt, equals(DateTime.utc(2026, 11, 20)));
       expect(task1?.dueAnchor, isNull);
       expect(task1?.isDuePassive, isFalse);
       expect(task1?.dueNote, isNull);
 
       final task2 = board.findTask('222222OkD2');
-      expect(task2?.dueAt, equals(DateTime.utc(2026, 11, 20, 0, 0, 0)));
-      expect(task2?.dueAnchor, equals(TdfLocalDateTime(2026, 11, 21, 0, 0, 0)));
+      expect(task2?.dueAt, equals(DateTime.utc(2026, 11, 20)));
+      expect(task2?.dueAnchor, equals(TdfLocalDateTime(2026, 11, 21)));
       expect(task2?.isDuePassive, isFalse);
       expect(task2?.dueNote, equals('18:00'));
 
       final task3 = board.findTask('333333OkD2');
-      expect(task3?.dueAt, equals(DateTime.utc(2026, 2, 28, 17, 0, 0)));
+      expect(task3?.dueAt, equals(DateTime.utc(2026, 2, 28, 17)));
       expect(task3?.dueAnchor, equals(TdfLocalDateTime(2026, 1, 31, 18, 0, 5)));
       expect(task3?.isDuePassive, isTrue);
       expect(task3?.dueNote, equals('Month-end\ncutoff'));
@@ -617,21 +617,18 @@ task 333333OkD2 {
       final epochTask = board.findTask('8jKaCdOkD2');
 
       expect(epochLabel?.color, equals('#4CAF50'));
-      expect(epochLabel?.modifiedAt, equals(DateTime.utc(1970, 1, 1)));
+      expect(epochLabel?.modifiedAt, equals(DateTime.utc(1970)));
       expect(omittedLabel?.modifiedAt, isNull);
-      expect(
-        omittedLabel?.effectiveModifiedAt,
-        equals(DateTime.utc(1970, 1, 1)),
-      );
+      expect(omittedLabel?.effectiveModifiedAt, equals(DateTime.utc(1970)));
 
       expect(epochLocation?.latitudeText, equals('0'));
       expect(epochLocation?.longitudeText, equals('11.0328'));
       expect(epochLocation?.radiusText, equals('150'));
-      expect(epochLocation?.modifiedAt, equals(DateTime.utc(1970, 1, 1)));
+      expect(epochLocation?.modifiedAt, equals(DateTime.utc(1970)));
       expect(omittedLocation?.modifiedAt, isNull);
       expect(omittedLocation?.radiusText, equals('25.5'));
 
-      expect(epochTask?.modifiedAt, equals(DateTime.utc(1970, 1, 1)));
+      expect(epochTask?.modifiedAt, equals(DateTime.utc(1970)));
 
       final serialized = tdfService.serialize(board);
       expect(
@@ -722,6 +719,146 @@ task 333333OkD2 {
         AppLogger.setEnabled(false);
         AppLogger.clear();
       }
+    });
+
+    test('scans double-quoted tokens identically across unescaped fast path and escaped slow path', () {
+      final now = DateTime.utc(2026, 11, 20, 12);
+      const tdf =
+          'tdf 0.8.0\n'
+          '\n'
+          'task tskScan001 {\n'
+          '    name    "Plain ASCII and \u00FCmlaut with \'single\' quotes"\n'
+          '    note    "\\tStart\\nMiddle \\"quoted\\" \\\\ slash\\\\"\n'
+          '    created 2026-11-20 12:00\n'
+          '}\n';
+      final board = tdfService.parse(tdf, evaluationTime: now);
+      final task = board.allTasks.single;
+      expect(
+        task.title,
+        equals("Plain ASCII and \u00FCmlaut with 'single' quotes"),
+      );
+      expect(task.note, equals('\tStart\nMiddle "quoted" \\ slash\\'));
+    });
+
+    test('logs UTF-8 byte count on serialize and runs parseAsync, parseBytesAsync, and serializeAsync across isolate threshold and non-sendable fallback', () async {
+      expect(TdfService.isolateOffloadThresholdBytes, equals(32768));
+
+      final now = DateTime.utc(2026, 11, 20, 12);
+      const smallTdf =
+          'tdf 0.8.0\n'
+          '\n'
+          'task tskUtf8001 {\n'
+          '    name    "\u00E4\u00F6\u00FC\u00DF\u20AC\u{1F600}"\n'
+          '    created 2026-11-20 12:00\n'
+          '}\n';
+      final smallBoard = tdfService.parse(smallTdf, evaluationTime: now);
+
+      AppLogger.resetForTesting(clock: () => now);
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.info,
+        persistToDisk: false,
+      );
+      try {
+        final serializedSmall = tdfService.serialize(smallBoard);
+        final expectedUtf8Bytes = utf8.encode(serializedSmall).length;
+        expect(expectedUtf8Bytes, greaterThan(serializedSmall.length));
+        final logLine = AppLogger.lines.lastWhere(
+          (line) => line.contains('tdf.serialize |'),
+        );
+        expect(
+          logLine,
+          contains('bytes=$expectedUtf8Bytes'),
+          reason: 'tdf.serialize log must report exact UTF-8 byte length rather than UTF-16 code units',
+        );
+
+        final asyncSmallParsed = await tdfService.parseAsync(
+          serializedSmall,
+          evaluationTime: now,
+        );
+        final asyncSmallBytesParsed = await tdfService.parseBytesAsync(
+          utf8.encode(serializedSmall),
+          evaluationTime: now,
+        );
+        final asyncSmallSerialized = await tdfService.serializeAsync(
+          smallBoard,
+        );
+        expect(asyncSmallParsed, equals(smallBoard));
+        expect(asyncSmallBytesParsed, equals(smallBoard));
+        expect(asyncSmallSerialized, equals(serializedSmall));
+      } finally {
+        AppLogger.resetForTesting();
+      }
+
+      // Build a > 32 KiB document to exercise real Isolate.run offload paths.
+      final largeBuffer = StringBuffer('tdf 0.8.0\n');
+      for (var i = 0; i < 320; i++) {
+        final taskId = 'ISO${i.toString().padLeft(7, '0')}';
+        largeBuffer
+          ..writeln()
+          ..writeln('task $taskId {')
+          ..writeln('    name    "Isolate benchmark payload task number $i"')
+          ..writeln(
+            '    note    "Structured multi-sentence note ensuring payload exceeds 32 KiB threshold for isolate offload."',
+          )
+          ..writeln('    created 2026-11-20 12:00')
+          ..writeln('}');
+      }
+      final largeTdf = largeBuffer.toString();
+      final largeBytes = utf8.encode(largeTdf);
+      expect(
+        largeBytes.length,
+        greaterThanOrEqualTo(TdfService.isolateOffloadThresholdBytes),
+      );
+
+      final syncLargeBoard = tdfService.parse(
+        largeTdf,
+        evaluationTime: now,
+        timeZone: TdfTimeZoneContext.americaNewYork,
+      );
+      final asyncLargeBoard = await tdfService.parseAsync(
+        largeTdf,
+        evaluationTime: now,
+        timeZone: TdfTimeZoneContext.americaNewYork,
+      );
+      final asyncLargeBytesBoard = await tdfService.parseBytesAsync(
+        largeBytes,
+        evaluationTime: now,
+        timeZone: TdfTimeZoneContext.americaNewYork,
+      );
+      expect(asyncLargeBoard, equals(syncLargeBoard));
+      expect(asyncLargeBytesBoard, equals(syncLargeBoard));
+
+      final syncLargeSerialized = tdfService.serialize(syncLargeBoard);
+      final asyncLargeSerialized = await tdfService.serializeAsync(
+        syncLargeBoard,
+      );
+      expect(asyncLargeSerialized, equals(syncLargeSerialized));
+
+      // Non-sendable customObserver must fall back synchronously without throwing isolate errors.
+      final customZone = TdfTimeZoneContext.customObserver(
+        'Test/NonSendable',
+        (int _) => 3600,
+      );
+      final fallbackBoard = await tdfService.parseAsync(
+        largeTdf,
+        evaluationTime: now,
+        timeZone: customZone,
+      );
+      expect(fallbackBoard.allTasks.length, equals(320));
+
+      // Malformed large document must propagate exact TdfException across isolate boundary.
+      final invalidLargeTdf = '$largeTdf\ntask BAD {\n}\n';
+      await expectLater(
+        tdfService.parseAsync(invalidLargeTdf, evaluationTime: now),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.invalidIdentifier,
+          ),
+        ),
+      );
     });
   });
 }

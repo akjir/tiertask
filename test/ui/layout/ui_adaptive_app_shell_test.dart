@@ -139,7 +139,6 @@ void main() {
             mobileActiveFilter: Text('Active Label: Work'),
             searchWidget: Text('Search Box'),
             trailingActions: <Widget>[Text('Sync')],
-            isSearchOpen: false,
             sidebarBody: SizedBox.shrink(),
             body: Text('Body'),
             menuOpenTooltip: 'Open menu',
@@ -345,7 +344,6 @@ void main() {
               UiButton(
                 key: const ValueKey<String>('test_sync_button'),
                 label: 'Synced',
-                variant: UiButtonVariant.secondary,
                 density: UiButtonDensity.chrome,
                 onPressed: () => syncTapCount++,
               ),
@@ -353,7 +351,6 @@ void main() {
                 key: const ValueKey<String>('test_close_button'),
                 leadingIcon: Icons.close_rounded,
                 variant: UiButtonVariant.icon,
-                density: UiButtonDensity.standard,
                 isDangerHover: true,
                 tooltip: 'Close TierTask',
                 onPressed: () => closeTapCount++,
@@ -364,7 +361,6 @@ void main() {
             sidebarBody: const SizedBox.shrink(),
             body: const Text('Main'),
           ),
-          surfaceSize: const Size(1280, 800),
           wrapInScaffold: false,
         );
 
@@ -426,7 +422,6 @@ void main() {
             sidebarBody: SizedBox.shrink(),
             body: Text('Main'),
           ),
-          surfaceSize: const Size(1280, 800),
           wrapInScaffold: false,
         );
         expect(

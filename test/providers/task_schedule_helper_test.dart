@@ -29,7 +29,9 @@ import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/providers/sync_error_formatter.dart';
 import 'package:tiertask/providers/sync_providers.dart';
+import 'package:tiertask/providers/task_condition_draft_helper.dart';
 import 'package:tiertask/providers/task_schedule_helper.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/webdav_repository.dart';
@@ -209,10 +211,7 @@ void main() {
     });
 
     test('resolves due and suspended drafts statically, local timestamps, wall-clock anchors, and remaining durations', () {
-      const utcConfig = WebDavConfig(
-        timeZoneMode: AppTimeZoneMode.manual,
-        manualTimeZoneOffsetMinutes: 0,
-      );
+      const utcConfig = WebDavConfig(timeZoneMode: AppTimeZoneMode.manual);
       final initialDueAt = DateTime.utc(2026, 11, 25, 14, 30);
       final initialAnchor = TdfLocalDateTime(2026, 11, 25, 14, 30);
 
@@ -238,7 +237,7 @@ void main() {
       );
       expect(editedDue.isValid, isTrue);
       expect(editedDue.isUnchanged, isFalse);
-      expect(editedDue.dueAt, equals(DateTime.utc(2026, 11, 26, 9, 0)));
+      expect(editedDue.dueAt, equals(DateTime.utc(2026, 11, 26, 9)));
 
       final suspendedForever = TaskScheduleHelper.resolveSuspendedDraft(
         configuration: utcConfig,
@@ -260,11 +259,12 @@ void main() {
       expect(invalidSuspended.isValid, isFalse);
 
       expect(
-        TaskScheduleHelper.formatInitialSuspendedText(
-          TaskItem.defaultSuspendedAt,
-          utcConfig,
-        ),
+        TaskScheduleHelper.formatInitialSuspendedText(null, utcConfig),
         isEmpty,
+      );
+      expect(
+        TaskScheduleHelper.formatInitialSuspendedText(initialDueAt, utcConfig),
+        equals('2026-11-25 14:30'),
       );
       expect(
         TaskScheduleHelper.formatLocalTimestamp(initialDueAt, utcConfig),
@@ -281,15 +281,15 @@ void main() {
 
       expect(
         TaskScheduleHelper.differsFromWallClock(
-          TdfLocalDateTime(2026, 11, 25, 14, 30, 0),
-          DateTime(2026, 11, 25, 14, 30, 0),
+          TdfLocalDateTime(2026, 11, 25, 14, 30),
+          DateTime(2026, 11, 25, 14, 30),
         ),
         isFalse,
       );
       expect(
         TaskScheduleHelper.differsFromWallClock(
-          TdfLocalDateTime(2026, 11, 25, 14, 30, 0),
-          DateTime(2026, 11, 25, 15, 30, 0),
+          TdfLocalDateTime(2026, 11, 25, 14, 30),
+          DateTime(2026, 11, 25, 15, 30),
         ),
         isTrue,
       );
@@ -339,7 +339,6 @@ void main() {
 
     test('ConditionDraft and TimeWindowDraft enforce immutability, copyWith, and value equality', () {
       final draft = ConditionDraft(
-        ignoreAllLabelConditions: false,
         daysMode: ConditionDimensionMode.custom,
         weekdays: const <int>[1, 3],
         timeMode: ConditionDimensionMode.custom,
@@ -684,15 +683,15 @@ void main() {
         timeZoneMode: AppTimeZoneMode.manual,
         manualTimeZoneOffsetMinutes: 120,
       );
-      final dueAtUtc = DateTime.utc(2026, 11, 25, 10, 0);
+      final dueAtUtc = DateTime.utc(2026, 11, 25, 10);
       final taskWithAnchor = TaskItem(
         id: 'tsk0000001',
         title: 'Due task',
         createdAt: DateTime.utc(2026, 11, 21),
         modifiedAt: DateTime.utc(2026, 11, 21),
         dueAt: dueAtUtc,
-        dueAnchor: TdfLocalDateTime(2026, 11, 25, 10, 0),
-        suspendedAt: DateTime.utc(2026, 11, 24, 10, 0),
+        dueAnchor: TdfLocalDateTime(2026, 11, 25, 10),
+        suspendedAt: DateTime.utc(2026, 11, 24, 10),
       );
       expect(
         TaskScheduleHelper.formatDueAnchor(
@@ -707,10 +706,7 @@ void main() {
       expect(
         TaskScheduleHelper.formatDueAnchor(
           task: taskWithAnchor,
-          config: const WebDavConfig(
-            timeZoneMode: AppTimeZoneMode.manual,
-            manualTimeZoneOffsetMinutes: 0,
-          ),
+          config: const WebDavConfig(timeZoneMode: AppTimeZoneMode.manual),
           localizations: englishLocalizations,
         ),
         isNull,
@@ -718,12 +714,9 @@ void main() {
       expect(
         TaskScheduleHelper.formatDueDetail(
           dueAtUtc: dueAtUtc,
-          nowUtc: DateTime.utc(2026, 11, 25, 11, 0),
+          nowUtc: DateTime.utc(2026, 11, 25, 11),
           isOverdue: true,
-          config: const WebDavConfig(
-            timeZoneMode: AppTimeZoneMode.manual,
-            manualTimeZoneOffsetMinutes: 0,
-          ),
+          config: const WebDavConfig(timeZoneMode: AppTimeZoneMode.manual),
           localizations: englishLocalizations,
         ),
         equals(englishLocalizations.taskInfoDueOverdue('2026-11-25 10:00')),
@@ -801,11 +794,8 @@ void main() {
       expect(
         TaskScheduleHelper.formatSuspendedDetail(
           task: taskWithAnchor.copyWith(isSuspendedForever: true),
-          nowUtc: DateTime.utc(2026, 11, 21, 10, 0),
-          config: const WebDavConfig(
-            timeZoneMode: AppTimeZoneMode.manual,
-            manualTimeZoneOffsetMinutes: 0,
-          ),
+          nowUtc: DateTime.utc(2026, 11, 21, 10),
+          config: const WebDavConfig(timeZoneMode: AppTimeZoneMode.manual),
           localizations: englishLocalizations,
         ),
         equals(englishLocalizations.taskInfoSuspendedForever),
@@ -813,11 +803,8 @@ void main() {
       expect(
         TaskScheduleHelper.formatSuspendedDetail(
           task: taskWithAnchor,
-          nowUtc: DateTime.utc(2026, 11, 24, 8, 0),
-          config: const WebDavConfig(
-            timeZoneMode: AppTimeZoneMode.manual,
-            manualTimeZoneOffsetMinutes: 0,
-          ),
+          nowUtc: DateTime.utc(2026, 11, 24, 8),
+          config: const WebDavConfig(timeZoneMode: AppTimeZoneMode.manual),
           localizations: englishLocalizations,
         ),
         contains('2026-11-24 10:00'),
@@ -1020,7 +1007,7 @@ void main() {
       // Subtasks validation.
       final validSubtasks = TaskScheduleHelper.validateSubtasksList(
         subtasks: const <SubtaskItem>[
-          SubtaskItem(title: '   ', isCompleted: false),
+          SubtaskItem(title: '   '),
           SubtaskItem(title: ' Step 1 ', isCompleted: true),
         ],
         localizations: englishLocalizations,
@@ -1034,9 +1021,7 @@ void main() {
       );
       expect(
         TaskScheduleHelper.validateSubtasksList(
-          subtasks: const <SubtaskItem>[
-            SubtaskItem(title: 'bad\x00step', isCompleted: false),
-          ],
+          subtasks: const <SubtaskItem>[SubtaskItem(title: 'bad\x00step')],
           localizations: englishLocalizations,
         ).error,
         equals(englishLocalizations.historyErrorTextInvalid),
@@ -1045,7 +1030,7 @@ void main() {
         TaskScheduleHelper.validateSubtasksList(
           subtasks: List<SubtaskItem>.filled(
             maxTdfStmtsPerBlock + 1,
-            const SubtaskItem(title: 'Step', isCompleted: false),
+            const SubtaskItem(title: 'Step'),
           ),
           localizations: englishLocalizations,
         ).error,
@@ -1080,11 +1065,7 @@ void main() {
         deletedBlock: TdfDeletedBlock(
           generation: 2,
           tasks: <TdfDeletedTaskRecord>[
-            TdfDeletedTaskRecord(
-              taskId: 'deltsk0001',
-              deletedAt: now,
-              completionsCheckpoint: 0,
-            ),
+            TdfDeletedTaskRecord(taskId: 'deltsk0001', deletedAt: now),
           ],
           labels: <TdfDeletedLabelRecord>[
             TdfDeletedLabelRecord(labelId: 'dellbl0001', deletedAt: now),
@@ -1197,6 +1178,131 @@ void main() {
         ),
         equals(englishLocalizations.conditionLocationErrorInvalid),
       );
+    });
+
+    test('delegates unified error formatting to SyncErrorFormatter across sync and settings flows', () {
+      for (final kind in TdfSyncOutcomeKind.values) {
+        final message = SyncErrorFormatter.formatSyncOutcomeMessage(
+          TdfSyncOutcomeException(kind: kind, message: 'outcome'),
+          englishLocalizations,
+        );
+        expect(
+          message,
+          equals(
+            TaskScheduleHelper.formatSyncOutcomeMessage(
+              TdfSyncOutcomeException(kind: kind, message: 'outcome'),
+              englishLocalizations,
+            ),
+          ),
+          reason: 'Formatter parity failed for $kind',
+        );
+      }
+
+      const fileReadError = StorageFileReadException(
+        'Fallback message',
+        report: StorageFileReadReport(
+          remote: StorageFileReadStatus.unreadable(
+            StorageFileTarget.remote,
+            detail: 'Remote syntax failure',
+            line: 7,
+          ),
+        ),
+      );
+      expect(
+        SyncErrorFormatter.formatSyncError(fileReadError, englishLocalizations),
+        contains('Remote syntax failure'),
+      );
+      expect(
+        SyncErrorFormatter.formatSettingsError(
+          fileReadError,
+          englishLocalizations,
+        ),
+        contains('Remote syntax failure'),
+      );
+      expect(
+        SyncErrorFormatter.formatSettingsError(
+          StateError('plain settings failure'),
+          englishLocalizations,
+        ),
+        equals('Bad state: plain settings failure'),
+      );
+      expect(
+        SyncErrorFormatter.formatSyncError(
+          StateError('plain sync failure'),
+          englishLocalizations,
+        ),
+        equals(
+          englishLocalizations.errorUnexpectedLoad(
+            'Bad state: plain sync failure',
+          ),
+        ),
+      );
+    });
+
+    test('validates WGS-84 coordinates and compiles condition drafts via TaskConditionDraftHelper', () {
+      expect(TaskScheduleHelper.isValidCoordinates(0.0, 0.0), isTrue);
+      expect(TaskScheduleHelper.isValidCoordinates(-90.0, 180.0), isTrue);
+      expect(TaskScheduleHelper.isValidCoordinates(90.0001, 0.0), isFalse);
+      expect(TaskScheduleHelper.isValidCoordinates(0.0, -180.0001), isFalse);
+      expect(TaskScheduleHelper.isValidCoordinates(double.nan, 0.0), isFalse);
+      expect(
+        TaskScheduleHelper.isValidCoordinates(0.0, double.infinity),
+        isFalse,
+      );
+
+      expect(
+        TaskScheduleHelper.tierWipLimit(TaskTier.focus),
+        equals(TaskBoard.focusSoftLimit),
+      );
+      expect(
+        TaskScheduleHelper.tierWipLimit(TaskTier.ready),
+        equals(TaskBoard.readySoftLimit),
+      );
+
+      final board = TaskBoard.empty().addLocation(
+        'Studio',
+        id: 'loc0000001',
+        latitude: 47.0,
+        longitude: 8.0,
+        radius: 150,
+      );
+      final compiled = TaskConditionDraftHelper.compileConditions(
+        ignoreAllLabelConditions: false,
+        daysMode: ConditionCompileMode.custom,
+        weekdays: const <int>[DateTime.monday, DateTime.friday],
+        timeMode: ConditionCompileMode.any,
+        timeWindows: const <({String start, String end})>[],
+        locationMode: ConditionCompileMode.custom,
+        locationIds: const <String>['loc0000001'],
+        board: board,
+        isTask: true,
+        localizations: englishLocalizations,
+      );
+      expect(compiled.error, isNull);
+      expect(compiled.conditions, hasLength(3));
+
+      final extracted = TaskConditionDraftHelper.extractDraftFields(
+        compiled.conditions,
+        isTask: true,
+      );
+      expect(
+        extracted.weekdays,
+        equals(<int>[DateTime.monday, DateTime.friday]),
+      );
+      expect(extracted.timeAny, isTrue);
+      expect(extracted.locationIds, equals(<String>['loc0000001']));
+
+      final summary = TaskConditionDraftHelper.buildSummaryChips(
+        ownRules: compiled.conditions,
+        inheritedRules: const <TaskCondition>[],
+        locationsById: <String, TdfLocation>{
+          for (final location in board.locations) location.id: location,
+        },
+        localizations: englishLocalizations,
+      );
+      expect(summary, hasLength(3));
+      expect(summary.last.label, equals('Studio'));
+      expect(summary.last.locationId, equals('loc0000001'));
     });
   });
 }

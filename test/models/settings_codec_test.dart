@@ -74,8 +74,6 @@ void main() {
                         config: WebDavConfig(
                           serverUrl: 'https://cloud.example.com',
                           username: 'alice',
-                          filePath: 'tasks.tdf',
-                          localFilePath: 'tasks.tdf',
                           storageMode: storageMode,
                           language: language,
                           themeMode: themeMode,
@@ -715,6 +713,142 @@ void main() {
       expect(config.storageMode, equals(StorageMode.local));
       expect(config.serverUrl, equals('https://cloud.example.com'));
       expect(config.username, equals('alice'));
+    });
+
+    test('rejects deeply nested JSON payloads before jsonDecode without StackOverflowError while ignoring brackets inside JSON strings', () {
+      expect(SettingsCodec.maxRawJsonNestingDepth, equals(64));
+
+      // Deeply nested arrays and objects (depth 5000 and 50000, both within maxJsonBytes):
+      final deepArrays = utf8.encode('${'[' * 5000}${']' * 5000}');
+      expect(deepArrays.length, lessThan(SettingsCodec.maxJsonBytes));
+      expect(
+        () => SettingsCodec.decodeJsonBytes(deepArrays),
+        throwsA(
+          isA<WorkspaceException>().having(
+            (error) => error.kind,
+            'kind',
+            WorkspaceErrorKind.corruptSettingsPayload,
+          ),
+        ),
+        reason: 'Depth-5000 nested arrays must fail cleanly with corruptSettingsPayload instead of StackOverflowError',
+      );
+
+      final extremeArrays = utf8.encode('${'[' * 50000}${']' * 50000}');
+      expect(extremeArrays.length, lessThan(SettingsCodec.maxJsonBytes));
+      expect(
+        () => SettingsCodec.decodeJsonBytes(extremeArrays),
+        throwsA(
+          isA<WorkspaceException>().having(
+            (error) => error.kind,
+            'kind',
+            WorkspaceErrorKind.corruptSettingsPayload,
+          ),
+        ),
+        reason: 'Depth-50000 nested arrays must fail cleanly before jsonDecode without StackOverflowError',
+      );
+
+      final deepObjects = utf8.encode('${'{"a":' * 5000}1${'}' * 5000}');
+      expect(deepObjects.length, lessThan(SettingsCodec.maxJsonBytes));
+      expect(
+        () => SettingsCodec.decodeJsonBytes(deepObjects),
+        throwsA(
+          isA<WorkspaceException>().having(
+            (error) => error.kind,
+            'kind',
+            WorkspaceErrorKind.corruptSettingsPayload,
+          ),
+        ),
+        reason: 'Depth-5000 nested objects must fail cleanly with corruptSettingsPayload instead of StackOverflowError',
+      );
+
+      // Exact pre-scan nesting boundary (64 allowed, 65 rejected):
+      Object buildNestedList(int depth) {
+        Object current = 'leaf';
+        for (var i = 0; i < depth; i++) {
+          current = <Object?>[current];
+        }
+        return current;
+      }
+
+      // Root object adds 1 container level; 63 nested lists reach total container depth 64:
+      final atDepthLimit = <String, Object?>{
+        'schemaVersion': 1,
+        'activeWorkspaceId': 'tasks',
+        'deepUnknown': buildNestedList(63),
+        'workspaces': <Object?>[
+          <String, Object?>{
+            'id': 'tasks',
+            'name': 'Tasks',
+            'localFilePath': 'tasks.tdf',
+            'filePath': 'tasks.tdf',
+          },
+        ],
+      };
+      final decodedAtLimit = SettingsCodec.decodeJsonBytes(
+        utf8.encode(jsonEncode(atDepthLimit)),
+      );
+      expect(
+        decodedAtLimit.document.workspaces.single.id,
+        equals('tasks'),
+        reason: 'Container depth 64 must pass raw pre-scan and drop deepUnknown with warning',
+      );
+      expect(
+        decodedAtLimit.document.unknownRootFields.containsKey('deepUnknown'),
+        isFalse,
+      );
+
+      // Root object + 64 nested lists reach total container depth 65 (> 64):
+      final overDepthLimit = <String, Object?>{
+        'schemaVersion': 1,
+        'activeWorkspaceId': 'tasks',
+        'tooDeep': buildNestedList(64),
+        'workspaces': <Object?>[
+          <String, Object?>{
+            'id': 'tasks',
+            'name': 'Tasks',
+            'localFilePath': 'tasks.tdf',
+            'filePath': 'tasks.tdf',
+          },
+        ],
+      };
+      expect(
+        () => SettingsCodec.decodeJsonBytes(
+          utf8.encode(jsonEncode(overDepthLimit)),
+        ),
+        throwsA(
+          isA<WorkspaceException>().having(
+            (error) => error.kind,
+            'kind',
+            WorkspaceErrorKind.corruptSettingsPayload,
+          ),
+        ),
+        reason: 'Container depth 65 must be rejected before jsonDecode',
+      );
+
+      // Brackets and escaped quotes/backslashes inside JSON strings must not count toward nesting depth:
+      final stringWithBrackets =
+          '${'[' * 200}\\"${'{' * 200}\\\\${']' * 200}${'}' * 200}';
+      final safePayload = <String, Object?>{
+        'schemaVersion': 1,
+        'activeWorkspaceId': 'tasks',
+        'bracketString': stringWithBrackets,
+        'workspaces': <Object?>[
+          <String, Object?>{
+            'id': 'tasks',
+            'name': 'Tasks',
+            'localFilePath': 'tasks.tdf',
+            'filePath': 'tasks.tdf',
+          },
+        ],
+      };
+      final decodedSafe = SettingsCodec.decodeJsonBytes(
+        utf8.encode(jsonEncode(safePayload)),
+      );
+      expect(
+        decodedSafe.document.unknownRootFields['bracketString'],
+        equals(stringWithBrackets),
+        reason: 'Brackets inside quoted strings with escapes must not trigger depth limit',
+      );
     });
   });
 }

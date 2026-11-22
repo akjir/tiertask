@@ -96,13 +96,14 @@ class FakeTaskNotifier extends TaskNotifier {
   }
 
   @override
-  Future<void> pushToRemote(
+  Future<bool> pushToRemote(
     TaskBoard board, {
     TaskBoard? fallbackBoard,
     Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
     int? mutationEpoch,
   }) async {
     state = AsyncData(board);
+    return true;
   }
 
   @override
@@ -217,7 +218,7 @@ Future<ProviderContainer> pumpLeafWidget(
 
   final effectiveSettingsRepo =
       settingsRepository ?? InMemorySettingsRepository(config);
-  final effectiveNow = nowUtc ?? DateTime.utc(2026, 11, 10, 12, 0);
+  final effectiveNow = nowUtc ?? DateTime.utc(2026, 11, 10, 12);
   final preset = UiThemePresets.byId(presetId);
 
   final container = ProviderContainer(
@@ -242,7 +243,7 @@ Future<ProviderContainer> pumpLeafWidget(
         windowControlRepository ?? FakeWindowControlRepository(),
       ),
       appBuildProfileProvider.overrideWithValue(buildProfile),
-      appVersionProvider.overrideWith((ref) async => 'v0.4.0+4.abc1234'),
+      appVersionProvider.overrideWith((ref) => 'v0.4.0+4.abc1234'),
       locationRepositoryProvider.overrideWithValue(
         locationRepository ?? FakeLocationRepository(initialFix: locationFix),
       ),

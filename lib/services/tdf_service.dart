@@ -14,6 +14,7 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'dart:convert';
+import 'dart:isolate';
 
 import '../models/task_board.dart';
 import '../models/task_board_evaluator.dart';
@@ -30,6 +31,9 @@ import 'tdf_serializer.dart';
 class TdfService {
   /// Creates a const [TdfService].
   const TdfService();
+
+  /// Minimum UTF-8 payload byte length (`32 KiB`) at which async helpers offload parsing and serialization to a worker isolate.
+  static const int isolateOffloadThresholdBytes = 32768;
 
   /// Maximum arguments allowed on a single block header or directive (`MAX_ARGS_PER_STMT`).
   static const int maxArgsPerStmt = maxTdfArgsPerStmt;
@@ -101,9 +105,7 @@ class TdfService {
   static const String supportedVersion = tdfSupportedVersion;
 
   /// Strict UTF-8 decoder rejecting malformed byte sequences (`TDF-LEX-001`).
-  static const Utf8Decoder _strictUtf8Decoder = Utf8Decoder(
-    allowMalformed: false,
-  );
+  static const Utf8Decoder _strictUtf8Decoder = Utf8Decoder();
 
   /// Scans and parses a `tdf 0.8.0` [tdfContent] string into a [TaskBoard] evaluated at [evaluationTime] unless [evaluateTiers] is `false`.
   TaskBoard parse(
@@ -149,6 +151,59 @@ class TdfService {
     }
   }
 
+  /// Asynchronously scans and parses [tdfContent], offloading to a worker isolate when the payload meets [isolateOffloadThresholdBytes] and parameters are isolate-sendable.
+  Future<TaskBoard> parseAsync(
+    String tdfContent, {
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+    bool pruneExpiredCompleted = false,
+    bool evaluateTiers = true,
+  }) async {
+    final canOffload =
+        (timeZone == null || timeZone.isIsolateSendable) &&
+        tdfContent.length <= maxTdfFileBytes &&
+        _exceedsStringOffloadThreshold(tdfContent);
+    if (!canOffload) {
+      return parse(
+        tdfContent,
+        evaluationTime: evaluationTime,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+        pruneExpiredCompleted: pruneExpiredCompleted,
+        evaluateTiers: evaluateTiers,
+      );
+    }
+    final stopwatch = Stopwatch()..start();
+    try {
+      final board = await _runParseStringIsolate(
+        tdfContent,
+        evaluationTime: evaluationTime,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+        pruneExpiredCompleted: pruneExpiredCompleted,
+        evaluateTiers: evaluateTiers,
+      );
+      _logParseSuccess(board, stopwatch);
+      return board;
+    } on TdfException catch (error) {
+      _logParseError(error);
+      rethrow;
+    }
+  }
+
   /// Validates UTF-8 byte length and encoding of [utf8Bytes] before scanning and parsing a `tdf 0.8.0` document (`TDF-LEX-001`, `TDF-VAL-001`).
   TaskBoard parseBytes(
     List<int> utf8Bytes, {
@@ -184,8 +239,77 @@ class TdfService {
     }
   }
 
+  /// Asynchronously validates and parses [utf8Bytes], offloading to a worker isolate when payload length meets [isolateOffloadThresholdBytes] and parameters are isolate-sendable.
+  Future<TaskBoard> parseBytesAsync(
+    List<int> utf8Bytes, {
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+    bool pruneExpiredCompleted = false,
+    bool evaluateTiers = true,
+  }) async {
+    final canOffload =
+        (timeZone == null || timeZone.isIsolateSendable) &&
+        utf8Bytes.length >= isolateOffloadThresholdBytes &&
+        utf8Bytes.length <= maxTdfFileBytes;
+    if (!canOffload) {
+      return parseBytes(
+        utf8Bytes,
+        evaluationTime: evaluationTime,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+        pruneExpiredCompleted: pruneExpiredCompleted,
+        evaluateTiers: evaluateTiers,
+      );
+    }
+    final stopwatch = Stopwatch()..start();
+    try {
+      final board = await _runParseBytesIsolate(
+        utf8Bytes,
+        evaluationTime: evaluationTime,
+        localEvaluationTime: localEvaluationTime,
+        timeZone: timeZone,
+        dueLeadWindow: dueLeadWindow,
+        activeLabelId: activeLabelId,
+        currentLatitude: currentLatitude,
+        currentLongitude: currentLongitude,
+        pruneExpiredCompleted: pruneExpiredCompleted,
+        evaluateTiers: evaluateTiers,
+      );
+      _logParseSuccess(board, stopwatch);
+      return board;
+    } on TdfException catch (error) {
+      _logParseError(error);
+      rethrow;
+    }
+  }
+
   /// Serializes [board] into a canonical `LF`-terminated `tdf 0.8.0` document string and validates output bounds (`TDF-SER-001`–`TDF-SER-005`).
   String serialize(TaskBoard board) => _serializeInternal(board);
+
+  /// Asynchronously serializes [board], offloading to a worker isolate when estimated output reaches [isolateOffloadThresholdBytes].
+  Future<String> serializeAsync(TaskBoard board) async {
+    if (_estimateSerializedBytes(board) < isolateOffloadThresholdBytes) {
+      return _serializeInternal(board);
+    }
+    final stopwatch = Stopwatch()..start();
+    try {
+      final result = await _runSerializeIsolate(board);
+      _logSerializeSuccess(board, result.utf8ByteLength, stopwatch);
+      return result.output;
+    } on TdfException catch (error) {
+      _logParseError(error);
+      rethrow;
+    }
+  }
 
   /// Computes the 1-based physical line number of the first lexical/UTF-8 failure at or before [failureOffset].
   static int _computeUtf8FailureLine(List<int> utf8Bytes, int? failureOffset) {
@@ -230,6 +354,56 @@ class TdfService {
     }
   }
 
+  /// Estimates serialized byte size for [board] with early exit at [isolateOffloadThresholdBytes].
+  static int _estimateSerializedBytes(TaskBoard board) {
+    var estimate =
+        16 +
+        board.deletedBlock.totalRecords * 36 +
+        board.queueBlock.taskIds.length * 16;
+    if (estimate >= isolateOffloadThresholdBytes) {
+      return estimate;
+    }
+    for (final task in board.allTasks) {
+      estimate +=
+          120 +
+          task.title.length +
+          (task.note?.length ?? 0) +
+          task.history.length * 60 +
+          task.subtasks.length * 32 +
+          task.links.length * 48;
+      if (estimate >= isolateOffloadThresholdBytes) {
+        return estimate;
+      }
+    }
+    for (final label in board.labels) {
+      estimate += 80 + label.name.length + (label.note?.length ?? 0);
+      if (estimate >= isolateOffloadThresholdBytes) {
+        return estimate;
+      }
+    }
+    for (final location in board.locations) {
+      estimate += 120 + location.name.length + (location.note?.length ?? 0);
+      if (estimate >= isolateOffloadThresholdBytes) {
+        return estimate;
+      }
+    }
+    return estimate;
+  }
+
+  /// Returns whether the UTF-8 byte length of [content] meets or exceeds [isolateOffloadThresholdBytes].
+  static bool _exceedsStringOffloadThreshold(String content) {
+    if (content.length >= isolateOffloadThresholdBytes) {
+      return true;
+    }
+    if (content.length * 3 < isolateOffloadThresholdBytes) {
+      return false;
+    }
+    return !TdfScanner.isUtf8ByteLengthWithinBound(
+      content,
+      isolateOffloadThresholdBytes - 1,
+    );
+  }
+
   /// Emits a redacted structured `tdf.error` log event for [error].
   static void _logParseError(TdfException error) {
     AppLogger.event(
@@ -240,6 +414,43 @@ class TdfService {
         'kind': error.kind.name,
         'line': error.line,
         'message': error.message,
+      },
+    );
+  }
+
+  /// Emits a redacted structured `tdf.parse` log event for [board] and [stopwatch].
+  static void _logParseSuccess(TaskBoard board, Stopwatch stopwatch) {
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.tdf,
+      'tdf.parse',
+      fields: <String, Object?>{
+        'version': supportedVersion,
+        'tasks': board.allTasks.length,
+        'labels': board.labels.length,
+        'locations': board.locations.length,
+        'elapsed_ms': stopwatch.elapsedMilliseconds,
+      },
+    );
+  }
+
+  /// Emits a redacted structured `tdf.serialize` log event with exact [utf8ByteLength].
+  static void _logSerializeSuccess(
+    TaskBoard board,
+    int utf8ByteLength,
+    Stopwatch stopwatch,
+  ) {
+    AppLogger.event(
+      LogLevel.info,
+      LogTag.tdf,
+      'tdf.serialize',
+      fields: <String, Object?>{
+        'version': supportedVersion,
+        'tasks': board.allTasks.length,
+        'labels': board.labels.length,
+        'locations': board.locations.length,
+        'bytes': utf8ByteLength,
+        'elapsed_ms': stopwatch.elapsedMilliseconds,
       },
     );
   }
@@ -271,40 +482,86 @@ class TdfService {
       byteLengthVerified: true,
       evaluateTiers: evaluateTiers,
     );
-    AppLogger.event(
-      LogLevel.info,
-      LogTag.tdf,
-      'tdf.parse',
-      fields: <String, Object?>{
-        'version': supportedVersion,
-        'tasks': board.allTasks.length,
-        'labels': board.labels.length,
-        'locations': board.locations.length,
-        'elapsed_ms': stopwatch.elapsedMilliseconds,
-      },
-    );
+    _logParseSuccess(board, stopwatch);
     return board;
   }
 
-  /// Delegates canonical `tdf 0.8.0` serialization and bounds validation to [TdfSerializer.serialize].
+  /// Runs strict UTF-8 decoding and TDF parsing on a background worker isolate.
+  static Future<TaskBoard> _runParseBytesIsolate(
+    List<int> utf8Bytes, {
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+    required bool pruneExpiredCompleted,
+    required bool evaluateTiers,
+  }) => Isolate.run(() {
+    final decoded = _decodeValidatedUtf8Bytes(utf8Bytes);
+    return TdfBlockParser.parseDocument(
+      decoded,
+      evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+      pruneExpiredCompleted: pruneExpiredCompleted,
+      byteLengthVerified: true,
+      evaluateTiers: evaluateTiers,
+    );
+  });
+
+  /// Runs UTF-8 byte-bound validation and TDF parsing on a background worker isolate.
+  static Future<TaskBoard> _runParseStringIsolate(
+    String tdfContent, {
+    DateTime? evaluationTime,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow,
+    String? activeLabelId,
+    double? currentLatitude,
+    double? currentLongitude,
+    required bool pruneExpiredCompleted,
+    required bool evaluateTiers,
+  }) => Isolate.run(() {
+    if (!TdfScanner.isUtf8ByteLengthWithinBound(tdfContent, maxTdfFileBytes)) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message: 'Document exceeds maximum of $maxTdfFileBytes bytes.',
+      );
+    }
+    return TdfBlockParser.parseDocument(
+      tdfContent,
+      evaluationTime: evaluationTime,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+      activeLabelId: activeLabelId,
+      currentLatitude: currentLatitude,
+      currentLongitude: currentLongitude,
+      pruneExpiredCompleted: pruneExpiredCompleted,
+      byteLengthVerified: true,
+      evaluateTiers: evaluateTiers,
+    );
+  });
+
+  /// Runs canonical `tdf 0.8.0` serialization on a background worker isolate.
+  static Future<({String output, int utf8ByteLength})> _runSerializeIsolate(
+    TaskBoard board,
+  ) => Isolate.run(() => TdfSerializer.serializeWithByteCount(board));
+
+  /// Delegates canonical `tdf 0.8.0` serialization and bounds validation to [TdfSerializer.serializeWithByteCount].
   String _serializeInternal(TaskBoard board) {
     final stopwatch = Stopwatch()..start();
     try {
-      final output = TdfSerializer.serialize(board);
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.tdf,
-        'tdf.serialize',
-        fields: <String, Object?>{
-          'version': supportedVersion,
-          'tasks': board.allTasks.length,
-          'labels': board.labels.length,
-          'locations': board.locations.length,
-          'bytes': output.length,
-          'elapsed_ms': stopwatch.elapsedMilliseconds,
-        },
-      );
-      return output;
+      final result = TdfSerializer.serializeWithByteCount(board);
+      _logSerializeSuccess(board, result.utf8ByteLength, stopwatch);
+      return result.output;
     } on TdfException catch (error) {
       _logParseError(error);
       rethrow;

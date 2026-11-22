@@ -55,7 +55,7 @@ class GeocodingCandidate {
 
   @override
   String toString() =>
-      'GeocodingCandidate(displayName: $displayName, coordinates: $formattedCoordinates)';
+      'GeocodingCandidate(displayName: <redacted>, coordinates: <redacted>)';
 }
 
 /// Immutable representation of a resolved geographical location fix.
@@ -147,7 +147,7 @@ class LocationFix {
 
   @override
   String toString() =>
-      'LocationFix(placeName: $placeName, coordinates: $formattedCoordinates, source: ${source?.name})';
+      'LocationFix(hasPlaceName: ${placeName != null}, hasCoordinates: $hasCoordinates, source: ${source?.name})';
 }
 
 /// Origin from which a [LocationFix] was determined.

@@ -15,14 +15,16 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
+import '../models/tdf_file_path.dart';
 import '../services/app_logger.dart';
 import '../services/sha256_service.dart';
+import 'posix_file_lock_bindings.dart';
+import 'win32_file_lock_bindings.dart';
 
 /// Non-blocking cooperative host-local file lock and atomic temporary-file
 /// publication manager implementing `TDF-PUB-002` and `TDF-PUB-003`.
@@ -54,39 +56,10 @@ class HostFileLockManager<E extends Exception> {
   static const String _hexDigits = '0123456789abcdef';
   static final Map<String, Completer<void>> _inProcessQueues =
       <String, Completer<void>>{};
-  static const int _posixDirMode0700 = 0x1C0;
-  static const int _posixEagain = 11;
-  static const int _posixEexist = 17;
-  static const int _posixEintr = 4;
-  static const int _posixEinval = 22;
-  static const int _posixEnosys = 38;
-  static const int _posixEopnotsupp = 95;
-  static const int _posixEperm = 1;
-  static const int _posixFileMode0600 = 0x180;
-  static const int _posixLockEx = 2;
-  static const int _posixLockNb = 4;
-  static const int _posixLockUn = 8;
-  static const int _posixOCloexec = 0x80000;
-  static const int _posixOCreat = 0x0040;
-  static const int _posixOExcl = 0x0080;
-  static const int _posixORdonly = 0x0000;
-  static const int _posixORdwr = 0x0002;
-  static const int _posixOWronly = 0x0001;
+  static const int _maxVerifiedPosixLockDirs = 64;
   static final math.Random _secureRandom = math.Random.secure();
   static final RegExp _separatorSequencePattern = RegExp(r'[\\/]+');
-  static const int _win32CreateNew = 1;
-  static const int _win32ErrorAccessDenied = 5;
-  static const int _win32ErrorLockViolation = 33;
-  static const int _win32ErrorSharingViolation = 32;
-  static const int _win32FileAttributeNormal = 0x00000080;
-  static const int _win32FileShareReadWrite = 0x00000003;
-  static const int _win32GenericReadWrite = 0xC0000000;
-  static const int _win32GenericWrite = 0x40000000;
-  static const int _win32LmemZeroInit = 0x0040;
-  static const int _win32LockExclusiveImmediate = 0x00000003;
-  static const int _win32MoveReplaceWriteThrough = 0x00000009;
-  static const int _win32OpenAlways = 4;
-  static const int _win32OverlappedByteSize = 32;
+  static final Set<String> _verifiedPosixLockDirs = <String>{};
   static final RegExp _windowsDrivePattern = RegExp(r'^[a-zA-Z]:[\\/]');
 
   /// Factory function constructing a typed domain exception with an optional underlying cause.
@@ -130,6 +103,12 @@ class HostFileLockManager<E extends Exception> {
     }
   }
 
+  /// Applies POSIX `chmod` [mode] to [path] via native libc FFI on Linux and
+  /// Android, retrying `EINTR` and ignoring non-POSIX or inaccessible path
+  /// errors on a best-effort basis without spawning subprocesses.
+  static void applyPosixChmodBestEffort(String path, int mode) =>
+      PosixLockBindings.applyChmodBestEffort(path, mode);
+
   /// Applies descriptor-based `fchmod` via [performFchmod], tolerating
   /// non-POSIX filesystem errnos (`EPERM`, `EINVAL`, `ENOSYS`, `EOPNOTSUPP`)
   /// with a debug log event and throwing via [createException] on hard errors.
@@ -145,11 +124,11 @@ class HostFileLockManager<E extends Exception> {
         return;
       }
       final errorCode = readErrno();
-      if (errorCode == _posixEintr) {
+      if (errorCode == PosixLockBindings.eintr) {
         continue;
       }
       if (isTolerablePosixFchmodErrno(errorCode)) {
-        _logFchmodSkipped(errorCode);
+        PosixLockBindings.logFchmodSkipped(errorCode);
         return;
       }
       throw _posixException(
@@ -164,7 +143,7 @@ class HostFileLockManager<E extends Exception> {
   /// Resolves [targetPath] to its canonical `/`-separated UTF-8 form (`TDF-PUB-002`).
   static String canonicalizeTargetPath(String targetPath, {bool? isWindows}) {
     final effectiveWindows = isWindows ?? Platform.isWindows;
-    final trimmed = _trimTrailingSeparators(targetPath.trim());
+    final trimmed = TdfFilePath.trimTrailingSeparators(targetPath.trim());
     if (trimmed.isEmpty) {
       return '';
     }
@@ -177,6 +156,37 @@ class HostFileLockManager<E extends Exception> {
     return _normalizeCanonicalSeparators(resolved, isWindows: effectiveWindows);
   }
 
+  /// Closes a Win32 write handle via [closeHandle], logging and throwing a formatted exception on failure.
+  @visibleForTesting
+  void closeWindowsWriteHandle({
+    required bool Function() closeHandle,
+    required int Function() readLastError,
+    required String tempPath,
+    String Function(String details)? formatFailureMessage,
+  }) {
+    if (closeHandle()) {
+      return;
+    }
+    final code = readLastError();
+    final details = 'CloseHandle failed (Win32 error $code)';
+    AppLogger.event(
+      LogLevel.error,
+      LogTag.storage,
+      'local.write.close_failed',
+      fields: <String, Object?>{'win32_error': code},
+    );
+    throw createException(
+      formatFailureMessage != null
+          ? formatFailureMessage(details)
+          : '$details: $tempPath',
+      cause: FileSystemException(
+        details,
+        tempPath,
+        OSError('Win32 error $code', code),
+      ),
+    );
+  }
+
   /// Computes the 64-character lowercase hexadecimal SHA-256 `<targetPathHash>` for [targetPath].
   static String computeTargetPathHash(String targetPath, {bool? isWindows}) {
     final canonical = canonicalizeTargetPath(targetPath, isWindows: isWindows);
@@ -186,20 +196,23 @@ class HostFileLockManager<E extends Exception> {
   /// Returns the real numeric POSIX user ID (`getuid()`) on Linux/Android, or `0` on Windows.
   static int getPosixUid() {
     if (Platform.isLinux || Platform.isAndroid) {
-      return _PosixLockBindings.instance.getuid();
+      return PosixLockBindings.instance.getuid();
     }
     return 0;
   }
+
+  /// Returns `true` when [lockDirectoryPath] is currently present in the verified POSIX lock directory cache.
+  @visibleForTesting
+  static bool isPosixLockDirectoryVerifiedForTesting(
+    String lockDirectoryPath,
+  ) => _verifiedPosixLockDirs.contains(lockDirectoryPath);
 
   /// Returns `true` when POSIX `fchmod` [errorCode] indicates a non-POSIX
   /// filesystem (`EPERM`, `EINVAL`, `ENOSYS`, `EOPNOTSUPP`) where permission
   /// adjustment is unsupported after `open(..., 0600)`.
   @visibleForTesting
   static bool isTolerablePosixFchmodErrno(int errorCode) =>
-      errorCode == _posixEperm ||
-      errorCode == _posixEinval ||
-      errorCode == _posixEnosys ||
-      errorCode == _posixEopnotsupp;
+      PosixLockBindings.isTolerableFchmodErrno(errorCode);
 
   /// Retries [performMove] up to [maxWindowsRenameAttempts] times on transient Win32 sharing errors (`32`, `5`).
   @visibleForTesting
@@ -231,8 +244,8 @@ class HostFileLockManager<E extends Exception> {
         return;
       }
       final isTransientSharing =
-          errorCode == _win32ErrorSharingViolation ||
-          errorCode == _win32ErrorAccessDenied;
+          errorCode == Win32LockBindings.errorSharingViolation ||
+          errorCode == Win32LockBindings.errorAccessDenied;
       final hasRemainingRetry = attempt + 1 < maxWindowsRenameAttempts;
       if (!isTransientSharing || !hasRemainingRetry) {
         cleanupTemp();
@@ -260,14 +273,14 @@ class HostFileLockManager<E extends Exception> {
     final activeEnvironment = environment ?? Platform.environment;
     final effectiveWindows = isWindows ?? Platform.isWindows;
     final effectiveAndroid = isAndroid ?? Platform.isAndroid;
-    final fallbackTemp = _trimTrailingSeparators(
+    final fallbackTemp = TdfFilePath.trimTrailingSeparators(
       (systemTempPath ?? Directory.systemTemp.path).trim(),
     );
 
     if (effectiveWindows) {
       final localAppData = (activeEnvironment['LOCALAPPDATA'] ?? '').trim();
       if (localAppData.isNotEmpty) {
-        final cleanLocal = _trimTrailingSeparators(localAppData);
+        final cleanLocal = TdfFilePath.trimTrailingSeparators(localAppData);
         return '$cleanLocal\\Temp\\tdf-locks';
       }
       return '$fallbackTemp\\tdf-locks';
@@ -275,7 +288,7 @@ class HostFileLockManager<E extends Exception> {
 
     final xdgRuntime = (activeEnvironment['XDG_RUNTIME_DIR'] ?? '').trim();
     if (!effectiveAndroid && xdgRuntime.startsWith('/')) {
-      final cleanRuntime = _trimTrailingSeparators(xdgRuntime);
+      final cleanRuntime = TdfFilePath.trimTrailingSeparators(xdgRuntime);
       return '$cleanRuntime/tdf-locks';
     }
 
@@ -289,6 +302,18 @@ class HostFileLockManager<E extends Exception> {
     final lockDirectory = _effectiveLockDirectoryPath();
     final separator = Platform.pathSeparator;
     return '$lockDirectory${separator}tdf-$targetHash.lock';
+  }
+
+  /// Rejects symlinks, directories, pipes, and sockets at [lockFilePath] before opening the lock handle.
+  @visibleForTesting
+  void validateLockFileEntityType(
+    FileSystemEntityType entityType,
+    String lockFilePath,
+  ) {
+    if (entityType != FileSystemEntityType.notFound &&
+        entityType != FileSystemEntityType.file) {
+      throw createException('Invalid host lock file entity: $lockFilePath');
+    }
   }
 
   /// Serializes [action] through an in-process FIFO queue and OS exclusive lock for [targetPath].
@@ -306,7 +331,6 @@ class HostFileLockManager<E extends Exception> {
       return await action();
     }
 
-    final stopwatch = Stopwatch()..start();
     final previousGate = _inProcessQueues[lockKey];
     final gate = Completer<void>();
     _inProcessQueues[lockKey] = gate;
@@ -314,6 +338,7 @@ class HostFileLockManager<E extends Exception> {
     if (previousGate != null) {
       await previousGate.future;
     }
+    final stopwatch = Stopwatch()..start();
     try {
       return await _acquireAndExecute<T>(
         targetPath: targetPath,
@@ -332,6 +357,85 @@ class HostFileLockManager<E extends Exception> {
     }
   }
 
+  /// Loops POSIX `write` calls until [totalBytes] are written, retrying `EINTR` and aborting on zero-byte writes with `EIO`.
+  @visibleForTesting
+  void writeAllPosixLoop({
+    required int totalBytes,
+    required int Function(int offset, int remaining) performWrite,
+    required int Function() readErrno,
+    required String path,
+    String Function(String details)? formatFailureMessage,
+  }) {
+    var writtenTotal = 0;
+    while (writtenTotal < totalBytes) {
+      final writtenNow = performWrite(writtenTotal, totalBytes - writtenTotal);
+      if (writtenNow > 0) {
+        writtenTotal += writtenNow;
+        continue;
+      }
+      if (writtenNow == 0) {
+        throw _posixException(
+          'write',
+          path,
+          PosixLockBindings.eio,
+          formatFailureMessage: formatFailureMessage,
+        );
+      }
+      final errorCode = readErrno();
+      if (errorCode != PosixLockBindings.eintr) {
+        throw _posixException(
+          'write',
+          path,
+          errorCode,
+          formatFailureMessage: formatFailureMessage,
+        );
+      }
+    }
+  }
+
+  /// Loops Win32 `WriteFile` calls until [totalBytes] are written, aborting cleanly if `WriteFile` fails or writes zero bytes.
+  @visibleForTesting
+  void writeAllWindowsLoop({
+    required int totalBytes,
+    required ({bool succeeded, int bytesWritten}) Function(
+      int offset,
+      int remaining,
+    )
+    performWrite,
+    required int Function() readLastError,
+    required String path,
+    String Function(String details)? formatFailureMessage,
+  }) {
+    var writtenTotal = 0;
+    while (writtenTotal < totalBytes) {
+      final result = performWrite(writtenTotal, totalBytes - writtenTotal);
+      if (!result.succeeded) {
+        final code = readLastError();
+        final details = 'WriteFile failed (Win32 error $code)';
+        throw createException(
+          formatFailureMessage != null
+              ? formatFailureMessage(details)
+              : '$details: $path',
+          cause: FileSystemException(
+            details,
+            path,
+            OSError('Win32 error $code', code),
+          ),
+        );
+      }
+      if (result.bytesWritten <= 0) {
+        const details = 'WriteFile wrote zero bytes';
+        throw createException(
+          formatFailureMessage != null
+              ? formatFailureMessage(details)
+              : '$details: $path',
+          cause: FileSystemException(details, path),
+        );
+      }
+      writtenTotal += result.bytesWritten;
+    }
+  }
+
   /// Writes [bytes] to a `0600` CSPRNG temporary file, flushes it, and atomically replaces [targetPath].
   Future<void> writeAtomically(
     String targetPath,
@@ -340,19 +444,27 @@ class HostFileLockManager<E extends Exception> {
     String? targetIsSymlinkMessage,
     String Function(String details)? formatFailureMessage,
   }) async {
-    final targetType = FileSystemEntity.typeSync(
-      targetPath,
-      followLinks: false,
-    );
-    if (targetType == FileSystemEntityType.directory) {
-      throw createException(
-        targetIsDirectoryMessage ?? 'Target path is a directory: $targetPath',
-      );
-    }
-    if (targetType == FileSystemEntityType.link) {
-      throw createException(
-        targetIsSymlinkMessage ?? 'Target path is a symbolic link: $targetPath',
-      );
+    switch (FileSystemEntity.typeSync(targetPath, followLinks: false)) {
+      case FileSystemEntityType.directory:
+        throw createException(
+          targetIsDirectoryMessage ?? 'Target path is a directory: $targetPath',
+        );
+      case FileSystemEntityType.link:
+        throw createException(
+          targetIsSymlinkMessage ??
+              'Target path is a symbolic link: $targetPath',
+        );
+      case FileSystemEntityType.pipe:
+      case FileSystemEntityType.unixDomainSock:
+        const details = 'Target path is not a regular file';
+        throw createException(
+          formatFailureMessage != null
+              ? formatFailureMessage(details)
+              : '$details: $targetPath',
+        );
+      case FileSystemEntityType.notFound:
+      case FileSystemEntityType.file:
+        break;
     }
     if (Platform.isWindows) {
       await _writeAtomicallyWindows(
@@ -447,28 +559,55 @@ class HostFileLockManager<E extends Exception> {
     required String lockFilePath,
     required String targetHash,
     required Stopwatch stopwatch,
-  }) async {
-    _ensurePosixLockDirectory(lockDirectoryPath);
-    final existingType = FileSystemEntity.typeSync(
-      lockFilePath,
-      followLinks: false,
-    );
-    if (existingType != FileSystemEntityType.notFound &&
-        existingType != FileSystemEntityType.file) {
-      throw createException('Invalid host lock file entity: $lockFilePath');
+  }) {
+    final usedCache = _verifiedPosixLockDirs.contains(lockDirectoryPath);
+    if (!usedCache) {
+      _ensurePosixLockDirectory(lockDirectoryPath);
     }
+    validateLockFileEntityType(
+      FileSystemEntity.typeSync(lockFilePath, followLinks: false),
+      lockFilePath,
+    );
 
-    final bindings = _PosixLockBindings.instance;
+    final bindings = PosixLockBindings.instance;
     final openFlags =
-        _posixORdwr | _posixOCreat | _posixOCloexec | bindings.noFollowFlag;
-    final descriptor = _posixOpen(lockFilePath, openFlags, _posixFileMode0600);
+        PosixLockBindings.oRdwr |
+        PosixLockBindings.oCreat |
+        PosixLockBindings.oCloexec |
+        bindings.noFollowFlag;
+    final openOutcome = bindings.openRaw(
+      lockFilePath,
+      openFlags,
+      PosixLockBindings.fileMode0600,
+    );
+    final int descriptor;
+    if (openOutcome.descriptor >= 0) {
+      descriptor = openOutcome.descriptor;
+    } else if (usedCache && openOutcome.errorCode == PosixLockBindings.enoent) {
+      _verifiedPosixLockDirs.remove(lockDirectoryPath);
+      _ensurePosixLockDirectory(lockDirectoryPath);
+      validateLockFileEntityType(
+        FileSystemEntity.typeSync(lockFilePath, followLinks: false),
+        lockFilePath,
+      );
+      descriptor = _posixOpen(
+        lockFilePath,
+        openFlags,
+        PosixLockBindings.fileMode0600,
+      );
+    } else {
+      throw _posixException('open', lockFilePath, openOutcome.errorCode);
+    }
     return acquirePosixDescriptorLock(
       descriptor: descriptor,
-      applyPermissions: () =>
-          _posixFchmodBestEffort(descriptor, _posixFileMode0600, lockFilePath),
+      applyPermissions: () => _posixFchmodBestEffort(
+        descriptor,
+        PosixLockBindings.fileMode0600,
+        lockFilePath,
+      ),
       tryLock: () => _posixTryFlockExclusive(descriptor, lockFilePath),
       closeDescriptor: bindings.close,
-      releaseAndClose: _posixReleaseAndClose,
+      releaseAndClose: PosixLockBindings.releaseAndClose,
       lockFilePath: lockFilePath,
       targetHash: targetHash,
       stopwatch: stopwatch,
@@ -490,37 +629,34 @@ class HostFileLockManager<E extends Exception> {
         cause: error,
       );
     }
-    final bindings = _Win32LockBindings.instance;
+    validateLockFileEntityType(
+      FileSystemEntity.typeSync(lockFilePath, followLinks: false),
+      lockFilePath,
+    );
     final handle = _win32CreateFile(
       lockFilePath,
-      desiredAccess: _win32GenericReadWrite,
-      shareMode: _win32FileShareReadWrite,
-      creationDisposition: _win32OpenAlways,
+      desiredAccess: Win32LockBindings.genericReadWrite,
+      shareMode: Win32LockBindings.fileShareReadWrite,
+      creationDisposition: Win32LockBindings.openAlways,
+      flagsAndAttributes:
+          Win32LockBindings.fileAttributeNormal |
+          Win32LockBindings.fileFlagOpenReparsePoint,
     );
-    final overlappedPointer = bindings.localAlloc(
-      _win32LmemZeroInit,
-      _win32OverlappedByteSize,
-    );
-    if (overlappedPointer.address == 0) {
-      bindings.closeHandle(handle);
-      throw const OutOfMemoryError();
-    }
+    final lockHandle = Win32LockBindings.instance.allocateLockHandle(handle);
 
     var acquired = false;
     try {
       await _pollLockWithBackoff(
-        tryAcquire: () =>
-            _win32TryLockExclusive(handle, overlappedPointer, lockFilePath),
+        tryAcquire: () => _win32TryLockExclusive(lockHandle, lockFilePath),
         targetHash: targetHash,
         lockFilePath: lockFilePath,
         stopwatch: stopwatch,
       );
       acquired = true;
-      return () => _win32UnlockAndClose(handle, overlappedPointer);
+      return lockHandle.unlockAndClose;
     } finally {
       if (!acquired) {
-        bindings.closeHandle(handle);
-        bindings.localFree(overlappedPointer);
+        lockHandle.closeWithoutUnlock();
       }
     }
   }
@@ -537,12 +673,12 @@ class HostFileLockManager<E extends Exception> {
   String _effectiveLockDirectoryPath() {
     final rawOverride = hostLockDirectoryOverride?.trim() ?? '';
     if (rawOverride.isNotEmpty) {
-      return _trimTrailingSeparators(rawOverride);
+      return TdfFilePath.trimTrailingSeparators(rawOverride);
     }
     return resolveHostLockDirectory();
   }
 
-  /// Creates [lockDirectoryPath] on POSIX and enforces owner-only `0700` permissions.
+  /// Creates [lockDirectoryPath] on POSIX, opens it with `O_DIRECTORY | O_NOFOLLOW`, and enforces owner-only `0700` via `fchmod`.
   void _ensurePosixLockDirectory(String lockDirectoryPath) {
     final initialType = FileSystemEntity.typeSync(
       lockDirectoryPath,
@@ -563,37 +699,52 @@ class HostFileLockManager<E extends Exception> {
       );
     }
 
-    final bindings = _PosixLockBindings.instance;
-    final pathPointer = bindings.allocateUtf8(lockDirectoryPath);
-    final int mkdirResult;
-    final int mkdirErrno;
+    final bindings = PosixLockBindings.instance;
+    final mkdirOutcome = bindings.mkdirRaw(
+      lockDirectoryPath,
+      PosixLockBindings.dirMode0700,
+    );
+    if (mkdirOutcome.result != 0 &&
+        mkdirOutcome.errorCode != PosixLockBindings.eexist) {
+      throw _posixException('mkdir', lockDirectoryPath, mkdirOutcome.errorCode);
+    }
+    final openFlags =
+        PosixLockBindings.oRdonly |
+        PosixLockBindings.oCloexec |
+        bindings.directoryFlag |
+        bindings.noFollowFlag;
+    final directoryDescriptor = _posixOpen(lockDirectoryPath, openFlags, 0);
     try {
-      mkdirResult = bindings.mkdir(pathPointer, _posixDirMode0700);
-      mkdirErrno = mkdirResult == 0 ? 0 : bindings.readErrno();
-    } finally {
-      bindings.freePointer(pathPointer.cast<Void>());
-    }
-    if (mkdirResult != 0 && mkdirErrno != _posixEexist) {
-      throw _posixException('mkdir', lockDirectoryPath, mkdirErrno);
-    }
-    if (FileSystemEntity.typeSync(lockDirectoryPath, followLinks: false) !=
-        FileSystemEntityType.directory) {
-      throw createException(
-        'Host lock directory was replaced by a non-directory: $lockDirectoryPath',
+      _posixFchmodStrict(
+        directoryDescriptor,
+        PosixLockBindings.dirMode0700,
+        lockDirectoryPath,
       );
+    } finally {
+      bindings.close(directoryDescriptor);
     }
-    _posixChmod(lockDirectoryPath, _posixDirMode0700);
+    if (_verifiedPosixLockDirs.length >= _maxVerifiedPosixLockDirs) {
+      _verifiedPosixLockDirs.clear();
+    }
+    _verifiedPosixLockDirs.add(lockDirectoryPath);
   }
 
-  /// Extracts the trailing file name segment from [filePath].
-  static String _extractBaseName(String filePath) {
-    final parts = filePath.split(_separatorSequencePattern);
-    for (var i = parts.length - 1; i >= 0; i--) {
-      if (parts[i].isNotEmpty) {
-        return parts[i];
-      }
+  /// Ensures [parentDirectory] exists before staging a temporary file, mapping OS failures via [createException].
+  void _ensureTargetParentDirectory(
+    Directory parentDirectory, {
+    String Function(String details)? formatFailureMessage,
+  }) {
+    try {
+      parentDirectory.createSync(recursive: true);
+    } on FileSystemException catch (error) {
+      final details = error.message;
+      throw createException(
+        formatFailureMessage != null
+            ? formatFailureMessage(details)
+            : 'Failed to prepare target directory ($details): ${parentDirectory.path}',
+        cause: error,
+      );
     }
-    return 'tasks.tdf';
   }
 
   /// Generates a 128-bit (`32`-char lowercase hex) CSPRNG temporary file suffix.
@@ -603,19 +754,6 @@ class HostFileLockManager<E extends Exception> {
       buffer.write(_hexDigits[_secureRandom.nextInt(16)]);
     }
     return buffer.toString();
-  }
-
-  /// Emits a debug diagnostic event when `fchmod` is unsupported by the filesystem.
-  static void _logFchmodSkipped(int errorCode) {
-    if (!AppLogger.shouldLog(LogLevel.debug)) {
-      return;
-    }
-    AppLogger.event(
-      LogLevel.debug,
-      LogTag.storage,
-      'local.fchmod.skipped',
-      fields: <String, Object?>{'errno': errorCode},
-    );
   }
 
   /// Emits a sanitized structured `local.lock.*` event to [AppLogger] when enabled.
@@ -704,23 +842,6 @@ class HostFileLockManager<E extends Exception> {
     }
   }
 
-  /// Applies POSIX `chmod` [mode] to [path], throwing via [createException] on failure.
-  void _posixChmod(String path, int mode) {
-    final bindings = _PosixLockBindings.instance;
-    final pointer = bindings.allocateUtf8(path);
-    final int result;
-    final int errorCode;
-    try {
-      result = bindings.chmod(pointer, mode);
-      errorCode = result == 0 ? 0 : bindings.readErrno();
-    } finally {
-      bindings.freePointer(pointer.cast<Void>());
-    }
-    if (result != 0) {
-      throw _posixException('chmod', path, errorCode);
-    }
-  }
-
   /// Wraps a POSIX `errno` failure on [operation] and [path] into [E].
   E _posixException(
     String operation,
@@ -748,7 +869,7 @@ class HostFileLockManager<E extends Exception> {
     String path, {
     String Function(String details)? formatFailureMessage,
   }) {
-    final bindings = _PosixLockBindings.instance;
+    final bindings = PosixLockBindings.instance;
     applyPosixFchmodBestEffort(
       performFchmod: () => bindings.fchmod(descriptor, mode),
       readErrno: bindings.readErrno,
@@ -757,92 +878,54 @@ class HostFileLockManager<E extends Exception> {
     );
   }
 
+  /// Strictly enforces [mode] on open [descriptor] via POSIX `fchmod`, retrying `EINTR` and throwing on any failure.
+  void _posixFchmodStrict(int descriptor, int mode, String path) {
+    final bindings = PosixLockBindings.instance;
+    while (true) {
+      if (bindings.fchmod(descriptor, mode) == 0) {
+        return;
+      }
+      final errorCode = bindings.readErrno();
+      if (errorCode != PosixLockBindings.eintr) {
+        throw _posixException('fchmod', path, errorCode);
+      }
+    }
+  }
+
   /// Flushes [descriptor] to storage via `fsync`, retrying on `EINTR`.
   void _posixFsync(
     int descriptor,
     String path, {
     String Function(String details)? formatFailureMessage,
   }) {
-    final bindings = _PosixLockBindings.instance;
-    while (true) {
-      if (bindings.fsync(descriptor) == 0) {
-        return;
-      }
-      final errorCode = bindings.readErrno();
-      if (errorCode != _posixEintr) {
-        throw _posixException(
-          'fsync',
-          path,
-          errorCode,
-          formatFailureMessage: formatFailureMessage,
-        );
-      }
-    }
-  }
-
-  /// Flushes the directory metadata of [directoryPath] when supported by the underlying POSIX filesystem.
-  void _posixFsyncDirectoryBestEffort(String directoryPath) {
-    final bindings = _PosixLockBindings.instance;
-    final pathPointer = bindings.allocateUtf8(directoryPath);
-    final int descriptor;
-    try {
-      descriptor = bindings.open(
-        pathPointer,
-        _posixORdonly | _posixOCloexec,
-        0,
+    final errorCode = PosixLockBindings.instance.fsyncDescriptor(descriptor);
+    if (errorCode != 0) {
+      throw _posixException(
+        'fsync',
+        path,
+        errorCode,
+        formatFailureMessage: formatFailureMessage,
       );
-    } finally {
-      bindings.freePointer(pathPointer.cast<Void>());
-    }
-    if (descriptor < 0) {
-      return;
-    }
-    try {
-      while (bindings.fsync(descriptor) != 0) {
-        if (bindings.readErrno() != _posixEintr) {
-          break;
-        }
-      }
-    } finally {
-      bindings.close(descriptor);
     }
   }
 
-  /// Opens [path] with POSIX `open(flags, mode)`, retrying on `EINTR`.
+  /// Opens [path] with POSIX `open(flags, mode)`, retrying on `EINTR` and throwing via [createException] on failure.
   int _posixOpen(
     String path,
     int flags,
     int mode, {
     String Function(String details)? formatFailureMessage,
   }) {
-    final bindings = _PosixLockBindings.instance;
-    final pointer = bindings.allocateUtf8(path);
-    try {
-      while (true) {
-        final descriptor = bindings.open(pointer, flags, mode);
-        if (descriptor >= 0) {
-          return descriptor;
-        }
-        final errorCode = bindings.readErrno();
-        if (errorCode != _posixEintr) {
-          throw _posixException(
-            'open',
-            path,
-            errorCode,
-            formatFailureMessage: formatFailureMessage,
-          );
-        }
-      }
-    } finally {
-      bindings.freePointer(pointer.cast<Void>());
+    final outcome = PosixLockBindings.instance.openRaw(path, flags, mode);
+    if (outcome.descriptor >= 0) {
+      return outcome.descriptor;
     }
-  }
-
-  /// Releases the POSIX `flock` on [descriptor] and closes it without unlinking the lock file.
-  static void _posixReleaseAndClose(int descriptor) {
-    final bindings = _PosixLockBindings.instance;
-    bindings.flock(descriptor, _posixLockUn);
-    bindings.close(descriptor);
+    throw _posixException(
+      'open',
+      path,
+      outcome.errorCode,
+      formatFailureMessage: formatFailureMessage,
+    );
   }
 
   /// Atomically renames [fromPath] over [toPath] via POSIX `rename`.
@@ -851,23 +934,12 @@ class HostFileLockManager<E extends Exception> {
     String toPath, {
     String Function(String details)? formatFailureMessage,
   }) {
-    final bindings = _PosixLockBindings.instance;
-    final fromPointer = bindings.allocateUtf8(fromPath);
-    final toPointer = bindings.allocateUtf8(toPath);
-    final int result;
-    final int errorCode;
-    try {
-      result = bindings.rename(fromPointer, toPointer);
-      errorCode = result == 0 ? 0 : bindings.readErrno();
-    } finally {
-      bindings.freePointer(fromPointer.cast<Void>());
-      bindings.freePointer(toPointer.cast<Void>());
-    }
-    if (result != 0) {
+    final outcome = PosixLockBindings.instance.renameRaw(fromPath, toPath);
+    if (outcome.result != 0) {
       throw _posixException(
         'rename',
         toPath,
-        errorCode,
+        outcome.errorCode,
         formatFailureMessage: formatFailureMessage,
       );
     }
@@ -875,31 +947,16 @@ class HostFileLockManager<E extends Exception> {
 
   /// Attempts a non-blocking `flock(LOCK_EX | LOCK_NB)` on [descriptor].
   bool _posixTryFlockExclusive(int descriptor, String lockFilePath) {
-    final bindings = _PosixLockBindings.instance;
-    while (true) {
-      if (bindings.flock(descriptor, _posixLockEx | _posixLockNb) == 0) {
-        return true;
-      }
-      final errorCode = bindings.readErrno();
-      if (errorCode == _posixEintr) {
-        continue;
-      }
-      if (errorCode == _posixEagain) {
-        return false;
-      }
-      throw _posixException('flock', lockFilePath, errorCode);
+    final errorCode = PosixLockBindings.instance.tryFlockExclusiveRaw(
+      descriptor,
+    );
+    if (errorCode == 0) {
+      return true;
     }
-  }
-
-  /// Removes [tempPath] via POSIX `unlink` while ignoring missing-file errors.
-  static void _posixUnlinkQuietly(String tempPath) {
-    final bindings = _PosixLockBindings.instance;
-    final pointer = bindings.allocateUtf8(tempPath);
-    try {
-      bindings.unlink(pointer);
-    } finally {
-      bindings.freePointer(pointer.cast<Void>());
+    if (errorCode == null) {
+      return false;
     }
+    throw _posixException('flock', lockFilePath, errorCode);
   }
 
   /// Writes all [bytes] to [descriptor] via POSIX `write`, handling partial writes and `EINTR`.
@@ -912,35 +969,18 @@ class HostFileLockManager<E extends Exception> {
     if (bytes.isEmpty) {
       return;
     }
-    final bindings = _PosixLockBindings.instance;
-    final bufferPointer = bindings.allocateBytes(bytes);
-    try {
-      var writtenTotal = 0;
-      while (writtenTotal < bytes.length) {
-        final chunkAddress = bufferPointer.address + writtenTotal;
-        final chunkPointer = Pointer<Uint8>.fromAddress(chunkAddress);
-        final writtenNow = bindings.write(
-          descriptor,
-          chunkPointer,
-          bytes.length - writtenTotal,
-        );
-        if (writtenNow > 0) {
-          writtenTotal += writtenNow;
-          continue;
-        }
-        final errorCode = bindings.readErrno();
-        if (errorCode != _posixEintr) {
-          throw _posixException(
-            'write',
-            path,
-            errorCode,
-            formatFailureMessage: formatFailureMessage,
-          );
-        }
-      }
-    } finally {
-      bindings.freePointer(bufferPointer.cast<Void>());
-    }
+    final bindings = PosixLockBindings.instance;
+    bindings.withByteBuffer(
+      bytes,
+      (performWrite) => writeAllPosixLoop(
+        totalBytes: bytes.length,
+        performWrite: performWrite,
+        readErrno: bindings.readErrno,
+        path: path,
+        formatFailureMessage: formatFailureMessage,
+      ),
+      descriptor,
+    );
   }
 
   /// Resolves the deepest existing ancestor directory of [targetPath] and appends remaining segments.
@@ -952,11 +992,11 @@ class HostFileLockManager<E extends Exception> {
       if (parentPath == cursor) {
         break;
       }
-      trailingSegments.add(_extractBaseName(cursor));
+      trailingSegments.add(TdfFilePath.extractFileNameFromPath(cursor));
       cursor = parentPath;
       final resolvedDir = _safeResolveDirectoryLinks(cursor);
       if (resolvedDir != null) {
-        final cleanAncestor = _trimTrailingSeparators(resolvedDir);
+        final cleanAncestor = TdfFilePath.trimTrailingSeparators(resolvedDir);
         final orderedTail = trailingSegments.reversed.join('/');
         return cleanAncestor == '/'
             ? '/$orderedTail'
@@ -1034,79 +1074,44 @@ class HostFileLockManager<E extends Exception> {
     );
   }
 
-  /// Strips trailing `/` and `\` characters while preserving POSIX `/` and Windows drive roots.
-  static String _trimTrailingSeparators(String path) {
-    final minLength = _windowsDrivePattern.hasMatch(path) ? 3 : 1;
-    var end = path.length;
-    while (end > minLength &&
-        (path.codeUnitAt(end - 1) == 0x2F ||
-            path.codeUnitAt(end - 1) == 0x5C)) {
-      end--;
-    }
-    return path.substring(0, end);
-  }
-
   /// Opens or creates [path] via Win32 `CreateFileW` and throws via [createException] on invalid handle.
   int _win32CreateFile(
     String path, {
     required int desiredAccess,
     required int shareMode,
     required int creationDisposition,
+    int flagsAndAttributes = Win32LockBindings.fileAttributeNormal,
     String Function(String details)? formatFailureMessage,
   }) {
-    final bindings = _Win32LockBindings.instance;
-    final pathPointer = bindings.allocateUtf16(path);
-    final int handle;
-    final int errorCode;
-    try {
-      handle = bindings.createFileW(
-        pathPointer,
-        desiredAccess,
-        shareMode,
-        nullptr,
-        creationDisposition,
-        _win32FileAttributeNormal,
-        0,
-      );
-      errorCode = (handle == -1 || handle == 0) ? bindings.getLastError() : 0;
-    } finally {
-      bindings.freePointer(pathPointer.cast<Void>());
-    }
-    if (handle == -1 || handle == 0) {
-      final details = 'CreateFileW failed (Win32 error $errorCode)';
+    final outcome = Win32LockBindings.instance.createFileRaw(
+      path,
+      desiredAccess: desiredAccess,
+      shareMode: shareMode,
+      creationDisposition: creationDisposition,
+      flagsAndAttributes: flagsAndAttributes,
+    );
+    if (outcome.handle == -1 || outcome.handle == 0) {
+      final details = 'CreateFileW failed (Win32 error ${outcome.errorCode})';
       final cause = FileSystemException(
         details,
         path,
-        OSError('Win32 error $errorCode', errorCode),
+        OSError('Win32 error ${outcome.errorCode}', outcome.errorCode),
       );
       final message = formatFailureMessage != null
           ? formatFailureMessage(details)
           : '$details: $path';
       throw createException(message, cause: cause);
     }
-    return handle;
+    return outcome.handle;
   }
 
-  /// Attempts a non-blocking `LockFileEx` over bytes `0..1` on [handle].
-  bool _win32TryLockExclusive(
-    int handle,
-    Pointer<Void> overlappedPointer,
-    String lockFilePath,
-  ) {
-    final bindings = _Win32LockBindings.instance;
-    final result = bindings.lockFileEx(
-      handle,
-      _win32LockExclusiveImmediate,
-      0,
-      1,
-      0,
-      overlappedPointer,
-    );
-    if (result != 0) {
+  /// Attempts a non-blocking `LockFileEx` over bytes `0..1` on [lockHandle].
+  bool _win32TryLockExclusive(Win32LockHandle lockHandle, String lockFilePath) {
+    final errorCode = lockHandle.tryLockExclusiveRaw();
+    if (errorCode == 0) {
       return true;
     }
-    final errorCode = bindings.getLastError();
-    if (errorCode == _win32ErrorLockViolation) {
+    if (errorCode == null) {
       return false;
     }
     throw createException(
@@ -1119,49 +1124,6 @@ class HostFileLockManager<E extends Exception> {
     );
   }
 
-  /// Attempts Win32 `MoveFileExW` replacement, returning `null` on success or `GetLastError()` on failure.
-  static int? _win32TryMoveReplace(String fromPath, String toPath) {
-    final bindings = _Win32LockBindings.instance;
-    final fromPointer = bindings.allocateUtf16(fromPath);
-    final toPointer = bindings.allocateUtf16(toPath);
-    try {
-      final succeeded = bindings.moveFileExW(
-        fromPointer,
-        toPointer,
-        _win32MoveReplaceWriteThrough,
-      );
-      if (succeeded != 0) {
-        return null;
-      }
-      return bindings.getLastError();
-    } finally {
-      bindings.freePointer(fromPointer.cast<Void>());
-      bindings.freePointer(toPointer.cast<Void>());
-    }
-  }
-
-  /// Deletes [tempPath] via Win32 `DeleteFileW`, ignoring errors on missing files.
-  static void _win32UnlinkQuietly(String tempPath) {
-    final bindings = _Win32LockBindings.instance;
-    final pointer = bindings.allocateUtf16(tempPath);
-    try {
-      bindings.deleteFileW(pointer);
-    } finally {
-      bindings.freePointer(pointer.cast<Void>());
-    }
-  }
-
-  /// Unlocks bytes `0..1`, closes [handle], and frees [overlappedPointer] without deleting the lock file.
-  static void _win32UnlockAndClose(
-    int handle,
-    Pointer<Void> overlappedPointer,
-  ) {
-    final bindings = _Win32LockBindings.instance;
-    bindings.unlockFileEx(handle, 0, 1, 0, overlappedPointer);
-    bindings.closeHandle(handle);
-    bindings.localFree(overlappedPointer);
-  }
-
   /// Writes all [bytes] and calls `FlushFileBuffers` on Win32 [handle].
   void _win32WriteAndFlush(
     int handle,
@@ -1169,15 +1131,20 @@ class HostFileLockManager<E extends Exception> {
     String tempPath, {
     String Function(String details)? formatFailureMessage,
   }) {
+    final bindings = Win32LockBindings.instance;
     if (bytes.isNotEmpty) {
-      _win32WriteBuffer(
+      bindings.withWriteBuffers(
         handle,
         bytes,
-        tempPath,
-        formatFailureMessage: formatFailureMessage,
+        (performWrite) => writeAllWindowsLoop(
+          totalBytes: bytes.length,
+          performWrite: performWrite,
+          readLastError: bindings.getLastError,
+          path: tempPath,
+          formatFailureMessage: formatFailureMessage,
+        ),
       );
     }
-    final bindings = _Win32LockBindings.instance;
     if (bindings.flushFileBuffers(handle) == 0) {
       final code = bindings.getLastError();
       final details = 'FlushFileBuffers failed (Win32 error $code)';
@@ -1194,57 +1161,6 @@ class HostFileLockManager<E extends Exception> {
     }
   }
 
-  /// Writes non-empty [bytes] to Win32 [handle] in a loop until complete.
-  void _win32WriteBuffer(
-    int handle,
-    List<int> bytes,
-    String tempPath, {
-    String Function(String details)? formatFailureMessage,
-  }) {
-    final bindings = _Win32LockBindings.instance;
-    final bufferPointer = bindings.allocateBytes(bytes);
-    final writtenPointer = bindings
-        .localAlloc(_win32LmemZeroInit, 4)
-        .cast<Uint32>();
-    if (writtenPointer.address == 0) {
-      bindings.freePointer(bufferPointer.cast<Void>());
-      throw const OutOfMemoryError();
-    }
-    try {
-      var writtenTotal = 0;
-      while (writtenTotal < bytes.length) {
-        final chunkPointer = Pointer<Uint8>.fromAddress(
-          bufferPointer.address + writtenTotal,
-        );
-        final result = bindings.writeFile(
-          handle,
-          chunkPointer,
-          bytes.length - writtenTotal,
-          writtenPointer,
-          nullptr,
-        );
-        if (result == 0) {
-          final code = bindings.getLastError();
-          final details = 'WriteFile failed (Win32 error $code)';
-          throw createException(
-            formatFailureMessage != null
-                ? formatFailureMessage(details)
-                : '$details: $tempPath',
-            cause: FileSystemException(
-              details,
-              tempPath,
-              OSError('Win32 error $code', code),
-            ),
-          );
-        }
-        writtenTotal += writtenPointer.value;
-      }
-    } finally {
-      bindings.freePointer(writtenPointer.cast<Void>());
-      bindings.freePointer(bufferPointer.cast<Void>());
-    }
-  }
-
   /// Writes [bytes] to an exclusive `0600` `.tmp.<32hex>` file, flushes it, and renames over [targetPath] on POSIX.
   void _writeAtomicallyPosix(
     String targetPath,
@@ -1252,30 +1168,35 @@ class HostFileLockManager<E extends Exception> {
     String Function(String details)? formatFailureMessage,
   }) {
     final parentDirectory = File(targetPath).parent;
-    parentDirectory.createSync(recursive: true);
-    final cleanParent = _trimTrailingSeparators(parentDirectory.path);
-    final baseName = _extractBaseName(targetPath);
+    _ensureTargetParentDirectory(
+      parentDirectory,
+      formatFailureMessage: formatFailureMessage,
+    );
+    final cleanParent = TdfFilePath.trimTrailingSeparators(
+      parentDirectory.path,
+    );
+    final baseName = TdfFilePath.extractFileNameFromPath(targetPath);
     final prefix = cleanParent == '/' ? '' : cleanParent;
     final tempPath = '$prefix/.$baseName.tmp.${_generateTempHexSuffix()}';
 
-    final bindings = _PosixLockBindings.instance;
+    final bindings = PosixLockBindings.instance;
     final openFlags =
-        _posixOWronly |
-        _posixOCreat |
-        _posixOExcl |
-        _posixOCloexec |
+        PosixLockBindings.oWronly |
+        PosixLockBindings.oCreat |
+        PosixLockBindings.oExcl |
+        PosixLockBindings.oCloexec |
         bindings.noFollowFlag;
     final descriptor = _posixOpen(
       tempPath,
       openFlags,
-      _posixFileMode0600,
+      PosixLockBindings.fileMode0600,
       formatFailureMessage: formatFailureMessage,
     );
     var descriptorClosed = false;
     try {
       _posixFchmodBestEffort(
         descriptor,
-        _posixFileMode0600,
+        PosixLockBindings.fileMode0600,
         tempPath,
         formatFailureMessage: formatFailureMessage,
       );
@@ -1305,12 +1226,12 @@ class HostFileLockManager<E extends Exception> {
         targetPath,
         formatFailureMessage: formatFailureMessage,
       );
-      _posixFsyncDirectoryBestEffort(parentDirectory.path);
+      bindings.fsyncDirectoryBestEffort(parentDirectory.path);
     } on Object {
       if (!descriptorClosed) {
         bindings.close(descriptor);
       }
-      _posixUnlinkQuietly(tempPath);
+      PosixLockBindings.unlinkQuietly(tempPath);
       rethrow;
     }
   }
@@ -1322,21 +1243,30 @@ class HostFileLockManager<E extends Exception> {
     String Function(String details)? formatFailureMessage,
   }) async {
     final parentDirectory = File(targetPath).parent;
-    parentDirectory.createSync(recursive: true);
-    final cleanParent = _trimTrailingSeparators(parentDirectory.path);
-    final baseName = _extractBaseName(targetPath);
+    _ensureTargetParentDirectory(
+      parentDirectory,
+      formatFailureMessage: formatFailureMessage,
+    );
+    final cleanParent = TdfFilePath.trimTrailingSeparators(
+      parentDirectory.path,
+    );
+    final baseName = TdfFilePath.extractFileNameFromPath(targetPath);
     final separator = cleanParent.endsWith(r'\') ? '' : r'\';
     final tempPath =
         '$cleanParent$separator.$baseName.tmp.${_generateTempHexSuffix()}';
 
     final handle = _win32CreateFile(
       tempPath,
-      desiredAccess: _win32GenericWrite,
+      desiredAccess: Win32LockBindings.genericWrite,
       shareMode: 0,
-      creationDisposition: _win32CreateNew,
+      creationDisposition: Win32LockBindings.createNew,
+      flagsAndAttributes:
+          Win32LockBindings.fileAttributeNormal |
+          Win32LockBindings.fileFlagOpenReparsePoint,
       formatFailureMessage: formatFailureMessage,
     );
     var handleClosed = false;
+    final bindings = Win32LockBindings.instance;
     try {
       _win32WriteAndFlush(
         handle,
@@ -1345,391 +1275,25 @@ class HostFileLockManager<E extends Exception> {
         formatFailureMessage: formatFailureMessage,
       );
       handleClosed = true;
-      _Win32LockBindings.instance.closeHandle(handle);
+      closeWindowsWriteHandle(
+        closeHandle: () => bindings.closeHandle(handle) != 0,
+        readLastError: bindings.getLastError,
+        tempPath: tempPath,
+        formatFailureMessage: formatFailureMessage,
+      );
     } on Object {
       if (!handleClosed) {
-        _Win32LockBindings.instance.closeHandle(handle);
+        bindings.closeHandle(handle);
       }
-      _win32UnlinkQuietly(tempPath);
+      Win32LockBindings.unlinkQuietly(tempPath);
       rethrow;
     }
 
     await replaceTargetWithSharingRetry(
-      performMove: () => _win32TryMoveReplace(tempPath, targetPath),
-      cleanupTemp: () => _win32UnlinkQuietly(tempPath),
+      performMove: () => Win32LockBindings.tryMoveReplace(tempPath, targetPath),
+      cleanupTemp: () => Win32LockBindings.unlinkQuietly(tempPath),
       targetPath: targetPath,
       formatFailureMessage: formatFailureMessage,
     );
-  }
-}
-
-/// Lazy FFI bindings to POSIX `libc` symbols on Linux and Android (`DynamicLibrary.process()`).
-class _PosixLockBindings {
-  /// Constructs [_PosixLockBindings] with bound `libc` function pointers.
-  const _PosixLockBindings._({
-    required this.chmod,
-    required this.close,
-    required this.errnoPointer,
-    required this.fchmod,
-    required this.flock,
-    required this.free,
-    required this.fsync,
-    required this.getuid,
-    required this.malloc,
-    required this.mkdir,
-    required this.noFollowFlag,
-    required this.open,
-    required this.rename,
-    required this.unlink,
-    required this.write,
-  });
-
-  /// Resolves `libc` process symbols on first POSIX lock or atomic file operation.
-  factory _PosixLockBindings._load() {
-    final libc = DynamicLibrary.process();
-    return _PosixLockBindings._(
-      chmod: libc
-          .lookupFunction<
-            Int32 Function(Pointer<Uint8>, Uint32),
-            int Function(Pointer<Uint8>, int)
-          >('chmod'),
-      close: libc.lookupFunction<Int32 Function(Int32), int Function(int)>(
-        'close',
-      ),
-      errnoPointer: libc
-          .lookupFunction<Pointer<Int32> Function(), Pointer<Int32> Function()>(
-            Platform.isAndroid ? '__errno' : '__errno_location',
-          ),
-      fchmod: libc
-          .lookupFunction<
-            Int32 Function(Int32, Uint32),
-            int Function(int, int)
-          >('fchmod'),
-      flock: libc
-          .lookupFunction<Int32 Function(Int32, Int32), int Function(int, int)>(
-            'flock',
-          ),
-      free: libc
-          .lookupFunction<
-            Void Function(Pointer<Void>),
-            void Function(Pointer<Void>)
-          >('free'),
-      fsync: libc.lookupFunction<Int32 Function(Int32), int Function(int)>(
-        'fsync',
-      ),
-      getuid: libc.lookupFunction<Uint32 Function(), int Function()>('getuid'),
-      malloc: libc
-          .lookupFunction<
-            Pointer<Void> Function(Size),
-            Pointer<Void> Function(int)
-          >('malloc'),
-      mkdir: libc
-          .lookupFunction<
-            Int32 Function(Pointer<Uint8>, Uint32),
-            int Function(Pointer<Uint8>, int)
-          >('mkdir'),
-      noFollowFlag: _resolveNoFollowFlag(),
-      open: libc
-          .lookupFunction<
-            Int32 Function(Pointer<Uint8>, Int32, VarArgs<(Uint32,)>),
-            int Function(Pointer<Uint8>, int, int)
-          >('open'),
-      rename: libc
-          .lookupFunction<
-            Int32 Function(Pointer<Uint8>, Pointer<Uint8>),
-            int Function(Pointer<Uint8>, Pointer<Uint8>)
-          >('rename'),
-      unlink: libc
-          .lookupFunction<
-            Int32 Function(Pointer<Uint8>),
-            int Function(Pointer<Uint8>)
-          >('unlink'),
-      write: libc
-          .lookupFunction<
-            IntPtr Function(Int32, Pointer<Uint8>, Size),
-            int Function(int, Pointer<Uint8>, int)
-          >('write'),
-    );
-  }
-
-  /// Singleton POSIX bindings instance.
-  static final _PosixLockBindings instance = _PosixLockBindings._load();
-
-  /// POSIX `chmod(const char *, mode_t)` function.
-  final int Function(Pointer<Uint8>, int) chmod;
-
-  /// POSIX `close(int)` function.
-  final int Function(int) close;
-
-  /// Thread-local POSIX `errno` address accessor.
-  final Pointer<Int32> Function() errnoPointer;
-
-  /// POSIX `fchmod(int, mode_t)` function.
-  final int Function(int, int) fchmod;
-
-  /// POSIX `flock(int, int)` function.
-  final int Function(int, int) flock;
-
-  /// Native `free(void *)` function.
-  final void Function(Pointer<Void>) free;
-
-  /// POSIX `fsync(int)` function.
-  final int Function(int) fsync;
-
-  /// POSIX `getuid(void)` function.
-  final int Function() getuid;
-
-  /// Native `malloc(size_t)` function.
-  final Pointer<Void> Function(int) malloc;
-
-  /// POSIX `mkdir(const char *, mode_t)` function.
-  final int Function(Pointer<Uint8>, int) mkdir;
-
-  /// Architecture-specific `O_NOFOLLOW` bitmask (`0x8000` on ARM/ARM64, `0x20000` on x86/x64).
-  final int noFollowFlag;
-
-  /// Variadic POSIX `open(const char *, int, mode_t)` function.
-  final int Function(Pointer<Uint8>, int, int) open;
-
-  /// POSIX `rename(const char *, const char *)` function.
-  final int Function(Pointer<Uint8>, Pointer<Uint8>) rename;
-
-  /// POSIX `unlink(const char *)` function.
-  final int Function(Pointer<Uint8>) unlink;
-
-  /// POSIX `write(int, const void *, size_t)` function.
-  final int Function(int, Pointer<Uint8>, int) write;
-
-  /// Allocates a native byte buffer initialized with [bytes].
-  Pointer<Uint8> allocateBytes(List<int> bytes) {
-    final pointer = malloc(bytes.isEmpty ? 1 : bytes.length).cast<Uint8>();
-    if (pointer.address == 0) {
-      throw const OutOfMemoryError();
-    }
-    if (bytes.isNotEmpty) {
-      pointer.asTypedList(bytes.length).setRange(0, bytes.length, bytes);
-    }
-    return pointer;
-  }
-
-  /// Allocates a null-terminated UTF-8 C string in native heap memory.
-  Pointer<Uint8> allocateUtf8(String value) {
-    final encoded = utf8.encode(value);
-    final pointer = malloc(encoded.length + 1).cast<Uint8>();
-    if (pointer.address == 0) {
-      throw const OutOfMemoryError();
-    }
-    pointer.asTypedList(encoded.length + 1)
-      ..setRange(0, encoded.length, encoded)
-      ..[encoded.length] = 0;
-    return pointer;
-  }
-
-  /// Frees native heap [pointer] allocated by [allocateUtf8] or [allocateBytes].
-  void freePointer(Pointer<Void> pointer) => free(pointer);
-
-  /// Reads the thread-local POSIX `errno` value.
-  int readErrno() => errnoPointer().value;
-
-  /// Resolves the Linux/Android ABI `O_NOFOLLOW` constant.
-  static int _resolveNoFollowFlag() {
-    return switch (Abi.current()) {
-      Abi.linuxArm64 ||
-      Abi.androidArm64 ||
-      Abi.linuxArm ||
-      Abi.androidArm => 0x8000,
-      Abi.linuxX64 ||
-      Abi.androidX64 ||
-      Abi.linuxIA32 ||
-      Abi.androidIA32 ||
-      Abi.linuxRiscv64 ||
-      Abi.androidRiscv64 => 0x20000,
-      _ => 0,
-    };
-  }
-}
-
-/// Lazy FFI bindings to Win32 `kernel32.dll` symbols on Windows.
-class _Win32LockBindings {
-  /// Constructs [_Win32LockBindings] with bound `kernel32.dll` function pointers.
-  const _Win32LockBindings._({
-    required this.closeHandle,
-    required this.createFileW,
-    required this.deleteFileW,
-    required this.flushFileBuffers,
-    required this.getLastError,
-    required this.localAlloc,
-    required this.localFree,
-    required this.lockFileEx,
-    required this.moveFileExW,
-    required this.unlockFileEx,
-    required this.writeFile,
-  });
-
-  /// Opens `kernel32.dll` and binds Win32 file/lock symbols on Windows.
-  factory _Win32LockBindings._load() {
-    final kernel32 = DynamicLibrary.open('kernel32.dll');
-    return _Win32LockBindings._(
-      closeHandle: kernel32
-          .lookupFunction<Int32 Function(IntPtr), int Function(int)>(
-            'CloseHandle',
-          ),
-      createFileW: kernel32
-          .lookupFunction<
-            IntPtr Function(
-              Pointer<Uint16>,
-              Uint32,
-              Uint32,
-              Pointer<Void>,
-              Uint32,
-              Uint32,
-              IntPtr,
-            ),
-            int Function(
-              Pointer<Uint16>,
-              int,
-              int,
-              Pointer<Void>,
-              int,
-              int,
-              int,
-            )
-          >('CreateFileW'),
-      deleteFileW: kernel32
-          .lookupFunction<
-            Int32 Function(Pointer<Uint16>),
-            int Function(Pointer<Uint16>)
-          >('DeleteFileW'),
-      flushFileBuffers: kernel32
-          .lookupFunction<Int32 Function(IntPtr), int Function(int)>(
-            'FlushFileBuffers',
-          ),
-      getLastError: kernel32.lookupFunction<Uint32 Function(), int Function()>(
-        'GetLastError',
-      ),
-      localAlloc: kernel32
-          .lookupFunction<
-            Pointer<Void> Function(Uint32, Size),
-            Pointer<Void> Function(int, int)
-          >('LocalAlloc'),
-      localFree: kernel32
-          .lookupFunction<
-            Pointer<Void> Function(Pointer<Void>),
-            Pointer<Void> Function(Pointer<Void>)
-          >('LocalFree'),
-      lockFileEx: kernel32
-          .lookupFunction<
-            Int32 Function(
-              IntPtr,
-              Uint32,
-              Uint32,
-              Uint32,
-              Uint32,
-              Pointer<Void>,
-            ),
-            int Function(int, int, int, int, int, Pointer<Void>)
-          >('LockFileEx'),
-      moveFileExW: kernel32
-          .lookupFunction<
-            Int32 Function(Pointer<Uint16>, Pointer<Uint16>, Uint32),
-            int Function(Pointer<Uint16>, Pointer<Uint16>, int)
-          >('MoveFileExW'),
-      unlockFileEx: kernel32
-          .lookupFunction<
-            Int32 Function(IntPtr, Uint32, Uint32, Uint32, Pointer<Void>),
-            int Function(int, int, int, int, Pointer<Void>)
-          >('UnlockFileEx'),
-      writeFile: kernel32
-          .lookupFunction<
-            Int32 Function(
-              IntPtr,
-              Pointer<Uint8>,
-              Uint32,
-              Pointer<Uint32>,
-              Pointer<Void>,
-            ),
-            int Function(
-              int,
-              Pointer<Uint8>,
-              int,
-              Pointer<Uint32>,
-              Pointer<Void>,
-            )
-          >('WriteFile'),
-    );
-  }
-
-  /// Singleton Win32 bindings instance.
-  static final _Win32LockBindings instance = _Win32LockBindings._load();
-
-  /// Win32 `CloseHandle(HANDLE)` function.
-  final int Function(int) closeHandle;
-
-  /// Win32 `CreateFileW` function.
-  final int Function(Pointer<Uint16>, int, int, Pointer<Void>, int, int, int)
-  createFileW;
-
-  /// Win32 `DeleteFileW(LPCWSTR)` function.
-  final int Function(Pointer<Uint16>) deleteFileW;
-
-  /// Win32 `FlushFileBuffers(HANDLE)` function.
-  final int Function(int) flushFileBuffers;
-
-  /// Win32 `GetLastError(void)` function.
-  final int Function() getLastError;
-
-  /// Win32 `LocalAlloc(UINT, SIZE_T)` function.
-  final Pointer<Void> Function(int, int) localAlloc;
-
-  /// Win32 `LocalFree(HLOCAL)` function.
-  final Pointer<Void> Function(Pointer<Void>) localFree;
-
-  /// Win32 `LockFileEx` function.
-  final int Function(int, int, int, int, int, Pointer<Void>) lockFileEx;
-
-  /// Win32 `MoveFileExW` function.
-  final int Function(Pointer<Uint16>, Pointer<Uint16>, int) moveFileExW;
-
-  /// Win32 `UnlockFileEx` function.
-  final int Function(int, int, int, int, Pointer<Void>) unlockFileEx;
-
-  /// Win32 `WriteFile` function.
-  final int Function(int, Pointer<Uint8>, int, Pointer<Uint32>, Pointer<Void>)
-  writeFile;
-
-  /// Allocates a native byte buffer initialized with [bytes].
-  Pointer<Uint8> allocateBytes(List<int> bytes) {
-    final pointer = localAlloc(
-      0x0040,
-      bytes.isEmpty ? 1 : bytes.length,
-    ).cast<Uint8>();
-    if (pointer.address == 0) {
-      throw const OutOfMemoryError();
-    }
-    if (bytes.isNotEmpty) {
-      pointer.asTypedList(bytes.length).setRange(0, bytes.length, bytes);
-    }
-    return pointer;
-  }
-
-  /// Allocates a null-terminated UTF-16LE wide string (`LPCWSTR`) in Win32 heap memory.
-  Pointer<Uint16> allocateUtf16(String value) {
-    final codeUnits = value.codeUnits;
-    final pointer = localAlloc(
-      0x0040,
-      (codeUnits.length + 1) * 2,
-    ).cast<Uint16>();
-    if (pointer.address == 0) {
-      throw const OutOfMemoryError();
-    }
-    pointer.asTypedList(codeUnits.length + 1)
-      ..setRange(0, codeUnits.length, codeUnits)
-      ..[codeUnits.length] = 0;
-    return pointer;
-  }
-
-  /// Frees Win32 heap [pointer] allocated via [localAlloc].
-  void freePointer(Pointer<Void> pointer) {
-    localFree(pointer);
   }
 }

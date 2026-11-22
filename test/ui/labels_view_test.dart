@@ -33,6 +33,7 @@ import 'package:tiertask/ui/components/ui_quick_composer.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/views/labels_view.dart';
 import 'package:tiertask/ui/widgets/entity_conditions_section.dart';
+import 'package:tiertask/ui/widgets/entity_links_section.dart';
 import 'package:tiertask/ui/widgets/entity_note_section.dart';
 
 import 'test_helpers.dart';
@@ -48,7 +49,7 @@ class _ControlledLabelTaskNotifier extends FakeTaskNotifier {
   final bool throwOnAddLabel;
 
   @override
-  Future<void> addLabel(
+  Future<bool> addLabel(
     String name, {
     String? color,
     String? id,
@@ -65,7 +66,7 @@ class _ControlledLabelTaskNotifier extends FakeTaskNotifier {
     if (throwOnAddLabel) {
       throw const FormatException('Simulated local persistence error');
     }
-    await super.addLabel(
+    return super.addLabel(
       name,
       color: color,
       id: id,
@@ -83,7 +84,7 @@ void main() {
 
   setUp(() {
     lastCopiedText = null;
-    AppLogger.resetForTesting(clock: () => DateTime.utc(2026, 11, 21, 12, 0));
+    AppLogger.resetForTesting(clock: () => DateTime.utc(2026, 11, 21, 12));
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
           if (call.method == 'Clipboard.setData') {
@@ -471,16 +472,15 @@ void main() {
           find.byKey(const ValueKey<String>('label_draft_add_links')),
         );
         await tester.pumpAndSettle();
-        final draftLinkTitle = find.descendant(
-          of: find.byKey(const ValueKey<String>('label_draft_link_title')),
+        final draftLinkInputs = find.descendant(
+          of: find.byType(EntityLinksEditorBody),
           matching: find.byType(TextField),
         );
-        final draftLinkUri = find.descendant(
-          of: find.byKey(const ValueKey<String>('label_draft_link_uri')),
-          matching: find.byType(TextField),
+        await tester.enterText(draftLinkInputs.at(0), 'Spec');
+        await tester.enterText(
+          draftLinkInputs.at(1),
+          'https://example.com/spec',
         );
-        await tester.enterText(draftLinkTitle, 'Spec');
-        await tester.enterText(draftLinkUri, 'https://example.com/spec');
         await tester.tap(find.text('Add link'));
         await tester.pumpAndSettle();
 
@@ -493,37 +493,31 @@ void main() {
         );
         await tester.pumpAndSettle();
         await tester.ensureVisible(
-          find.byKey(const ValueKey<String>('label_draft_cond_day_1')),
+          find.byKey(const ValueKey<String>('cond_day_1')),
         );
         await tester.pumpAndSettle();
-        await tester.tap(
-          find.byKey(const ValueKey<String>('label_draft_cond_day_1')),
-        );
+        await tester.tap(find.byKey(const ValueKey<String>('cond_day_1')));
         await tester.pumpAndSettle();
 
-        final startTimeField = find.descendant(
-          of: find.byKey(const ValueKey<String>('label_draft_cond_time_start')),
+        final draftTimeInputs = find.descendant(
+          of: find.byType(EntityConditionsEditorBody),
           matching: find.byType(TextField),
         );
-        final endTimeField = find.descendant(
-          of: find.byKey(const ValueKey<String>('label_draft_cond_time_end')),
-          matching: find.byType(TextField),
-        );
-        await tester.ensureVisible(startTimeField);
+        await tester.ensureVisible(draftTimeInputs.at(0));
         await tester.pumpAndSettle();
-        await tester.enterText(startTimeField, '09:00');
-        await tester.enterText(endTimeField, '17:00');
+        await tester.enterText(draftTimeInputs.at(0), '09:00');
+        await tester.enterText(draftTimeInputs.at(1), '17:00');
         await tester.ensureVisible(find.text('Add time window'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add time window'));
         await tester.pumpAndSettle();
 
         await tester.ensureVisible(
-          find.byKey(const ValueKey<String>('label_draft_cond_loc_loc_office')),
+          find.byKey(const ValueKey<String>('cond_loc_loc_office')),
         );
         await tester.pumpAndSettle();
         await tester.tap(
-          find.byKey(const ValueKey<String>('label_draft_cond_loc_loc_office')),
+          find.byKey(const ValueKey<String>('cond_loc_loc_office')),
         );
         await tester.pumpAndSettle();
 
@@ -580,12 +574,7 @@ void main() {
             DayTaskCondition.fromWeekdays(const <int>[DateTime.monday]),
           ],
         );
-        const beta = TdfLabel(
-          id: 'lbl_beta',
-          name: 'Beta',
-          color: '#E91E63',
-          isScoped: false,
-        );
+        const beta = TdfLabel(id: 'lbl_beta', name: 'Beta', color: '#E91E63');
         final task = TaskItem(
           id: 'tsk_1',
           title: 'Open alpha task',
@@ -699,14 +688,8 @@ void main() {
           id: 'lbl_alpha',
           name: 'Alpha',
           color: '#2196F3',
-          isScoped: false,
         );
-        const beta = TdfLabel(
-          id: 'lbl_beta',
-          name: 'Beta',
-          color: '#4CAF50',
-          isScoped: false,
-        );
+        const beta = TdfLabel(id: 'lbl_beta', name: 'Beta', color: '#4CAF50');
         final board = TaskBoard(labels: const <TdfLabel>[alpha, beta]);
 
         final container = await pumpLeafWidget(
@@ -1064,7 +1047,6 @@ void main() {
             .read(shellProvider.notifier)
             .expandEntity(
               const EntityRef(kind: EntityKind.label, id: 'lbl_12'),
-              reveal: true,
             );
         await tester.pumpAndSettle();
 
@@ -1079,5 +1061,87 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'defers internal ScrollController disposal when external scrollController attaches',
+      (tester) async {
+        final externalController = ScrollController();
+        addTearDown(externalController.dispose);
+
+        var useExternal = false;
+        late StateSetter rebuildHost;
+
+        await pumpLeafWidget(
+          tester,
+          Scaffold(
+            body: StatefulBuilder(
+              builder: (context, setState) {
+                rebuildHost = setState;
+                return LabelsView(
+                  scrollController: useExternal ? externalController : null,
+                );
+              },
+            ),
+          ),
+          board: TaskBoard(
+            labels: const <TdfLabel>[
+              TdfLabel(id: 'lbl_1', name: 'Work', color: '#2196F3'),
+              TdfLabel(id: 'lbl_2', name: 'Home', color: '#4CAF50'),
+            ],
+          ),
+        );
+
+        rebuildHost(() => useExternal = true);
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Swapping LabelsView from internal to external ScrollController must defer disposal',
+        );
+        expect(externalController.hasClients, isTrue);
+      },
+    );
+
+    testWidgets('does not rebuild LabelsView on unrelated task mutations', (
+      tester,
+    ) async {
+      final board = TaskBoard(
+        focus: <TaskItem>[
+          TaskItem(
+            id: 'tsk_1',
+            title: 'Task without label changes',
+            note: 'Before',
+          ),
+        ],
+        labels: const <TdfLabel>[
+          TdfLabel(id: 'lbl_1', name: 'Work', color: '#2196F3'),
+        ],
+      );
+
+      final container = await pumpLeafWidget(
+        tester,
+        const Scaffold(body: LabelsView()),
+        board: board,
+      );
+
+      final scrollViewBefore = tester.widget<CustomScrollView>(
+        find.byType(CustomScrollView),
+      );
+
+      await container
+          .read(taskNotifierProvider.notifier)
+          .updateTask('tsk_1', note: 'After');
+      await tester.pump();
+
+      final scrollViewAfter = tester.widget<CustomScrollView>(
+        find.byType(CustomScrollView),
+      );
+      expect(
+        identical(scrollViewAfter, scrollViewBefore),
+        isTrue,
+        reason: 'Unrelated task note edit must not rebuild LabelsView when sortedLabels values are unchanged',
+      );
+    });
   });
 }

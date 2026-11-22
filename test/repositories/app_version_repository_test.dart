@@ -73,7 +73,6 @@ void main() {
           AppVersionRepository.formatFullVersion(
             commitCount: '55',
             commitHash: 'e64e6a5',
-            isDirty: false,
           ),
           equals('v0.4.0+55.e64e6a5'),
           reason: 'Clean working tree must format without .dev suffix',

@@ -330,7 +330,6 @@ class _SelectLocalFileModalState extends ConsumerState<_SelectLocalFileModal> {
       key: const ValueKey<String>('select_local_file_modal'),
       title: localizations.selectLocalDialogTitle,
       subtitle: localizations.selectLocalDialogDescription,
-      size: UiDialogSize.medium,
       closeTooltip: localizations.actionClose,
       onClose: widget.onClose,
       body: _SelectLocalFileBody(

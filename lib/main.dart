@@ -56,15 +56,16 @@ class _BackgroundServicesHost extends ConsumerWidget {
 
 /// State for [TierTaskApp] managing application lifecycle log flushing, cached themes, and Material routing.
 class _TierTaskAppState extends ConsumerState<TierTaskApp> {
-  static final ThemeData _calmDarkTheme = UiThemePresets.calm.dark
-      .toThemeData();
-  static final ThemeData _calmLightTheme = UiThemePresets.calm.light
-      .toThemeData();
-  static final ThemeData _plumDarkTheme = UiThemePresets.plumUmber.dark
-      .toThemeData();
-  static final ThemeData _plumLightTheme = UiThemePresets.plumUmber.light
-      .toThemeData();
+  static final Map<AppThemePalette, ({ThemeData light, ThemeData dark})>
+  _cachedThemes =
+      Map<AppThemePalette, ({ThemeData light, ThemeData dark})>.unmodifiable(
+        <AppThemePalette, ({ThemeData light, ThemeData dark})>{
+          for (final palette in AppThemePalette.values)
+            palette: _buildThemePair(UiDomainMappers.themePreset(palette)),
+        },
+      );
 
+  Future<void>? _inFlightRemoteLogFlush;
   AppLifecycleListener? _lifecycleListener;
 
   @override
@@ -72,10 +73,7 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
     super.initState();
     _lifecycleListener = AppLifecycleListener(
       onStateChange: _handleLifecycleStateChange,
-      onExitRequested: () async {
-        AppLogger.handleAppLifecycleState(AppLifecycleState.detached);
-        return AppExitResponse.exit;
-      },
+      onExitRequested: _handleExitRequested,
     );
   }
 
@@ -111,20 +109,49 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
     );
   }
 
-  /// Attempts a best-effort WebDAV log upload when backgrounding the application.
-  Future<void> _flushRemoteLogQuietly() async {
-    try {
-      await ref.read(webDavConfigProvider.notifier).syncLogToWebDavNow();
-    } on Object {
-      // Ignore background flush errors during lifecycle transitions.
+  /// Builds the cached light and dark [ThemeData] pair for [preset].
+  static ({ThemeData light, ThemeData dark}) _buildThemePair(
+    UiThemePreset preset,
+  ) => (light: preset.light.toThemeData(), dark: preset.dark.toThemeData());
+
+  /// Attempts a deduplicated best-effort WebDAV log upload during backgrounding or shutdown.
+  Future<void> _flushRemoteLogQuietly() {
+    if (_inFlightRemoteLogFlush case final pending?) {
+      return pending;
     }
+    final operation = _runRemoteLogFlush();
+    _inFlightRemoteLogFlush = operation;
+    return operation;
   }
 
-  /// Records lifecycle state transitions and flushes WebDAV logs on backgrounding.
+  /// Drains pending workspace persistence before flushing [AppLogger] and approving exit.
+  Future<AppExitResponse> _handleExitRequested() async {
+    if (mounted) {
+      try {
+        await ref.read(workspaceUnloadCoordinatorProvider).runBeforeUnload();
+      } on Object catch (error) {
+        AppLogger.event(
+          LogLevel.warn,
+          LogTag.lifecycle,
+          'lifecycle.exit_flush_failed',
+          error: error,
+        );
+      }
+    }
+    AppLogger.handleAppLifecycleState(AppLifecycleState.detached);
+    return AppExitResponse.exit;
+  }
+
+  /// Records lifecycle state transitions and flushes WebDAV logs on backgrounding or exit.
   void _handleLifecycleStateChange(AppLifecycleState state) {
     AppLogger.handleAppLifecycleState(state);
-    if (state == AppLifecycleState.inactive ||
-        state == AppLifecycleState.paused) {
+    final shouldFlushRemoteLog = switch (state) {
+      AppLifecycleState.paused ||
+      AppLifecycleState.hidden ||
+      AppLifecycleState.detached => true,
+      AppLifecycleState.inactive || AppLifecycleState.resumed => false,
+    };
+    if (shouldFlushRemoteLog) {
       unawaited(_flushRemoteLogQuietly());
     }
   }
@@ -133,13 +160,22 @@ class _TierTaskAppState extends ConsumerState<TierTaskApp> {
   ({ThemeData light, ThemeData dark}) _resolveCachedThemes(
     AppThemePalette palette,
   ) {
-    return switch (palette) {
-      AppThemePalette.calm => (light: _calmLightTheme, dark: _calmDarkTheme),
-      AppThemePalette.plumUmber => (
-        light: _plumLightTheme,
-        dark: _plumDarkTheme,
-      ),
-    };
+    return _cachedThemes[palette] ??
+        _buildThemePair(UiDomainMappers.themePreset(palette));
+  }
+
+  /// Executes a single best-effort WebDAV log upload and clears [_inFlightRemoteLogFlush].
+  Future<void> _runRemoteLogFlush() async {
+    try {
+      if (!mounted) {
+        return;
+      }
+      await ref.read(webDavConfigProvider.notifier).syncLogToWebDavNow();
+    } on Object {
+      // Ignore background flush errors during lifecycle transitions.
+    } finally {
+      _inFlightRemoteLogFlush = null;
+    }
   }
 }
 

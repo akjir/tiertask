@@ -15,11 +15,13 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/location_state.dart';
+import '../../models/task_board.dart';
 import '../../models/tdf_error.dart';
 import '../../models/tdf_location.dart';
 import '../../providers/entity_actions_provider.dart';
@@ -32,13 +34,8 @@ import '../layout/ui_page_header.dart';
 import '../primitives/ui_banner.dart';
 import '../tokens/ui_breakpoints.dart';
 import '../tokens/ui_theme_tokens.dart';
+import '../widgets/entity_reveal_scroll_controller.dart';
 import 'location_card.dart';
-
-/// Estimated vertical extent per collapsed location card used to pre-scroll offscreen reveals.
-const double _estimatedCardExtent = 84.0;
-
-/// Duration for smooth scroll-to-card reveals (`U-CARD-001`).
-const Duration _revealScrollDuration = Duration(milliseconds: 220);
 
 /// Expandable Locations manager view with inline Quick-Create, uncommitted Draft Card,
 /// single-expand location cards, coordinates/geocoding editing, and context-preserving Back navigation (`U-CARD-001`..`006`, `U-UX-002`).
@@ -51,6 +48,28 @@ class LocationsView extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<LocationsView> createState() => _LocationsViewState();
+}
+
+/// Immutable value-equality location list slice watched by [_LocationsViewState].
+@immutable
+class _LocationsBoardSlice {
+  /// Creates a [_LocationsBoardSlice].
+  const _LocationsBoardSlice(this.locations);
+
+  /// Alphabetically sorted workspace locations.
+  final List<TdfLocation> locations;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is _LocationsBoardSlice &&
+        listEquals(other.locations, locations);
+  }
+
+  @override
+  int get hashCode => Object.hashAll(locations);
 }
 
 /// Lazy sliver list building expandable Location cards (`P-LAZY-LISTS`).
@@ -447,47 +466,38 @@ class _LocationsScrollView extends StatelessWidget {
 }
 
 /// Manages Quick-Create composer state, card reveal keys, fallback scroll ownership, and view coordination for [LocationsView].
-class _LocationsViewState extends ConsumerState<LocationsView> {
-  final Map<String, GlobalKey> _ownedCardKeys = <String, GlobalKey>{};
+class _LocationsViewState extends ConsumerState<LocationsView>
+    with EntityRevealScrollMixin<LocationsView> {
   final TextEditingController _quickCreateController = TextEditingController();
   final FocusNode _quickCreateFocusNode = FocusNode();
 
-  ScrollController? _ownedScrollController;
-  String? _pendingRevealLocationId;
+  @override
+  ScrollController? get externalScrollController => widget.scrollController;
 
-  /// Active scroll controller, creating a private fallback only when caller omits [LocationsView.scrollController].
-  ScrollController get _scrollController {
-    if (widget.scrollController case final external?) {
-      return external;
-    }
-    return _ownedScrollController ??= ScrollController();
-  }
+  @override
+  double get revealAlignment => 0.12;
+
+  @override
+  EntityDraftKind get revealDraftKind => EntityDraftKind.location;
+
+  @override
+  EntityKind get revealEntityKind => EntityKind.location;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      _scheduleReveal(ref.read(shellProvider).revealEntityRequest);
-    });
+    initRevealScroll();
   }
 
   @override
   void didUpdateWidget(covariant LocationsView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.scrollController != widget.scrollController &&
-        widget.scrollController != null &&
-        _ownedScrollController != null) {
-      _ownedScrollController?.dispose();
-      _ownedScrollController = null;
-    }
+    handleScrollControllerSwap(oldWidget.scrollController);
   }
 
   @override
   void dispose() {
-    _ownedScrollController?.dispose();
+    disposeRevealScroll();
     _quickCreateController.dispose();
     _quickCreateFocusNode.dispose();
     super.dispose();
@@ -495,44 +505,34 @@ class _LocationsViewState extends ConsumerState<LocationsView> {
 
   @override
   Widget build(BuildContext context) {
-    _registerShellListeners();
+    registerRevealShellListeners();
     final tokens = UiThemeTokens.of(context);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
     final contentPadding = tokens.spacing.mainContentPadding(viewport);
-    final locations = ref.watch(
-      taskNotifierProvider.select(
-        (boardAsync) =>
-            boardAsync.asData?.value.sortedLocations ?? const <TdfLocation>[],
-      ),
-    );
-    _pruneOwnedCardKeys(locations);
+    final locations = ref
+        .watch(taskNotifierProvider.select(_selectLocationsBoardSlice))
+        .locations;
+    pruneOwnedCardKeys(locations.map((location) => location.id));
 
     return _LocationsScrollView(
-      controller: _scrollController,
+      controller: effectiveScrollController,
       locations: locations,
       contentPadding: contentPadding,
       quickCreateController: _quickCreateController,
       quickCreateFocusNode: _quickCreateFocusNode,
-      cardKeyFor: _cardKeyFor,
+      cardKeyFor: resolveRevealCardKey,
       onBack: _handleBackNavigation,
       onExpandDraft: _handleOpenDraft,
       onSubmitQuickCreate: _handleQuickCreateSubmit,
     );
   }
 
-  /// Returns a stable [GlobalKey] mapped to [locationId] for smooth reveal scrolling.
-  GlobalKey _cardKeyFor(String locationId) =>
-      _ownedCardKeys.putIfAbsent(locationId, GlobalKey.new);
-
-  /// Scrolls back to the top when a location draft card transitions open.
-  void _handleActiveDraftChanged(
-    EntityDraftKind? previous,
-    EntityDraftKind? next,
-  ) {
-    if (previous != EntityDraftKind.location &&
-        next == EntityDraftKind.location) {
-      _scrollToTop();
-    }
+  @override
+  List<String> collectVisibleEntityIds() {
+    final locations =
+        ref.read(taskNotifierProvider).asData?.value.sortedLocations ??
+        const <TdfLocation>[];
+    return <String>[for (final location in locations) location.id];
   }
 
   /// Restores the saved [ReturnContext] back to Tasks or Global Search.
@@ -547,129 +547,12 @@ class _LocationsViewState extends ConsumerState<LocationsView> {
     ref
         .read(shellProvider.notifier)
         .openDraft(EntityDraftKind.location, seedTitle: seedTitle);
-    _scrollToTop();
+    scrollToTop();
   }
 
   /// Quick-creates a location seeded from the active foreground GPS fix.
   void _handleQuickCreateSubmit() {
     unawaited(_submitQuickCreate());
-  }
-
-  /// Executes smooth `Scrollable.ensureVisible` to [locationId], pre-scrolling if offscreen in the lazy list.
-  Future<void> _performReveal(String locationId) async {
-    final targetContext = _ownedCardKeys[locationId]?.currentContext;
-    if (targetContext != null) {
-      _pendingRevealLocationId = null;
-      ref.read(shellProvider.notifier).clearRevealRequest();
-      await Scrollable.ensureVisible(
-        targetContext,
-        duration: _revealScrollDuration,
-        curve: Curves.easeOut,
-        alignment: 0.12,
-      );
-      return;
-    }
-
-    final locations =
-        ref.read(taskNotifierProvider).asData?.value.sortedLocations ??
-        const <TdfLocation>[];
-    final targetIndex = locations.indexWhere(
-      (location) => location.id == locationId,
-    );
-    final controller = _scrollController;
-    if (targetIndex < 0 || !controller.hasClients) {
-      _pendingRevealLocationId = null;
-      ref.read(shellProvider.notifier).clearRevealRequest();
-      return;
-    }
-
-    final estimatedOffset = (targetIndex * _estimatedCardExtent).clamp(
-      0.0,
-      controller.position.maxScrollExtent,
-    );
-    controller.jumpTo(estimatedOffset);
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _revealMaterializedCard(locationId),
-    );
-  }
-
-  /// Removes card [GlobalKey] entries for locations no longer present on the board.
-  void _pruneOwnedCardKeys(List<TdfLocation> locations) {
-    if (_ownedCardKeys.isEmpty) {
-      return;
-    }
-    final activeIds = <String>{for (final location in locations) location.id};
-    _ownedCardKeys.removeWhere((id, _) => !activeIds.contains(id));
-  }
-
-  /// Registers Riverpod listeners coordinating smooth card reveal and draft scroll-to-top behavior.
-  void _registerShellListeners() {
-    ref.listen<EntityRef?>(
-      shellProvider.select((shell) => shell.revealEntityRequest),
-      (previous, next) {
-        _scheduleReveal(next);
-      },
-    );
-    ref.listen<EntityDraftKind?>(
-      shellProvider.select((shell) => shell.activeDraft),
-      _handleActiveDraftChanged,
-    );
-  }
-
-  /// Completes smooth reveal after an offscreen card materializes in the sliver viewport.
-  void _revealMaterializedCard(String locationId) {
-    if (!mounted) {
-      return;
-    }
-    _pendingRevealLocationId = null;
-    ref.read(shellProvider.notifier).clearRevealRequest();
-    final materializedContext = _ownedCardKeys[locationId]?.currentContext;
-    if (materializedContext == null) {
-      return;
-    }
-    unawaited(
-      Scrollable.ensureVisible(
-        materializedContext,
-        duration: _revealScrollDuration,
-        curve: Curves.easeOut,
-        alignment: 0.12,
-      ),
-    );
-  }
-
-  /// Schedules a post-frame reveal scroll when [request] targets a location card.
-  void _scheduleReveal(EntityRef? request) {
-    if (request == null ||
-        request.kind != EntityKind.location ||
-        _pendingRevealLocationId == request.id) {
-      return;
-    }
-    _pendingRevealLocationId = request.id;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      unawaited(_performReveal(request.id));
-    });
-  }
-
-  /// Scrolls smoothly back to the top of the manager view when opening a Draft Card.
-  void _scrollToTop() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scrollController.hasClients) {
-        return;
-      }
-      if (_scrollController.offset <= 0.0) {
-        return;
-      }
-      unawaited(
-        _scrollController.animateTo(
-          0.0,
-          duration: _revealScrollDuration,
-          curve: Curves.easeOut,
-        ),
-      );
-    });
   }
 
   /// Dispatches Quick-Create persistence through [EntityActionsNotifier.quickCreateLocation].
@@ -717,4 +600,13 @@ String? _resolveBackLabel(
           : localizations.actionBackToTasks,
     null => null,
   };
+}
+
+/// Extracts value-compared sorted workspace locations from [boardAsync].
+_LocationsBoardSlice _selectLocationsBoardSlice(
+  AsyncValue<TaskBoard> boardAsync,
+) {
+  return _LocationsBoardSlice(
+    boardAsync.asData?.value.sortedLocations ?? const <TdfLocation>[],
+  );
 }

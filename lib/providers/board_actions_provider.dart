@@ -74,236 +74,148 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     required String rawText,
     String? rawTimestampOverride,
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    final task = _currentBoard.findTask(taskId);
-    if (task == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
+  }) => _runTaskAction(
+    taskId: taskId,
+    locale: locale,
+    suppressLocalWatch: false,
+    run: (_, task, localizations, commit) {
+      final validated = _validateHistoryCandidate(
+        task: task,
+        rawText: rawText,
+        rawTimestamp: rawTimestampOverride ?? '',
+        configuration: _currentConfiguration,
+        fallbackNowUtc: ref.read(clockProvider)().toUtc(),
+        localizations: localizations,
       );
-    }
-    final sanitizedText = TaskScheduleHelper.sanitizeHistoryText(rawText);
-    final textError = TaskScheduleHelper.validateHistoryText(
-      sanitizedText,
-      localizations,
-    );
-    if (textError != null) {
-      return ActionValidationFailed(
-        message: textError,
-        fieldErrors: <String, String>{'text': textError},
-      );
-    }
-    final resolvedTimestampUtc = TaskScheduleHelper.resolveHistoryTimestampUtc(
-      configuration: _currentConfiguration,
-      fallbackNowUtc: ref.read(clockProvider)().toUtc(),
-      rawTimestamp: rawTimestampOverride ?? '',
-    );
-    if (resolvedTimestampUtc == null) {
-      return ActionValidationFailed(
-        message: localizations.historyErrorTimestampInvalid,
-        fieldErrors: <String, String>{
-          'timestamp': localizations.historyErrorTimestampInvalid,
-        },
-      );
-    }
-    final candidate = TaskHistoryEntry(
-      timestampUtc: resolvedTimestampUtc,
-      text: sanitizedText,
-    );
-    if (task.history.contains(candidate)) {
-      return ActionValidationFailed(
-        message: localizations.historyErrorDuplicate,
-        fieldErrors: <String, String>{
-          'text': localizations.historyErrorDuplicate,
-        },
-      );
-    }
-    if (task.history.length >= maxTdfHistoryPerTask) {
-      return ActionValidationFailed(
-        message: localizations.historyErrorMaxExceeded,
-        fieldErrors: <String, String>{
-          'text': localizations.historyErrorMaxExceeded,
-        },
-      );
-    }
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      action: (token) async {
-        await ref
+      if (validated.failure case final failure?) {
+        return Future<ActionResult>.value(failure);
+      }
+      final candidate = validated.entry;
+      if (candidate == null) {
+        return Future<ActionResult>.value(
+          ActionValidationFailed(
+            message: localizations.historyErrorTextInvalid,
+          ),
+        );
+      }
+      if (task.history.length >= maxTdfHistoryPerTask) {
+        return Future<ActionResult>.value(
+          ActionValidationFailed(
+            message: localizations.historyErrorMaxExceeded,
+            fieldErrors: <String, String>{
+              'text': localizations.historyErrorMaxExceeded,
+            },
+          ),
+        );
+      }
+      return commit(
+        persist: () => ref
             .read(taskNotifierProvider.notifier)
             .addTaskHistoryEntry(
               taskId,
               timestampUtc: candidate.timestampUtc,
               text: candidate.text,
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        final postTask = _currentBoard.findTask(taskId);
-        if (postTask == null || !postTask.history.contains(candidate)) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        return ActionSucceeded(entityId: taskId);
-      },
-    );
-  }
-
-  /// Clears all task-level activation conditions on [taskId].
-  Future<ActionResult> clearConditions(String taskId, {Locale? locale}) {
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.conditions,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(taskId, conditions: const <TaskCondition>[]),
-    );
-  }
-
-  /// Clears the due timestamp, anchor, due note, and Mode 2 repeat lead days on [taskId].
-  Future<ActionResult> clearDue(String taskId, {Locale? locale}) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.due,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final existingTask = checked.task;
-    if (existingTask == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    final clearedLeadRepeat = switch (existingTask.repeatRule) {
-      final existingRule? when existingRule.leadDays > 0 =>
-        existingRule.copyWith(leadDays: 0),
-      _ => null,
-    };
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.due,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(
-            taskId,
-            clearDueAt: true,
-            clearDueAnchor: true,
-            clearDueNote: true,
-            isDuePassive: false,
-            repeatRule: clearedLeadRepeat,
-          ),
-    );
-  }
-
-  /// Clears the body note on [taskId].
-  Future<ActionResult> clearNote(String taskId, {Locale? locale}) {
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.note,
-      locale: locale,
-      persist: () =>
-          ref.read(taskNotifierProvider.notifier).updateTask(taskId, note: ''),
-    );
-  }
-
-  /// Completes an open [taskId] (with local-mutation suppression and repeat/Undo handling) or restores a completed [taskId].
-  Future<ActionResult> completeOrRestoreTask(
-    String taskId, {
-    Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    final taskBefore = _currentBoard.findTask(taskId);
-    if (taskBefore == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    final target = EntityRef(kind: EntityKind.task, id: taskId);
-    if (taskBefore.isCompleted || taskBefore.completedAt != null) {
-      return _runGuardedMutation(
-        busyTaskId: taskId,
-        localizations: localizations,
-        action: (token) async {
-          await ref
-              .read(shellProvider.notifier)
-              .runLocalEntityMutation(
-                target,
-                () =>
-                    ref.read(taskNotifierProvider.notifier).restoreTask(taskId),
-              );
-          if (!_isOperationActive(token)) {
-            return ActionSucceeded(entityId: taskId);
-          }
-          if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
+            ),
+        onCommitted: () {
+          final postTask = _currentBoard.findTask(taskId);
+          if (postTask == null || !postTask.history.contains(candidate)) {
             return ActionPersistFailed(
               message: _fallbackPersistError(localizations),
             );
           }
-          _collapseIfExpandedAndLeftActiveView(taskId);
-          final noticeMessage = localizations.taskRestoredNotice(
-            taskBefore.title,
-          );
-          ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
-          return ActionSucceeded(
-            entityId: taskId,
-            noticeMessage: noticeMessage,
+          return ActionSucceeded(entityId: taskId);
+        },
+      );
+    },
+  );
+
+  /// Clears all task-level activation conditions on [taskId].
+  Future<ActionResult> clearConditions(String taskId, {Locale? locale}) =>
+      _runInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.conditions,
+        locale: locale,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, conditions: const <TaskCondition>[]),
+      );
+
+  /// Clears the due timestamp, anchor, due note, and Mode 2 repeat lead days on [taskId].
+  Future<ActionResult> clearDue(String taskId, {Locale? locale}) =>
+      _runEditableTaskSection(
+        taskId: taskId,
+        section: TaskSectionKind.due,
+        locale: locale,
+        onValidatedTask: (_, existingTask, localizations) {
+          final clearedLeadRepeat = switch (existingTask.repeatRule) {
+            final existingRule? when existingRule.leadDays > 0 =>
+              existingRule.copyWith(leadDays: 0),
+            _ => null,
+          };
+          return _commitInlineSectionSave(
+            taskId: taskId,
+            section: TaskSectionKind.due,
+            localizations: localizations,
+            persist: () => ref
+                .read(taskNotifierProvider.notifier)
+                .updateTask(
+                  taskId,
+                  clearDueAt: true,
+                  clearDueAnchor: true,
+                  clearDueNote: true,
+                  isDuePassive: false,
+                  repeatRule: clearedLeadRepeat,
+                ),
           );
         },
       );
-    }
 
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      action: (token) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(
-              target,
-              () =>
-                  ref.read(taskNotifierProvider.notifier).completeTask(taskId),
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
+  /// Clears the body note on [taskId].
+  Future<ActionResult> clearNote(String taskId, {Locale? locale}) =>
+      _runInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.note,
+        locale: locale,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, note: ''),
+      );
+
+  /// Completes an open [taskId] (with local-mutation suppression and repeat/Undo handling) or restores a completed [taskId].
+  Future<ActionResult> completeOrRestoreTask(String taskId, {Locale? locale}) =>
+      _runTaskAction(
+        taskId: taskId,
+        locale: locale,
+        run: (_, taskBefore, localizations, commit) {
+          final wasCompleted =
+              taskBefore.isCompleted || taskBefore.completedAt != null;
+          return commit(
+            persist: () => wasCompleted
+                ? ref.read(taskNotifierProvider.notifier).restoreTask(taskId)
+                : ref.read(taskNotifierProvider.notifier).completeTask(taskId),
+            onCommitted: () {
+              if (wasCompleted) {
+                _collapseIfExpandedAndLeftActiveView(taskId);
+                final noticeMessage = localizations.taskRestoredNotice(
+                  taskBefore.title,
+                );
+                ref
+                    .read(floatingNoticeProvider.notifier)
+                    .showNotice(noticeMessage);
+                return ActionSucceeded(
+                  entityId: taskId,
+                  noticeMessage: noticeMessage,
+                );
+              }
+              return _finishCompletedTaskAction(
+                taskId: taskId,
+                taskBefore: taskBefore,
+                localizations: localizations,
+              );
+            },
           );
-        }
-        _collapseIfExpanded(target);
-        if (taskBefore.repeatRule != null) {
-          final repeatMessage = localizations.taskCompletedRepeatNotice(
-            taskBefore.title,
-          );
-          ref.read(floatingNoticeProvider.notifier).showNotice(repeatMessage);
-          return ActionSucceeded(
-            entityId: taskId,
-            noticeMessage: repeatMessage,
-          );
-        }
-        return ActionSucceeded(entityId: taskId);
-      },
-    );
-  }
+        },
+      );
 
   /// Atomically creates a new label with rotating preset color from [rawName] and assigns it to [taskId] in one persistence cycle.
   Future<ActionResult> createAndAssignLabel(
@@ -312,19 +224,19 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     Locale? locale,
   }) async {
     final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
+    final checked = _requireTask(
+      taskId: taskId,
+      localizations: localizations,
+      requireOpen: true,
+    );
+    if (checked.failure case final failure?) {
+      return failure;
     }
-    final boardBefore = _currentBoard;
-    final taskBefore = boardBefore.findTask(taskId);
+    final boardBefore = checked.board;
+    final taskBefore = checked.task;
     if (taskBefore == null) {
       return ActionValidationFailed(
         message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    if (taskBefore.isCompleted || taskBefore.completedAt != null) {
-      return ActionValidationFailed(
-        message: localizations.completedReadOnlyPill,
       );
     }
     final nameCheck = TaskScheduleHelper.validateSingleLineText(
@@ -384,8 +296,7 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
             entityId: createdLabel?.id ?? generatedLabelId,
           );
         }
-        if (createdLabel == null ||
-            !ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
+        if (createdLabel == null) {
           return ActionPersistFailed(
             message: _fallbackPersistError(localizations),
           );
@@ -424,65 +335,39 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
         fieldErrors: validation.fieldErrors,
       );
     }
-
     final newTaskId = generateTaskId(
       timestamp: ref.read(clockProvider)().toUtc(),
       existingIds: TaskScheduleHelper.collectAllUsedEntityIds(boardBefore),
     );
     final placementTarget = _resolvePlacementTarget(input.placement);
-
-    return _runGuardedMutation(
+    return _commitTaskCreation(
+      newTaskId: newTaskId,
       localizations: localizations,
-      action: (token) async {
-        await ref
-            .read(taskNotifierProvider.notifier)
-            .addTask(
-              validation.trimmedTitle,
-              id: newTaskId,
-              note: validation.normalizedNote,
-              targetTier: placementTarget.targetTier,
-              isPriority: placementTarget.isPriority,
-              subtasksAutoFinish: input.subtasksAutoFinish,
-              subtasks: validation.subtasks,
-              labelIds: validation.labelIds,
-              dueLocalInput: validation.dueLocalInput,
-              isDuePassive: validation.hasDue && !input.autoPrioritizeDue,
-              dueNote: validation.dueNote,
-              suspendedLocalInput: validation.suspendedLocalInput,
-              isSuspendedForever: validation.isSuspendedForever,
-              suspendedNote: validation.suspendedNote,
-              repeatRule: validation.repeatRule,
-              blockedByTaskIds: validation.prerequisiteIds,
-              links: validation.links,
-              conditions: validation.conditions,
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: newTaskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        final boardAfter = _currentBoard;
-        final createdTask = boardAfter.findTask(newTaskId);
-        if (createdTask == null) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
+      persist: () => ref
+          .read(taskNotifierProvider.notifier)
+          .addTask(
+            validation.trimmedTitle,
+            id: newTaskId,
+            note: validation.normalizedNote,
+            targetTier: placementTarget.targetTier,
+            isPriority: placementTarget.isPriority,
+            subtasksAutoFinish: input.subtasksAutoFinish,
+            subtasks: validation.subtasks,
+            labelIds: validation.labelIds,
+            dueLocalInput: validation.dueLocalInput,
+            isDuePassive: validation.hasDue && !input.autoPrioritizeDue,
+            dueNote: validation.dueNote,
+            suspendedLocalInput: validation.suspendedLocalInput,
+            isSuspendedForever: validation.isSuspendedForever,
+            suspendedNote: validation.suspendedNote,
+            repeatRule: validation.repeatRule,
+            blockedByTaskIds: validation.prerequisiteIds,
+            links: validation.links,
+            conditions: validation.conditions,
+          ),
+      onCreated: () {
         ref.read(shellProvider.notifier).cancelDraft();
         UiTelemetry.logEntityDraftCommitted('task');
-        final noticeMessage = _resolveTaskPlacementNotice(
-          board: boardAfter,
-          task: createdTask,
-          localizations: localizations,
-        );
-        ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
-        return ActionSucceeded(
-          entityId: createdTask.id,
-          noticeMessage: noticeMessage,
-        );
       },
     );
   }
@@ -493,141 +378,84 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     required String timestampUtcIso,
     required String text,
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    final task = _currentBoard.findTask(taskId);
-    if (task == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    final timestampUtc = DateTime.tryParse(timestampUtcIso)?.toUtc();
-    if (timestampUtc == null) {
-      return ActionValidationFailed(
-        message: localizations.historyErrorTimestampInvalid,
-      );
-    }
-    final entry = TaskHistoryEntry(timestampUtc: timestampUtc, text: text);
-    if (!task.history.contains(entry)) {
-      return ActionSucceeded(entityId: taskId);
-    }
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      action: (token) async {
-        await ref
+  }) => _runTaskAction(
+    taskId: taskId,
+    locale: locale,
+    suppressLocalWatch: false,
+    run: (_, task, localizations, commit) {
+      final timestampUtc = DateTime.tryParse(timestampUtcIso)?.toUtc();
+      if (timestampUtc == null) {
+        return Future<ActionResult>.value(
+          ActionValidationFailed(
+            message: localizations.historyErrorTimestampInvalid,
+          ),
+        );
+      }
+      final entry = TaskHistoryEntry(timestampUtc: timestampUtc, text: text);
+      if (!task.history.contains(entry)) {
+        return Future<ActionResult>.value(ActionSucceeded(entityId: taskId));
+      }
+      return commit(
+        persist: () => ref
             .read(taskNotifierProvider.notifier)
             .removeTaskHistoryEntry(
               taskId,
               timestampUtc: entry.timestampUtc,
               text: entry.text,
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        return ActionSucceeded(entityId: taskId);
-      },
-    );
-  }
+            ),
+      );
+    },
+  );
 
   /// Deletes [taskId] with local-mutation suppression, collapses its card, and clears delete confirmation.
-  Future<ActionResult> deleteTask(String taskId, {Locale? locale}) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    if (_currentBoard.findTask(taskId) == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
+  Future<ActionResult> deleteTask(String taskId, {Locale? locale}) =>
+      _runTaskAction(
+        taskId: taskId,
+        locale: locale,
+        run: (_, _, _, commit) => commit(
+          persist: () =>
+              ref.read(taskNotifierProvider.notifier).deleteTask(taskId),
+          onCommitted: () {
+            final target = EntityRef(kind: EntityKind.task, id: taskId);
+            final shellState = ref.read(shellProvider);
+            if (shellState.expandedEntity == target ||
+                shellState.activeDeleteConfirm == target) {
+              ref.read(shellProvider.notifier).collapseEntity();
+            }
+            return ActionSucceeded(entityId: taskId);
+          },
+        ),
       );
-    }
-    final target = EntityRef(kind: EntityKind.task, id: taskId);
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      action: (token) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(
-              target,
-              () => ref.read(taskNotifierProvider.notifier).deleteTask(taskId),
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        final shellState = ref.read(shellProvider);
-        if (shellState.expandedEntity == target ||
-            shellState.activeDeleteConfirm == target) {
-          ref.read(shellProvider.notifier).collapseEntity();
-        }
-        return ActionSucceeded(entityId: taskId);
-      },
-    );
-  }
 
   /// Disables recurrence on [taskId].
-  Future<ActionResult> disableRepeat(String taskId, {Locale? locale}) {
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.repeat,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(taskId, clearRepeatRule: true),
-    );
-  }
+  Future<ActionResult> disableRepeat(String taskId, {Locale? locale}) =>
+      _runInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.repeat,
+        locale: locale,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, clearRepeatRule: true),
+      );
 
   /// Downgrades active [taskId] under the active sidebar label filter.
-  Future<ActionResult> downgradeTask(String taskId, {Locale? locale}) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    if (_currentBoard.findTask(taskId) == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    final activeLabelId = ref.read(shellProvider).activeLabelId;
-    final target = EntityRef(kind: EntityKind.task, id: taskId);
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      action: (token) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(
-              target,
-              () => ref
-                  .read(taskNotifierProvider.notifier)
-                  .downgradeTask(taskId, activeFilterLabelId: activeLabelId),
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
+  Future<ActionResult> downgradeTask(String taskId, {Locale? locale}) =>
+      _runTaskAction(
+        taskId: taskId,
+        locale: locale,
+        run: (_, _, _, commit) {
+          final activeLabelId = ref.read(shellProvider).activeLabelId;
+          return commit(
+            persist: () => ref
+                .read(taskNotifierProvider.notifier)
+                .downgradeTask(taskId, activeFilterLabelId: activeLabelId),
+            onCommitted: () {
+              _collapseIfExpandedAndLeftActiveView(taskId);
+              return ActionSucceeded(entityId: taskId);
+            },
           );
-        }
-        _collapseIfExpandedAndLeftActiveView(taskId);
-        return ActionSucceeded(entityId: taskId);
-      },
-    );
-  }
+        },
+      );
 
   /// Validates and creates a task from the docked Quick-Add composer without switching tiers, scrolling, or expanding (`U-CARD-006`).
   Future<ActionResult> quickAddTask({
@@ -641,37 +469,23 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
       return ActionPersistFailed(message: localizations.syncStatusSyncing);
     }
     final boardBefore = _currentBoard;
-    final titleCheck = TaskScheduleHelper.validateSingleLineText(
-      rawText: rawTitle,
-      emptyError: localizations.taskNameErrorEmpty,
-      invalidError: localizations.historyErrorTextInvalid,
-      tooLongError: localizations.historyErrorTextTooLong,
+    final titleValidation = _validateTaskTitleInput(
+      board: boardBefore,
+      rawTitle: rawTitle,
+      excludingTaskId: null,
+      localizations: localizations,
     );
-    if (titleCheck.error case final error?) {
+    if (titleValidation.error case final error?) {
+      if (error == localizations.taskNameErrorDuplicate) {
+        ref
+            .read(floatingNoticeProvider.notifier)
+            .showNotice(error, tone: FloatingNoticeTone.danger);
+      }
       return ActionValidationFailed(
         message: error,
         fieldErrors: <String, String>{'title': error},
       );
     }
-    final trimmedTitle = titleCheck.trimmed;
-    final duplicateError = TaskScheduleHelper.validateTaskTitle(
-      board: boardBefore,
-      rawTitle: trimmedTitle,
-      excludingTaskId: null,
-      localizations: localizations,
-    );
-    if (duplicateError != null) {
-      if (duplicateError == localizations.taskNameErrorDuplicate) {
-        ref
-            .read(floatingNoticeProvider.notifier)
-            .showNotice(duplicateError, tone: FloatingNoticeTone.danger);
-      }
-      return ActionValidationFailed(
-        message: duplicateError,
-        fieldErrors: <String, String>{'title': duplicateError},
-      );
-    }
-
     final orderedLabelIds = TaskScheduleHelper.collectOrderedLabelIds(
       boardBefore,
       labelIds.toSet(),
@@ -681,106 +495,70 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
       timestamp: ref.read(clockProvider)().toUtc(),
       existingIds: TaskScheduleHelper.collectAllUsedEntityIds(boardBefore),
     );
-
-    return _runGuardedMutation(
+    return _commitTaskCreation(
+      newTaskId: newTaskId,
       localizations: localizations,
-      action: (token) async {
-        await ref
-            .read(taskNotifierProvider.notifier)
-            .addTask(
-              trimmedTitle,
-              id: newTaskId,
-              targetTier: placementTarget.targetTier,
-              isPriority: placementTarget.isPriority,
-              labelIds: orderedLabelIds,
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: newTaskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        final boardAfter = _currentBoard;
-        final createdTask = boardAfter.findTask(newTaskId);
-        if (createdTask == null) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        final noticeMessage = _resolveTaskPlacementNotice(
-          board: boardAfter,
-          task: createdTask,
-          localizations: localizations,
-        );
-        ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
-        return ActionSucceeded(
-          entityId: createdTask.id,
-          noticeMessage: noticeMessage,
-        );
-      },
+      persist: () => ref
+          .read(taskNotifierProvider.notifier)
+          .addTask(
+            titleValidation.trimmed,
+            id: newTaskId,
+            targetTier: placementTarget.targetTier,
+            isPriority: placementTarget.isPriority,
+            labelIds: orderedLabelIds,
+          ),
     );
   }
 
   /// Clears finite or indefinite suspension and its deferral note on [taskId].
-  Future<ActionResult> resumeTask(String taskId, {Locale? locale}) {
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.suspended,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(
-            taskId,
-            clearSuspendedAt: true,
-            clearSuspendedNote: true,
-            isSuspendedForever: false,
-          ),
-    );
-  }
+  Future<ActionResult> resumeTask(String taskId, {Locale? locale}) =>
+      _runInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.suspended,
+        locale: locale,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(
+              taskId,
+              clearSuspendedAt: true,
+              clearSuspendedNote: true,
+              isSuspendedForever: false,
+            ),
+      );
 
   /// Compiles, validates, and saves activation conditions from [draft] onto [taskId].
   Future<ActionResult> saveConditions(
     String taskId,
     ConditionDraft draft, {
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.conditions,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final compiled = TaskScheduleHelper.compileConditionDraft(
-      draft: draft,
-      board: _currentBoard,
-      isTask: true,
-      localizations: localizations,
-    );
-    if (compiled.error case final error?) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: TaskSectionKind.conditions.name,
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: TaskSectionKind.conditions,
+    locale: locale,
+    onValidatedTask: (board, _, localizations) {
+      final compiled = TaskScheduleHelper.compileConditionDraft(
+        draft: draft,
+        board: board,
+        isTask: true,
+        localizations: localizations,
       );
-      return ActionValidationFailed(
-        message: error,
-        fieldErrors: <String, String>{'conditions': error},
+      if (compiled.error case final error?) {
+        return _failInlineValidation(
+          taskId: taskId,
+          section: TaskSectionKind.conditions,
+          fieldErrors: <String, String>{'conditions': error},
+        );
+      }
+      return _commitInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.conditions,
+        localizations: localizations,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, conditions: compiled.conditions),
       );
-    }
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.conditions,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(taskId, conditions: compiled.conditions),
-    );
-  }
+    },
+  );
 
   /// Validates and saves deadline timestamp, auto-priority flag, and deadline note onto [taskId].
   Future<ActionResult> saveDue(
@@ -789,238 +567,192 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     required bool autoPrioritize,
     required String rawDueNote,
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.due,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final existingTask = checked.task;
-    if (existingTask == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    final configuration = _currentConfiguration;
-    final initialDueText = existingTask.dueAt != null
-        ? TaskScheduleHelper.formatLocalTimestamp(
-            existingTask.dueAt,
-            configuration,
-          )
-        : '';
-    final fieldErrors = <String, String>{};
-    final dueDraft = rawDue.trim().isEmpty
-        ? const ResolvedDueDraft(
-            dueAt: null,
-            dueLocalInput: null,
-            dueAnchor: null,
-            isUnchanged: false,
-            isValid: false,
-          )
-        : TaskScheduleHelper.resolveDueDraft(
-            configuration: configuration,
-            hasDue: true,
-            rawDueText: rawDue,
-            initialDueAt: existingTask.dueAt,
-            initialDueAnchor: existingTask.dueAnchor,
-            initialDueText: initialDueText,
-          );
-    if (!dueDraft.isValid) {
-      fieldErrors['due'] = localizations.taskSuspendedErrorInvalid;
-    }
-    final normalizedDueNote = TaskScheduleHelper.normalizeSchedulingNote(
-      rawDueNote,
-    );
-    final dueNoteError = TaskScheduleHelper.validateSchedulingNote(
-      normalizedDueNote,
-      localizations,
-    );
-    if (dueNoteError != null) {
-      fieldErrors['dueNote'] = dueNoteError;
-    }
-    if (fieldErrors.isNotEmpty) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: TaskSectionKind.due.name,
-      );
-      return ActionValidationFailed(
-        message: fieldErrors.values.first,
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: TaskSectionKind.due,
+    locale: locale,
+    onValidatedTask: (_, existingTask, localizations) {
+      final configuration = _currentConfiguration;
+      final initialDueText = existingTask.dueAt != null
+          ? TaskScheduleHelper.formatLocalTimestamp(
+              existingTask.dueAt,
+              configuration,
+            )
+          : '';
+      final fieldErrors = <String, String>{};
+      final dueDraft = rawDue.trim().isEmpty
+          ? const ResolvedDueDraft(
+              dueAt: null,
+              dueLocalInput: null,
+              dueAnchor: null,
+              isUnchanged: false,
+              isValid: false,
+            )
+          : TaskScheduleHelper.resolveDueDraft(
+              configuration: configuration,
+              hasDue: true,
+              rawDueText: rawDue,
+              initialDueAt: existingTask.dueAt,
+              initialDueAnchor: existingTask.dueAnchor,
+              initialDueText: initialDueText,
+            );
+      if (!dueDraft.isValid) {
+        fieldErrors['due'] = localizations.taskSuspendedErrorInvalid;
+      }
+      final normalizedDueNote = _validateOptionalSchedulingNote(
+        rawNote: rawDueNote,
+        fieldKey: 'dueNote',
+        localizations: localizations,
         fieldErrors: fieldErrors,
       );
-    }
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.due,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(
-            taskId,
-            dueAt: dueDraft.dueLocalInput == null ? dueDraft.dueAt : null,
-            dueLocalInput: dueDraft.dueLocalInput,
-            dueAnchor: dueDraft.dueLocalInput == null
-                ? dueDraft.dueAnchor
-                : null,
-            isDuePassive: !autoPrioritize,
-            dueNote: normalizedDueNote,
-            clearDueAt: false,
-            clearDueAnchor:
-                dueDraft.dueLocalInput == null && dueDraft.dueAnchor == null,
-            clearDueNote: normalizedDueNote == null,
-          ),
-    );
-  }
+      if (fieldErrors.isNotEmpty) {
+        return _failInlineValidation(
+          taskId: taskId,
+          section: TaskSectionKind.due,
+          fieldErrors: fieldErrors,
+        );
+      }
+      return _commitInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.due,
+        localizations: localizations,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(
+              taskId,
+              dueAt: dueDraft.dueLocalInput == null ? dueDraft.dueAt : null,
+              dueLocalInput: dueDraft.dueLocalInput,
+              dueAnchor: dueDraft.dueLocalInput == null
+                  ? dueDraft.dueAnchor
+                  : null,
+              isDuePassive: !autoPrioritize,
+              dueNote: normalizedDueNote,
+              clearDueAnchor:
+                  dueDraft.dueLocalInput == null && dueDraft.dueAnchor == null,
+              clearDueNote: normalizedDueNote == null,
+            ),
+      );
+    },
+  );
 
   /// Validates and saves the reference [links] list onto [taskId].
   Future<ActionResult> saveLinks(
     String taskId,
     List<TaskLink> links, {
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.links,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final validated = TaskScheduleHelper.validateLinksList(
-      links: links,
-      localizations: localizations,
-    );
-    if (validated.error case final error?) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: TaskSectionKind.links.name,
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: TaskSectionKind.links,
+    locale: locale,
+    onValidatedTask: (_, _, localizations) {
+      final validated = TaskScheduleHelper.validateLinksList(
+        links: links,
+        localizations: localizations,
       );
-      return ActionValidationFailed(
-        message: error,
-        fieldErrors: <String, String>{'links': error},
+      if (validated.error case final error?) {
+        return _failInlineValidation(
+          taskId: taskId,
+          section: TaskSectionKind.links,
+          fieldErrors: <String, String>{'links': error},
+        );
+      }
+      return _commitInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.links,
+        localizations: localizations,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, links: validated.links),
       );
-    }
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.links,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(taskId, links: validated.links),
-    );
-  }
+    },
+  );
 
   /// Validates and saves the multi-line body note onto [taskId].
   Future<ActionResult> saveNote(
     String taskId,
     String rawNote, {
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.note,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final normalizedNote = TaskScheduleHelper.normalizeSchedulingNote(rawNote);
-    final noteError = TaskScheduleHelper.validateSchedulingNote(
-      normalizedNote,
-      localizations,
-    );
-    if (noteError != null) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: TaskSectionKind.note.name,
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: TaskSectionKind.note,
+    locale: locale,
+    onValidatedTask: (_, _, localizations) {
+      final fieldErrors = <String, String>{};
+      final normalizedNote = _validateOptionalSchedulingNote(
+        rawNote: rawNote,
+        fieldKey: 'note',
+        localizations: localizations,
+        fieldErrors: fieldErrors,
       );
-      return ActionValidationFailed(
-        message: noteError,
-        fieldErrors: <String, String>{'note': noteError},
+      if (fieldErrors.isNotEmpty) {
+        return _failInlineValidation(
+          taskId: taskId,
+          section: TaskSectionKind.note,
+          fieldErrors: fieldErrors,
+        );
+      }
+      return _commitInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.note,
+        localizations: localizations,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, note: normalizedNote ?? ''),
       );
-    }
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.note,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(taskId, note: normalizedNote ?? ''),
-    );
-  }
+    },
+  );
 
   /// Validates prerequisite dependencies against self/transitive cycles and statement bounds, then saves onto [taskId].
   Future<ActionResult> savePrerequisites(
     String taskId,
     List<String> prerequisiteTaskIds, {
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.prerequisites,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final board = _currentBoard;
-    final selectedIds = <String>{};
-    for (final rawId in prerequisiteTaskIds) {
-      final candidateId = rawId.trim();
-      if (candidateId.isEmpty) {
-        continue;
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: TaskSectionKind.prerequisites,
+    locale: locale,
+    onValidatedTask: (board, _, localizations) {
+      final selectedIds = <String>{};
+      for (final rawId in prerequisiteTaskIds) {
+        final candidateId = rawId.trim();
+        if (candidateId.isEmpty) {
+          continue;
+        }
+        if (candidateId == taskId ||
+            board.wouldCreateDependencyCycle(taskId, candidateId)) {
+          return _failInlineValidation(
+            taskId: taskId,
+            section: TaskSectionKind.prerequisites,
+            fieldErrors: <String, String>{
+              'prerequisites': localizations.prerequisiteCyclePreventedHint,
+            },
+          );
+        }
+        selectedIds.add(candidateId);
       }
-      if (candidateId == taskId ||
-          board.wouldCreateDependencyCycle(taskId, candidateId)) {
-        UiTelemetry.logInlineEditFailed(
-          kind: 'task',
-          entityId: taskId,
-          section: TaskSectionKind.prerequisites.name,
-        );
-        return ActionValidationFailed(
-          message: localizations.prerequisiteCyclePreventedHint,
+      final orderedIds = TaskScheduleHelper.collectOrderedBlockedByIds(
+        board,
+        selectedIds,
+      );
+      if (orderedIds.length > maxTdfArgsPerStmt) {
+        return _failInlineValidation(
+          taskId: taskId,
+          section: TaskSectionKind.prerequisites,
           fieldErrors: <String, String>{
-            'prerequisites': localizations.prerequisiteCyclePreventedHint,
+            'prerequisites': localizations.errorLocalFileTooLarge,
           },
         );
       }
-      selectedIds.add(candidateId);
-    }
-    final orderedIds = TaskScheduleHelper.collectOrderedBlockedByIds(
-      board,
-      selectedIds,
-    );
-    if (orderedIds.length > maxTdfArgsPerStmt) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: TaskSectionKind.prerequisites.name,
+      return _commitInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.prerequisites,
+        localizations: localizations,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, blockedByTaskIds: orderedIds),
       );
-      return ActionValidationFailed(
-        message: localizations.errorLocalFileTooLarge,
-        fieldErrors: <String, String>{
-          'prerequisites': localizations.errorLocalFileTooLarge,
-        },
-      );
-    }
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.prerequisites,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(taskId, blockedByTaskIds: orderedIds),
-    );
-  }
+    },
+  );
 
   /// Validates recurrence count (`1..3650`) and Mode 2 lead days (`0..3650`) and saves onto [taskId].
   Future<ActionResult> saveRepeat(
@@ -1029,66 +761,38 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     required RepeatUnit unit,
     required String rawLeadDays,
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.repeat,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final existingTask = checked.task;
-    if (existingTask == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    final parsedCount = TaskScheduleHelper.parseRepeatCount(
-      isRepeating: true,
-      rawCount: rawCount,
-    );
-    final parsedLeadDays = TaskScheduleHelper.parseLeadDays(
-      hasDue: existingTask.dueAt != null,
-      isRepeating: true,
-      rawLeadDays: rawLeadDays,
-    );
-    final fieldErrors = <String, String>{};
-    if (parsedCount == null) {
-      fieldErrors['repeatCount'] = localizations.repeatErrorInvalid;
-    }
-    if (parsedLeadDays == null) {
-      fieldErrors['repeatLeadDays'] = localizations.repeatLeadDaysErrorInvalid;
-    }
-    if (fieldErrors.isNotEmpty ||
-        parsedCount == null ||
-        parsedLeadDays == null) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: TaskSectionKind.repeat.name,
-      );
-      return ActionValidationFailed(
-        message: fieldErrors.values.first,
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: TaskSectionKind.repeat,
+    locale: locale,
+    onValidatedTask: (_, existingTask, localizations) {
+      final fieldErrors = <String, String>{};
+      final nextRule = _validateRepeatFields(
+        hasDue: existingTask.dueAt != null,
+        rawCount: rawCount,
+        unit: unit,
+        rawLeadDays: rawLeadDays,
+        clock: existingTask.repeatRule?.clock ?? TdfRepeatClock.midnight,
+        localizations: localizations,
         fieldErrors: fieldErrors,
       );
-    }
-    final nextRule = TaskRepeatRule(
-      count: parsedCount,
-      unit: unit,
-      clock: existingTask.repeatRule?.clock ?? TdfRepeatClock.midnight,
-      leadDays: parsedLeadDays,
-    );
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.repeat,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(taskId, repeatRule: nextRule, clearRepeatRule: false),
-    );
-  }
+      if (fieldErrors.isNotEmpty || nextRule == null) {
+        return _failInlineValidation(
+          taskId: taskId,
+          section: TaskSectionKind.repeat,
+          fieldErrors: fieldErrors,
+        );
+      }
+      return _commitInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.repeat,
+        localizations: localizations,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, repeatRule: nextRule),
+      );
+    },
+  );
 
   /// Strips blanks, enforces `1024`/`500` subtask bounds, saves onto [taskId], and atomically auto-finishes in one persistence cycle when all remaining steps are complete.
   Future<ActionResult> saveSubtasks(
@@ -1096,119 +800,90 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     List<SubtaskItem> subtasks, {
     required bool autoFinish,
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.subtasks,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final existingTask = checked.task;
-    if (existingTask == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: TaskSectionKind.subtasks,
+    locale: locale,
+    onValidatedTask: (_, existingTask, localizations) {
+      final validated = TaskScheduleHelper.validateSubtasksList(
+        subtasks: subtasks,
+        localizations: localizations,
       );
-    }
-    final validated = TaskScheduleHelper.validateSubtasksList(
-      subtasks: subtasks,
-      localizations: localizations,
-    );
-    if (validated.error case final error?) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: TaskSectionKind.subtasks.name,
-      );
-      return ActionValidationFailed(
-        message: error,
-        fieldErrors: <String, String>{'subtasks': error},
-      );
-    }
-    final steps = validated.subtasks;
-    final triggersAutoFinish =
-        autoFinish &&
-        steps.isNotEmpty &&
-        steps.every((step) => step.isCompleted);
-    if (!triggersAutoFinish) {
-      return _runInlineSectionSave(
-        taskId: taskId,
-        section: TaskSectionKind.subtasks,
-        locale: locale,
-        persist: () => ref
-            .read(taskNotifierProvider.notifier)
-            .updateTask(
-              taskId,
-              subtasks: steps,
-              subtasksAutoFinish: autoFinish,
-            ),
-      );
-    }
-
-    // Stage the final step incomplete so updateTaskAndComplete's inner updateTask
-    // does not pre-trigger recurring auto-completion before its single completeTask call.
-    final stagedSteps = <SubtaskItem>[
-      for (var i = 0; i < steps.length; i++)
-        i == steps.length - 1
-            ? steps[i].copyWith(isCompleted: false)
-            : steps[i],
-    ];
-    final target = EntityRef(kind: EntityKind.task, id: taskId);
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      onPersistFailure: () {
-        UiTelemetry.logInlineEditFailed(
+      if (validated.error case final error?) {
+        return _failInlineValidation(
+          taskId: taskId,
+          section: TaskSectionKind.subtasks,
+          fieldErrors: <String, String>{'subtasks': error},
+        );
+      }
+      final steps = validated.subtasks;
+      final triggersAutoFinish =
+          autoFinish &&
+          steps.isNotEmpty &&
+          steps.every((step) => step.isCompleted);
+      if (!triggersAutoFinish) {
+        return _commitInlineSectionSave(
+          taskId: taskId,
+          section: TaskSectionKind.subtasks,
+          localizations: localizations,
+          persist: () => ref
+              .read(taskNotifierProvider.notifier)
+              .updateTask(
+                taskId,
+                subtasks: steps,
+                subtasksAutoFinish: autoFinish,
+              ),
+        );
+      }
+      final target = EntityRef(kind: EntityKind.task, id: taskId);
+      return _runGuardedMutation(
+        busyTaskId: taskId,
+        localizations: localizations,
+        onPersistFailure: () => UiTelemetry.logInlineEditFailed(
           kind: 'task',
           entityId: taskId,
           section: TaskSectionKind.subtasks.name,
-        );
-      },
-      action: (token) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(
-              target,
-              () => ref
-                  .read(taskNotifierProvider.notifier)
-                  .updateTaskAndComplete(
-                    taskId,
-                    subtasks: stagedSteps,
-                    subtasksAutoFinish: true,
-                  ),
+        ),
+        action: (token) async {
+          final committed = await ref
+              .read(shellProvider.notifier)
+              .runLocalEntityMutation(
+                target,
+                () => ref
+                    .read(taskNotifierProvider.notifier)
+                    .updateTaskAndComplete(
+                      taskId,
+                      subtasks: steps,
+                      subtasksAutoFinish: true,
+                    ),
+              );
+          if (!_isOperationActive(token)) {
+            return ActionSucceeded(entityId: taskId);
+          }
+          if (!committed) {
+            UiTelemetry.logInlineEditFailed(
+              kind: 'task',
+              entityId: taskId,
+              section: TaskSectionKind.subtasks.name,
             );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          UiTelemetry.logInlineEditFailed(
+            return ActionPersistFailed(
+              message: _fallbackPersistError(localizations),
+            );
+          }
+          UiTelemetry.logInlineEditSaved(
             kind: 'task',
             entityId: taskId,
             section: TaskSectionKind.subtasks.name,
           );
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
+          return _finishCompletedTaskAction(
+            taskId: taskId,
+            taskBefore: existingTask,
+            localizations: localizations,
           );
-        }
-        UiTelemetry.logInlineEditSaved(
-          kind: 'task',
-          entityId: taskId,
-          section: TaskSectionKind.subtasks.name,
-        );
-        _collapseIfExpanded(target);
-        if (existingTask.repeatRule != null) {
-          final repeatNotice = localizations.taskCompletedRepeatNotice(
-            existingTask.title,
-          );
-          ref.read(floatingNoticeProvider.notifier).showNotice(repeatNotice);
-          return ActionSucceeded(entityId: taskId, noticeMessage: repeatNotice);
-        }
-        return ActionSucceeded(entityId: taskId);
-      },
-    );
-  }
+        },
+      );
+    },
+  );
 
   /// Validates finite or indefinite deferral settings and deferral note, then saves onto [taskId].
   Future<ActionResult> saveSuspended(
@@ -1217,366 +892,261 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     required String rawUntil,
     required String rawNote,
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.suspended,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final existingTask = checked.task;
-    if (existingTask == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: TaskSectionKind.suspended,
+    locale: locale,
+    onValidatedTask: (_, existingTask, localizations) {
+      final fieldErrors = <String, String>{};
+      final suspendedDraft = _resolveSuspendedInput(
+        indefinitely: indefinitely,
+        rawUntil: rawUntil,
+        existingTask: existingTask,
+        configuration: _currentConfiguration,
       );
-    }
-    final configuration = _currentConfiguration;
-    final fieldErrors = <String, String>{};
-    final suspendedDraft = _resolveSuspendedInput(
-      indefinitely: indefinitely,
-      rawUntil: rawUntil,
-      existingTask: existingTask,
-      configuration: configuration,
-    );
-    if (!indefinitely &&
-        (!suspendedDraft.isValid || suspendedDraft.isForever)) {
-      fieldErrors['suspended'] = localizations.taskSuspendedErrorInvalid;
-    }
-    final normalizedNote = TaskScheduleHelper.normalizeSchedulingNote(rawNote);
-    final noteError = TaskScheduleHelper.validateSchedulingNote(
-      normalizedNote,
-      localizations,
-    );
-    if (noteError != null) {
-      fieldErrors['suspendedNote'] = noteError;
-    }
-    if (fieldErrors.isNotEmpty) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: TaskSectionKind.suspended.name,
-      );
-      return ActionValidationFailed(
-        message: fieldErrors.values.first,
+      if (!indefinitely &&
+          (!suspendedDraft.isValid || suspendedDraft.isForever)) {
+        fieldErrors['suspended'] = localizations.taskSuspendedErrorInvalid;
+      }
+      final normalizedNote = _validateOptionalSchedulingNote(
+        rawNote: rawNote,
+        fieldKey: 'suspendedNote',
+        localizations: localizations,
         fieldErrors: fieldErrors,
       );
-    }
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.suspended,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(
-            taskId,
-            suspendedAt: indefinitely ? null : suspendedDraft.suspendedAt,
-            suspendedLocalInput: indefinitely
-                ? null
-                : suspendedDraft.suspendedLocalInput,
-            isSuspendedForever: indefinitely,
-            suspendedNote: normalizedNote,
-            clearSuspendedAt: false,
-            clearSuspendedNote: normalizedNote == null,
-          ),
-    );
-  }
+      if (fieldErrors.isNotEmpty) {
+        return _failInlineValidation(
+          taskId: taskId,
+          section: TaskSectionKind.suspended,
+          fieldErrors: fieldErrors,
+        );
+      }
+      return _commitInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.suspended,
+        localizations: localizations,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(
+              taskId,
+              suspendedAt: indefinitely ? null : suspendedDraft.suspendedAt,
+              suspendedLocalInput: indefinitely
+                  ? null
+                  : suspendedDraft.suspendedLocalInput,
+              isSuspendedForever: indefinitely,
+              suspendedNote: normalizedNote,
+              clearSuspendedNote: normalizedNote == null,
+            ),
+      );
+    },
+  );
 
   /// Validates single-line `<text>` rules and duplicate uniqueness, then saves [rawTitle] onto [taskId].
   Future<ActionResult> saveTitle(
     String taskId,
     String rawTitle, {
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
-      taskId: taskId,
-      section: TaskSectionKind.title,
-      localizations: localizations,
-    );
-    if (checked.failure case final failure?) {
-      return failure;
-    }
-    final titleCheck = TaskScheduleHelper.validateSingleLineText(
-      rawText: rawTitle,
-      emptyError: localizations.taskNameErrorEmpty,
-      invalidError: localizations.historyErrorTextInvalid,
-      tooLongError: localizations.historyErrorTextTooLong,
-    );
-    final titleError =
-        titleCheck.error ??
-        TaskScheduleHelper.validateTaskTitle(
-          board: _currentBoard,
-          rawTitle: titleCheck.trimmed,
-          excludingTaskId: taskId,
-          localizations: localizations,
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: TaskSectionKind.title,
+    locale: locale,
+    onValidatedTask: (board, _, localizations) {
+      final titleValidation = _validateTaskTitleInput(
+        board: board,
+        rawTitle: rawTitle,
+        excludingTaskId: taskId,
+        localizations: localizations,
+      );
+      if (titleValidation.error case final titleError?) {
+        return _failInlineValidation(
+          taskId: taskId,
+          section: TaskSectionKind.title,
+          fieldErrors: <String, String>{'title': titleError},
         );
-    if (titleError != null) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: TaskSectionKind.title.name,
+      }
+      return _commitInlineSectionSave(
+        taskId: taskId,
+        section: TaskSectionKind.title,
+        localizations: localizations,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, title: titleValidation.trimmed),
       );
-      return ActionValidationFailed(
-        message: titleError,
-        fieldErrors: <String, String>{'title': titleError},
-      );
-    }
-    return _runInlineSectionSave(
-      taskId: taskId,
-      section: TaskSectionKind.title,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateTask(taskId, title: titleCheck.trimmed),
-    );
-  }
+    },
+  );
 
   /// Switches active [taskId] placement between [QuickAddMode.standard], [QuickAddMode.priority], and [QuickAddMode.someday], collapsing if it moved tiers.
   Future<ActionResult> setPlacement(
     String taskId,
     QuickAddMode placement, {
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    final boardBefore = _currentBoard;
-    final taskBefore = boardBefore.findTask(taskId);
-    if (taskBefore == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    if (taskBefore.isCompleted || taskBefore.completedAt != null) {
-      return ActionValidationFailed(
-        message: localizations.completedReadOnlyPill,
-      );
-    }
-    final shellBefore = ref.read(shellProvider);
-    final tierBefore = _evaluatedBoardForLabel(shellBefore.activeLabelId)
-        .findTierOfTask(taskId);
-    final wasQueued = boardBefore.queueBlock.taskIds.contains(taskId);
-    final wasPriority = taskBefore.isPriority;
-    final placementTarget = _resolvePlacementTarget(placement);
-    final target = EntityRef(kind: EntityKind.task, id: taskId);
-
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      action: (token) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(
-              target,
-              () => ref
-                  .read(taskNotifierProvider.notifier)
-                  .updateTask(
-                    taskId,
-                    targetTier: placementTarget.targetTier,
-                    isPriority: placementTarget.isPriority,
-                  ),
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
+  }) => _runTaskAction(
+    taskId: taskId,
+    locale: locale,
+    requireOpen: true,
+    run: (boardBefore, taskBefore, localizations, commit) {
+      final shellBefore = ref.read(shellProvider);
+      final tierBefore = _evaluatedBoardForLabel(shellBefore.activeLabelId)
+          .findTierOfTask(taskId);
+      final wasQueued = boardBefore.queueBlock.taskIds.contains(taskId);
+      final wasPriority = taskBefore.isPriority;
+      final placementTarget = _resolvePlacementTarget(placement);
+      return commit(
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(
+              taskId,
+              targetTier: placementTarget.targetTier,
+              isPriority: placementTarget.isPriority,
+            ),
+        onCommitted: () {
+          final shellAfter = ref.read(shellProvider);
+          final tierAfter = _evaluatedBoardForLabel(shellAfter.activeLabelId)
+              .findTierOfTask(taskId);
+          if (tierAfter != tierBefore && !shellAfter.searchOpen) {
+            _collapseIfExpanded(EntityRef(kind: EntityKind.task, id: taskId));
+          }
+          final noticeMessage = _resolvePlacementToggleNotice(
+            placement: placement,
+            wasQueued: wasQueued,
+            wasPriority: wasPriority,
+            tierAfter: tierAfter,
+            activeTier: shellAfter.activeTier,
+            localizations: localizations,
           );
-        }
-        final shellAfter = ref.read(shellProvider);
-        final tierAfter = _evaluatedBoardForLabel(shellAfter.activeLabelId)
-            .findTierOfTask(taskId);
-        if (tierAfter != tierBefore && !shellAfter.searchOpen) {
-          _collapseIfExpanded(target);
-        }
-        final noticeMessage = _resolvePlacementToggleNotice(
-          placement: placement,
-          wasQueued: wasQueued,
-          wasPriority: wasPriority,
-          tierAfter: tierAfter,
-          activeTier: shellAfter.activeTier,
-          localizations: localizations,
-        );
-        ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
-        return ActionSucceeded(entityId: taskId, noticeMessage: noticeMessage);
-      },
-    );
-  }
+          ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
+          return ActionSucceeded(
+            entityId: taskId,
+            noticeMessage: noticeMessage,
+          );
+        },
+      );
+    },
+  );
 
   /// Adds or removes [labelId] on [taskId], collapses if the task left the active view/tier, and emits a contextual toast.
   Future<ActionResult> toggleLabel(
     String taskId,
     String labelId, {
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    final boardBefore = _currentBoard;
-    final taskBefore = boardBefore.findTask(taskId);
-    final label = boardBefore.findLabel(labelId);
-    if (taskBefore == null || label == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
+  }) => _runTaskAction(
+    taskId: taskId,
+    locale: locale,
+    requireOpen: true,
+    run: (boardBefore, taskBefore, localizations, commit) {
+      final label = boardBefore.findLabel(labelId);
+      if (label == null) {
+        return Future<ActionResult>.value(
+          ActionValidationFailed(
+            message: localizations.entityRemovedExternallyNotice,
+          ),
+        );
+      }
+      final isRemoving = taskBefore.labelIds.contains(labelId);
+      final nextSet = taskBefore.labelIds.toSet();
+      if (isRemoving) {
+        nextSet.remove(labelId);
+      } else {
+        nextSet.add(labelId);
+      }
+      final nextLabelIds = TaskScheduleHelper.collectOrderedLabelIds(
+        boardBefore,
+        nextSet,
       );
-    }
-    if (taskBefore.isCompleted || taskBefore.completedAt != null) {
-      return ActionValidationFailed(
-        message: localizations.completedReadOnlyPill,
-      );
-    }
-    final isRemoving = taskBefore.labelIds.contains(labelId);
-    final nextSet = taskBefore.labelIds.toSet();
-    if (isRemoving) {
-      nextSet.remove(labelId);
-    } else {
-      nextSet.add(labelId);
-    }
-    final nextLabelIds = TaskScheduleHelper.collectOrderedLabelIds(
-      boardBefore,
-      nextSet,
-    );
-    if (nextLabelIds.length > maxTdfArgsPerStmt) {
-      return ActionValidationFailed(
-        message: localizations.errorLocalFileTooLarge,
-      );
-    }
-    final shellBefore = ref.read(shellProvider);
-    final tierBefore = _evaluatedBoardForLabel(shellBefore.activeLabelId)
-        .findTierOfTask(taskId);
-    final target = EntityRef(kind: EntityKind.task, id: taskId);
-
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      action: (token) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(
-              target,
-              () => ref
-                  .read(taskNotifierProvider.notifier)
-                  .updateTask(taskId, labelIds: nextLabelIds),
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
+      if (nextLabelIds.length > maxTdfArgsPerStmt) {
+        return Future<ActionResult>.value(
+          ActionValidationFailed(message: localizations.errorLocalFileTooLarge),
+        );
+      }
+      final shellBefore = ref.read(shellProvider);
+      final tierBefore = _evaluatedBoardForLabel(shellBefore.activeLabelId)
+          .findTierOfTask(taskId);
+      return commit(
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateTask(taskId, labelIds: nextLabelIds),
+        onCommitted: () {
+          final boardAfter = _currentBoard;
+          final taskAfter = boardAfter.findTask(taskId);
+          final shellAfter = ref.read(shellProvider);
+          final tierAfter = _evaluatedBoardForLabel(shellAfter.activeLabelId)
+              .findTierOfTask(taskId);
+          final leftCurrentView =
+              tierAfter == null ||
+              (!shellAfter.searchOpen && tierAfter != shellAfter.activeTier);
+          if (leftCurrentView) {
+            _collapseIfExpanded(EntityRef(kind: EntityKind.task, id: taskId));
+          }
+          final labelMapAfter = <String, TdfLabel>{
+            for (final existingLabel in boardAfter.labels)
+              existingLabel.id: existingLabel,
+          };
+          final restrictingScopedName = taskAfter != null
+              ? _findRestrictingScopedLabelName(
+                  task: taskAfter,
+                  labelMap: labelMapAfter,
+                  activeLabelId: shellAfter.activeLabelId,
+                )
+              : null;
+          final noticeMessage =
+              (restrictingScopedName != null &&
+                  tierBefore != null &&
+                  tierAfter == null)
+              ? localizations.noticeTaskMovedToScopedQueue(
+                  restrictingScopedName,
+                )
+              : (isRemoving
+                    ? localizations.noticeLabelRemoved(label.name)
+                    : localizations.noticeLabelAdded(label.name));
+          ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
+          return ActionSucceeded(
+            entityId: taskId,
+            noticeMessage: noticeMessage,
           );
-        }
-        final boardAfter = _currentBoard;
-        final taskAfter = boardAfter.findTask(taskId);
-        final shellAfter = ref.read(shellProvider);
-        final tierAfter = _evaluatedBoardForLabel(shellAfter.activeLabelId)
-            .findTierOfTask(taskId);
-        final leftCurrentView =
-            tierAfter == null ||
-            (!shellAfter.searchOpen && tierAfter != shellAfter.activeTier);
-        if (leftCurrentView) {
-          _collapseIfExpanded(target);
-        }
-        final labelMapAfter = <String, TdfLabel>{
-          for (final existingLabel in boardAfter.labels)
-            existingLabel.id: existingLabel,
-        };
-        final restrictingScopedName = taskAfter != null
-            ? _findRestrictingScopedLabelName(
-                task: taskAfter,
-                labelMap: labelMapAfter,
-                activeLabelId: shellAfter.activeLabelId,
-              )
-            : null;
-        final noticeMessage =
-            (restrictingScopedName != null &&
-                tierBefore != null &&
-                tierAfter == null)
-            ? localizations.noticeTaskMovedToScopedQueue(restrictingScopedName)
-            : (isRemoving
-                  ? localizations.noticeLabelRemoved(label.name)
-                  : localizations.noticeLabelAdded(label.name));
-        ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
-        return ActionSucceeded(entityId: taskId, noticeMessage: noticeMessage);
-      },
-    );
-  }
+        },
+      );
+    },
+  );
 
   /// Toggles subtask step [stepIndex] on [taskId] inside `runLocalEntityMutation`, collapsing on auto-finish completion.
   Future<ActionResult> toggleSubtask(
     String taskId,
     int stepIndex, {
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    final taskBefore = _currentBoard.findTask(taskId);
-    if (taskBefore == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    if (taskBefore.isCompleted || taskBefore.completedAt != null) {
-      return ActionValidationFailed(
-        message: localizations.completedReadOnlyPill,
-      );
-    }
-    if (stepIndex < 0 || stepIndex >= taskBefore.subtasks.length) {
-      return ActionValidationFailed(
-        message: localizations.historyErrorTextInvalid,
-      );
-    }
-    final target = EntityRef(kind: EntityKind.task, id: taskId);
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      action: (token) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(
-              target,
-              () => ref
-                  .read(taskNotifierProvider.notifier)
-                  .toggleSubtask(taskId, stepIndex),
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        final taskAfter = _currentBoard.findTask(taskId);
-        final didAutoComplete =
-            taskAfter != null &&
-            (taskAfter.completions > taskBefore.completions ||
-                (!taskBefore.isCompleted && taskAfter.isCompleted));
-        if (didAutoComplete) {
-          _collapseIfExpanded(target);
-          if (taskBefore.repeatRule != null) {
-            final repeatNotice = localizations.taskCompletedRepeatNotice(
-              taskBefore.title,
-            );
-            ref.read(floatingNoticeProvider.notifier).showNotice(repeatNotice);
-            return ActionSucceeded(
-              entityId: taskId,
-              noticeMessage: repeatNotice,
+  }) => _runTaskAction(
+    taskId: taskId,
+    locale: locale,
+    requireOpen: true,
+    run: (_, taskBefore, localizations, commit) {
+      if (stepIndex < 0 || stepIndex >= taskBefore.subtasks.length) {
+        return Future<ActionResult>.value(
+          ActionValidationFailed(
+            message: localizations.historyErrorTextInvalid,
+          ),
+        );
+      }
+      return commit(
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .toggleSubtask(taskId, stepIndex),
+        onCommitted: () {
+          final taskAfter = _currentBoard.findTask(taskId);
+          final didAutoComplete =
+              taskAfter != null &&
+              (taskAfter.completions > taskBefore.completions ||
+                  (!taskBefore.isCompleted && taskAfter.isCompleted));
+          if (didAutoComplete) {
+            return _finishCompletedTaskAction(
+              taskId: taskId,
+              taskBefore: taskBefore,
+              localizations: localizations,
             );
           }
-        }
-        return ActionSucceeded(entityId: taskId);
-      },
-    );
-  }
+          return ActionSucceeded(entityId: taskId);
+        },
+      );
+    },
+  );
 
   /// Validates and replaces an existing `(oldTimestampUtcIso, oldText)` history entry on [taskId], rejecting duplicates.
   Future<ActionResult> updateHistoryEntry(
@@ -1586,83 +1156,61 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     required String rawNewText,
     required String rawNewTimestamp,
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    final task = _currentBoard.findTask(taskId);
-    if (task == null) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
+  }) => _runTaskAction(
+    taskId: taskId,
+    locale: locale,
+    suppressLocalWatch: false,
+    run: (_, task, localizations, commit) {
+      final oldTimestampUtc = DateTime.tryParse(oldTimestampUtcIso)?.toUtc();
+      if (oldTimestampUtc == null) {
+        return Future<ActionResult>.value(
+          ActionValidationFailed(
+            message: localizations.historyErrorTimestampInvalid,
+          ),
+        );
+      }
+      final oldEntry = TaskHistoryEntry(
+        timestampUtc: oldTimestampUtc,
+        text: oldText,
       );
-    }
-    final oldTimestampUtc = DateTime.tryParse(oldTimestampUtcIso)?.toUtc();
-    if (oldTimestampUtc == null) {
-      return ActionValidationFailed(
-        message: localizations.historyErrorTimestampInvalid,
+      if (!task.history.contains(oldEntry)) {
+        return Future<ActionResult>.value(
+          ActionValidationFailed(
+            message: localizations.entityRemovedExternallyNotice,
+          ),
+        );
+      }
+      final configuration = _currentConfiguration;
+      final validated = _validateHistoryCandidate(
+        task: task,
+        rawText: rawNewText,
+        rawTimestamp: rawNewTimestamp,
+        configuration: configuration,
+        fallbackNowUtc: ref.read(clockProvider)().toUtc(),
+        preservedTimestampText: TaskScheduleHelper.formatLocalTimestamp(
+          oldEntry.timestampUtc,
+          configuration,
+        ),
+        preservedTimestampUtc: oldEntry.timestampUtc,
+        ignoringDuplicateEntry: oldEntry,
+        localizations: localizations,
       );
-    }
-    final oldEntry = TaskHistoryEntry(
-      timestampUtc: oldTimestampUtc,
-      text: oldText,
-    );
-    if (!task.history.contains(oldEntry)) {
-      return ActionValidationFailed(
-        message: localizations.entityRemovedExternallyNotice,
-      );
-    }
-    final sanitizedText = TaskScheduleHelper.sanitizeHistoryText(rawNewText);
-    final textError = TaskScheduleHelper.validateHistoryText(
-      sanitizedText,
-      localizations,
-    );
-    if (textError != null) {
-      return ActionValidationFailed(
-        message: textError,
-        fieldErrors: <String, String>{'text': textError},
-      );
-    }
-    final configuration = _currentConfiguration;
-    final preservedLocalText = TaskScheduleHelper.formatLocalTimestamp(
-      oldEntry.timestampUtc,
-      configuration,
-    );
-    final newTimestampUtc = TaskScheduleHelper.resolveHistoryTimestampUtc(
-      configuration: configuration,
-      fallbackNowUtc: ref.read(clockProvider)().toUtc(),
-      preservedTimestampText: preservedLocalText,
-      preservedTimestampUtc: oldEntry.timestampUtc,
-      rawTimestamp: rawNewTimestamp,
-    );
-    if (newTimestampUtc == null) {
-      return ActionValidationFailed(
-        message: localizations.historyErrorTimestampInvalid,
-        fieldErrors: <String, String>{
-          'timestamp': localizations.historyErrorTimestampInvalid,
-        },
-      );
-    }
-    final replacement = TaskHistoryEntry(
-      timestampUtc: newTimestampUtc,
-      text: sanitizedText,
-    );
-    if (replacement == oldEntry) {
-      return ActionSucceeded(entityId: taskId);
-    }
-    if (task.history.contains(replacement)) {
-      return ActionValidationFailed(
-        message: localizations.historyErrorDuplicate,
-        fieldErrors: <String, String>{
-          'text': localizations.historyErrorDuplicate,
-        },
-      );
-    }
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      action: (token) async {
-        await ref
+      if (validated.failure case final failure?) {
+        return Future<ActionResult>.value(failure);
+      }
+      final replacement = validated.entry;
+      if (replacement == null) {
+        return Future<ActionResult>.value(
+          ActionValidationFailed(
+            message: localizations.historyErrorTextInvalid,
+          ),
+        );
+      }
+      if (replacement == oldEntry) {
+        return Future<ActionResult>.value(ActionSucceeded(entityId: taskId));
+      }
+      return commit(
+        persist: () => ref
             .read(taskNotifierProvider.notifier)
             .updateTaskHistoryEntry(
               taskId,
@@ -1670,19 +1218,10 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
               oldText: oldEntry.text,
               newTimestampUtc: replacement.timestampUtc,
               newText: replacement.text,
-            );
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        return ActionSucceeded(entityId: taskId);
-      },
-    );
-  }
+            ),
+      );
+    },
+  );
 
   /// Collapses the currently expanded card when it matches [target].
   void _collapseIfExpanded(EntityRef target) {
@@ -1708,10 +1247,136 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     }
   }
 
+  /// Executes the guarded inline persistence pass for a pre-validated [taskId] and [section].
+  Future<ActionResult> _commitInlineSectionSave({
+    required String taskId,
+    required TaskSectionKind section,
+    required AppLocalizations localizations,
+    required Future<bool> Function() persist,
+  }) {
+    final shellBefore = ref.read(shellProvider);
+    final tierBefore = _evaluatedBoardForLabel(shellBefore.activeLabelId)
+        .findTierOfTask(taskId);
+    final target = EntityRef(kind: EntityKind.task, id: taskId);
+
+    return _runGuardedMutation(
+      busyTaskId: taskId,
+      localizations: localizations,
+      onPersistFailure: () => UiTelemetry.logInlineEditFailed(
+        kind: 'task',
+        entityId: taskId,
+        section: section.name,
+      ),
+      action: (token) async {
+        final committed = await ref
+            .read(shellProvider.notifier)
+            .runLocalEntityMutation(target, persist);
+        if (!_isOperationActive(token)) {
+          return ActionSucceeded(entityId: taskId);
+        }
+        if (!committed) {
+          UiTelemetry.logInlineEditFailed(
+            kind: 'task',
+            entityId: taskId,
+            section: section.name,
+          );
+          return ActionPersistFailed(
+            message: _fallbackPersistError(localizations),
+          );
+        }
+        UiTelemetry.logInlineEditSaved(
+          kind: 'task',
+          entityId: taskId,
+          section: section.name,
+        );
+        final shellAfter = ref.read(shellProvider);
+        if (shellAfter.activeInlineEdit?.entity == target) {
+          ref.read(shellProvider.notifier).closeInlineEdit();
+        }
+        final tierAfter = _evaluatedBoardForLabel(shellAfter.activeLabelId)
+            .findTierOfTask(taskId);
+        final movedTiers = tierAfter != tierBefore;
+        if (movedTiers &&
+            !shellAfter.searchOpen &&
+            tierAfter != shellAfter.activeTier) {
+          _collapseIfExpanded(target);
+        }
+        final noticeMessage =
+            (movedTiers &&
+                tierAfter != null &&
+                tierAfter != shellAfter.activeTier)
+            ? localizations.noticeTaskSavedInTier(
+                localizations.tierName(tierAfter),
+              )
+            : localizations.noticeTaskSaved;
+        if (movedTiers) {
+          ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
+        }
+        return ActionSucceeded(entityId: taskId, noticeMessage: noticeMessage);
+      },
+    );
+  }
+
+  /// Persists a newly validated task identified by [newTaskId], runs optional [onCreated], and emits its non-jumping placement notice.
+  Future<ActionResult> _commitTaskCreation({
+    required String newTaskId,
+    required AppLocalizations localizations,
+    required Future<bool> Function() persist,
+    VoidCallback? onCreated,
+  }) => _runGuardedMutation(
+    localizations: localizations,
+    action: (token) async {
+      final committed = await persist();
+      if (!_isOperationActive(token)) {
+        return ActionSucceeded(entityId: newTaskId);
+      }
+      if (!committed) {
+        return ActionPersistFailed(
+          message: _fallbackPersistError(localizations),
+        );
+      }
+      final boardAfter = _currentBoard;
+      final createdTask = boardAfter.findTask(newTaskId);
+      if (createdTask == null) {
+        return ActionPersistFailed(
+          message: _fallbackPersistError(localizations),
+        );
+      }
+      onCreated?.call();
+      final noticeMessage = _resolveTaskPlacementNotice(
+        board: boardAfter,
+        task: createdTask,
+        localizations: localizations,
+      );
+      ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
+      return ActionSucceeded(
+        entityId: createdTask.id,
+        noticeMessage: noticeMessage,
+      );
+    },
+  );
+
   /// Reads the context-evaluated [TaskBoard] for [activeLabelId] from [evaluatedBoardProvider].
   TaskBoard _evaluatedBoardForLabel(String? activeLabelId) =>
       ref.read(evaluatedBoardProvider(activeLabelId)).asData?.value ??
       _currentBoard;
+
+  /// Logs inline validation failure telemetry for [taskId] and [section] and returns [ActionValidationFailed].
+  Future<ActionResult> _failInlineValidation({
+    required String taskId,
+    required TaskSectionKind section,
+    required Map<String, String> fieldErrors,
+  }) async {
+    UiTelemetry.logInlineEditFailed(
+      kind: 'task',
+      entityId: taskId,
+      section: section.name,
+    );
+    return ActionValidationFailed(
+      message: fieldErrors.values.first,
+      fieldErrors: fieldErrors,
+    );
+  }
 
   /// Returns a sanitized localized persistence failure message when a storage rollback occurred.
   String _fallbackPersistError(AppLocalizations localizations) {
@@ -1720,6 +1385,23 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
       return syncError;
     }
     return localizations.syncStatusError;
+  }
+
+  /// Collapses [taskId] after completion or auto-finish and emits the repeating-task reschedule notice when applicable.
+  ActionSucceeded _finishCompletedTaskAction({
+    required String taskId,
+    required TaskItem taskBefore,
+    required AppLocalizations localizations,
+  }) {
+    _collapseIfExpanded(EntityRef(kind: EntityKind.task, id: taskId));
+    if (taskBefore.repeatRule != null) {
+      final repeatNotice = localizations.taskCompletedRepeatNotice(
+        taskBefore.title,
+      );
+      ref.read(floatingNoticeProvider.notifier).showNotice(repeatNotice);
+      return ActionSucceeded(entityId: taskId, noticeMessage: repeatNotice);
+    }
+    return ActionSucceeded(entityId: taskId);
   }
 
   /// Resets in-flight busy state and invalidates stale operation tokens on actual workspace switches, ignoring transient `AsyncLoading`.
@@ -1751,40 +1433,58 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     required TaskSectionKind section,
     required AppLocalizations localizations,
   }) {
+    final checked = _requireTask(
+      taskId: taskId,
+      localizations: localizations,
+      requireOpen: true,
+    );
+    if (checked.failure case final failure?) {
+      if (failure is ActionValidationFailed) {
+        UiTelemetry.logInlineEditFailed(
+          kind: 'task',
+          entityId: taskId,
+          section: section.name,
+        );
+      }
+      return (task: null, failure: failure);
+    }
+    return (task: checked.task, failure: null);
+  }
+
+  /// Checks busy guard, task presence on the current board, and optional open-state requirement for [taskId].
+  ({TaskBoard board, TaskItem? task, ActionResult? failure}) _requireTask({
+    required String taskId,
+    required AppLocalizations localizations,
+    bool requireOpen = false,
+  }) {
+    final board = _currentBoard;
     if (state.isBusy) {
       return (
+        board: board,
         task: null,
         failure: ActionPersistFailed(message: localizations.syncStatusSyncing),
       );
     }
-    final task = _currentBoard.findTask(taskId);
+    final task = board.findTask(taskId);
     if (task == null) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: section.name,
-      );
       return (
+        board: board,
         task: null,
         failure: ActionValidationFailed(
           message: localizations.entityRemovedExternallyNotice,
         ),
       );
     }
-    if (task.isCompleted || task.completedAt != null) {
-      UiTelemetry.logInlineEditFailed(
-        kind: 'task',
-        entityId: taskId,
-        section: section.name,
-      );
+    if (requireOpen && (task.isCompleted || task.completedAt != null)) {
       return (
+        board: board,
         task: null,
         failure: ActionValidationFailed(
           message: localizations.completedReadOnlyPill,
         ),
       );
     }
-    return (task: task, failure: null);
+    return (board: board, task: task, failure: null);
   }
 
   /// Resolves [AppLocalizations] from explicit [locale] or [appLocaleProvider].
@@ -1861,6 +1561,36 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     return localizations.noticeTaskSaved;
   }
 
+  /// Verifies [taskId] is editable for [section] once and runs [onValidatedTask].
+  Future<ActionResult> _runEditableTaskSection({
+    required String taskId,
+    required TaskSectionKind section,
+    required Locale? locale,
+    required Future<ActionResult> Function(
+      TaskBoard board,
+      TaskItem existingTask,
+      AppLocalizations localizations,
+    )
+    onValidatedTask,
+  }) async {
+    final localizations = _resolveLocalizations(locale);
+    final checked = _requireEditableTask(
+      taskId: taskId,
+      section: section,
+      localizations: localizations,
+    );
+    if (checked.failure case final failure?) {
+      return failure;
+    }
+    final existingTask = checked.task;
+    if (existingTask == null) {
+      return ActionValidationFailed(
+        message: localizations.entityRemovedExternallyNotice,
+      );
+    }
+    return onValidatedTask(_currentBoard, existingTask, localizations);
+  }
+
   /// Executes [action] under the in-flight `isBusy` guard, mapping domain/calendar exceptions to [ActionPersistFailed].
   Future<ActionResult> _runGuardedMutation({
     String? busyTaskId,
@@ -1900,85 +1630,84 @@ class BoardActionsNotifier extends Notifier<BoardActionsState> {
     }
   }
 
-  /// Persists a validated inline section edit on [taskId], checks [TaskNotifier.lastMutationCommitted], logs telemetry, closes the editor, and handles tier transitions.
+  /// Validates [taskId] editability and executes a parameterless inline section clear/disable save.
   Future<ActionResult> _runInlineSectionSave({
     required String taskId,
     required TaskSectionKind section,
     required Locale? locale,
-    required Future<void> Function() persist,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    final checked = _requireEditableTask(
+    required Future<bool> Function() persist,
+  }) => _runEditableTaskSection(
+    taskId: taskId,
+    section: section,
+    locale: locale,
+    onValidatedTask: (_, _, localizations) => _commitInlineSectionSave(
       taskId: taskId,
       section: section,
       localizations: localizations,
+      persist: persist,
+    ),
+  );
+
+  /// Runs a guarded live task mutation with shared busy/lookup/open checks, local-watch suppression, and post-commit handling.
+  Future<ActionResult> _runTaskAction({
+    required String taskId,
+    required Locale? locale,
+    bool requireOpen = false,
+    bool suppressLocalWatch = true,
+    required Future<ActionResult> Function(
+      TaskBoard boardBefore,
+      TaskItem taskBefore,
+      AppLocalizations localizations,
+      Future<ActionResult> Function({
+        required Future<bool> Function() persist,
+        ActionResult Function()? onCommitted,
+      })
+      commit,
+    )
+    run,
+  }) async {
+    final localizations = _resolveLocalizations(locale);
+    final checked = _requireTask(
+      taskId: taskId,
+      localizations: localizations,
+      requireOpen: requireOpen,
     );
     if (checked.failure case final failure?) {
       return failure;
     }
-    final shellBefore = ref.read(shellProvider);
-    final tierBefore = _evaluatedBoardForLabel(shellBefore.activeLabelId)
-        .findTierOfTask(taskId);
+    final boardBefore = checked.board;
+    final taskBefore = checked.task;
+    if (taskBefore == null) {
+      return ActionValidationFailed(
+        message: localizations.entityRemovedExternallyNotice,
+      );
+    }
     final target = EntityRef(kind: EntityKind.task, id: taskId);
-
-    return _runGuardedMutation(
-      busyTaskId: taskId,
-      localizations: localizations,
-      onPersistFailure: () {
-        UiTelemetry.logInlineEditFailed(
-          kind: 'task',
-          entityId: taskId,
-          section: section.name,
-        );
-      },
-      action: (token) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(target, persist);
-        if (!_isOperationActive(token)) {
-          return ActionSucceeded(entityId: taskId);
-        }
-        if (!ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-          UiTelemetry.logInlineEditFailed(
-            kind: 'task',
-            entityId: taskId,
-            section: section.name,
-          );
-          return ActionPersistFailed(
-            message: _fallbackPersistError(localizations),
-          );
-        }
-        UiTelemetry.logInlineEditSaved(
-          kind: 'task',
-          entityId: taskId,
-          section: section.name,
-        );
-        final shellAfter = ref.read(shellProvider);
-        if (shellAfter.activeInlineEdit?.entity == target) {
-          ref.read(shellProvider.notifier).closeInlineEdit();
-        }
-        final tierAfter = _evaluatedBoardForLabel(shellAfter.activeLabelId)
-            .findTierOfTask(taskId);
-        final movedTiers = tierAfter != tierBefore;
-        if (movedTiers &&
-            !shellAfter.searchOpen &&
-            tierAfter != shellAfter.activeTier) {
-          _collapseIfExpanded(target);
-        }
-        final noticeMessage =
-            (movedTiers &&
-                tierAfter != null &&
-                tierAfter != shellAfter.activeTier)
-            ? localizations.noticeTaskSavedInTier(
-                localizations.tierName(tierAfter),
-              )
-            : localizations.noticeTaskSaved;
-        if (movedTiers) {
-          ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
-        }
-        return ActionSucceeded(entityId: taskId, noticeMessage: noticeMessage);
-      },
-    );
+    return run(boardBefore, taskBefore, localizations, ({
+      required Future<bool> Function() persist,
+      ActionResult Function()? onCommitted,
+    }) {
+      return _runGuardedMutation(
+        busyTaskId: taskId,
+        localizations: localizations,
+        action: (token) async {
+          final committed = suppressLocalWatch
+              ? await ref
+                    .read(shellProvider.notifier)
+                    .runLocalEntityMutation(target, persist)
+              : await persist();
+          if (!_isOperationActive(token)) {
+            return ActionSucceeded(entityId: taskId);
+          }
+          if (!committed) {
+            return ActionPersistFailed(
+              message: _fallbackPersistError(localizations),
+            );
+          }
+          return onCommitted?.call() ?? ActionSucceeded(entityId: taskId);
+        },
+      );
+    });
   }
 }
 
@@ -2303,50 +2032,13 @@ _validateDraftDue({
   if (parsedDue == null) {
     fieldErrors['due'] = localizations.taskSuspendedErrorInvalid;
   }
-  final dueNote = TaskScheduleHelper.normalizeSchedulingNote(input.rawDueNote);
-  final dueNoteError = TaskScheduleHelper.validateSchedulingNote(
-    dueNote,
-    localizations,
+  final dueNote = _validateOptionalSchedulingNote(
+    rawNote: input.rawDueNote,
+    fieldKey: 'dueNote',
+    localizations: localizations,
+    fieldErrors: fieldErrors,
   );
-  if (dueNoteError != null) {
-    fieldErrors['dueNote'] = dueNoteError;
-  }
   return (hasDue: true, dueLocalInput: parsedDue?.localInput, dueNote: dueNote);
-}
-
-/// Validates optional recurrence count and Mode 2 lead days on [input], recording errors in [fieldErrors].
-TaskRepeatRule? _validateDraftRepeat({
-  required TaskDraftInput input,
-  required bool hasDue,
-  required AppLocalizations localizations,
-  required Map<String, String> fieldErrors,
-}) {
-  if (!input.isRepeating) {
-    return null;
-  }
-  final parsedCount = TaskScheduleHelper.parseRepeatCount(
-    isRepeating: true,
-    rawCount: input.rawRepeatCount,
-  );
-  final parsedLeadDays = TaskScheduleHelper.parseLeadDays(
-    hasDue: hasDue,
-    isRepeating: true,
-    rawLeadDays: input.rawRepeatLeadDays,
-  );
-  if (parsedCount == null) {
-    fieldErrors['repeatCount'] = localizations.repeatErrorInvalid;
-  }
-  if (parsedLeadDays == null) {
-    fieldErrors['repeatLeadDays'] = localizations.repeatLeadDaysErrorInvalid;
-  }
-  if (parsedCount == null || parsedLeadDays == null) {
-    return null;
-  }
-  return TaskRepeatRule(
-    count: parsedCount,
-    unit: input.repeatUnit,
-    leadDays: parsedLeadDays,
-  );
 }
 
 /// Validates optional deferral mode, timestamp, and `suspendedNote` on [input], recording errors in [fieldErrors].
@@ -2380,20 +2072,133 @@ _validateDraftSuspended({
       suspendedLocalInput = parsedSuspended.localInput;
     }
   }
-  final suspendedNote = TaskScheduleHelper.normalizeSchedulingNote(
-    input.rawSuspendedNote,
+  final suspendedNote = _validateOptionalSchedulingNote(
+    rawNote: input.rawSuspendedNote,
+    fieldKey: 'suspendedNote',
+    localizations: localizations,
+    fieldErrors: fieldErrors,
   );
-  final suspendedNoteError = TaskScheduleHelper.validateSchedulingNote(
-    suspendedNote,
-    localizations,
-  );
-  if (suspendedNoteError != null) {
-    fieldErrors['suspendedNote'] = suspendedNoteError;
-  }
   return (
     isSuspendedForever: input.suspendedIndefinitely,
     suspendedLocalInput: suspendedLocalInput,
     suspendedNote: suspendedNote,
+  );
+}
+
+/// Validates a candidate history journal entry's text, timestamp, and uniqueness on [task].
+({TaskHistoryEntry? entry, ActionValidationFailed? failure})
+_validateHistoryCandidate({
+  required TaskItem task,
+  required String rawText,
+  required String rawTimestamp,
+  required WebDavConfig configuration,
+  required DateTime fallbackNowUtc,
+  String? preservedTimestampText,
+  DateTime? preservedTimestampUtc,
+  TaskHistoryEntry? ignoringDuplicateEntry,
+  required AppLocalizations localizations,
+}) {
+  final sanitizedText = TaskScheduleHelper.sanitizeHistoryText(rawText);
+  final textError = TaskScheduleHelper.validateHistoryText(
+    sanitizedText,
+    localizations,
+  );
+  if (textError != null) {
+    return (
+      entry: null,
+      failure: ActionValidationFailed(
+        message: textError,
+        fieldErrors: <String, String>{'text': textError},
+      ),
+    );
+  }
+  final resolvedTimestampUtc = TaskScheduleHelper.resolveHistoryTimestampUtc(
+    configuration: configuration,
+    fallbackNowUtc: fallbackNowUtc,
+    preservedTimestampText: preservedTimestampText,
+    preservedTimestampUtc: preservedTimestampUtc,
+    rawTimestamp: rawTimestamp,
+  );
+  if (resolvedTimestampUtc == null) {
+    return (
+      entry: null,
+      failure: ActionValidationFailed(
+        message: localizations.historyErrorTimestampInvalid,
+        fieldErrors: <String, String>{
+          'timestamp': localizations.historyErrorTimestampInvalid,
+        },
+      ),
+    );
+  }
+  final candidate = TaskHistoryEntry(
+    timestampUtc: resolvedTimestampUtc,
+    text: sanitizedText,
+  );
+  if (candidate != ignoringDuplicateEntry && task.history.contains(candidate)) {
+    return (
+      entry: null,
+      failure: ActionValidationFailed(
+        message: localizations.historyErrorDuplicate,
+        fieldErrors: <String, String>{
+          'text': localizations.historyErrorDuplicate,
+        },
+      ),
+    );
+  }
+  return (entry: candidate, failure: null);
+}
+
+/// Normalizes and validates an optional scheduling or body note, recording any error under [fieldKey] in [fieldErrors].
+String? _validateOptionalSchedulingNote({
+  required String rawNote,
+  required String fieldKey,
+  required AppLocalizations localizations,
+  required Map<String, String> fieldErrors,
+}) {
+  final normalized = TaskScheduleHelper.normalizeSchedulingNote(rawNote);
+  final error = TaskScheduleHelper.validateSchedulingNote(
+    normalized,
+    localizations,
+  );
+  if (error != null) {
+    fieldErrors[fieldKey] = error;
+  }
+  return normalized;
+}
+
+/// Validates recurrence count (`1..3650`) and Mode 2 lead days (`0..3650`), recording errors in [fieldErrors].
+TaskRepeatRule? _validateRepeatFields({
+  required bool hasDue,
+  required String rawCount,
+  required RepeatUnit unit,
+  required String rawLeadDays,
+  required TdfRepeatClock clock,
+  required AppLocalizations localizations,
+  required Map<String, String> fieldErrors,
+}) {
+  final parsedCount = TaskScheduleHelper.parseRepeatCount(
+    isRepeating: true,
+    rawCount: rawCount,
+  );
+  final parsedLeadDays = TaskScheduleHelper.parseLeadDays(
+    hasDue: hasDue,
+    isRepeating: true,
+    rawLeadDays: rawLeadDays,
+  );
+  if (parsedCount == null) {
+    fieldErrors['repeatCount'] = localizations.repeatErrorInvalid;
+  }
+  if (parsedLeadDays == null) {
+    fieldErrors['repeatLeadDays'] = localizations.repeatLeadDaysErrorInvalid;
+  }
+  if (parsedCount == null || parsedLeadDays == null) {
+    return null;
+  }
+  return TaskRepeatRule(
+    count: parsedCount,
+    unit: unit,
+    clock: clock,
+    leadDays: parsedLeadDays,
   );
 }
 
@@ -2405,32 +2210,22 @@ _ValidatedTaskDraft _validateTaskDraft({
   required AppLocalizations localizations,
 }) {
   final fieldErrors = <String, String>{};
-  final titleCheck = TaskScheduleHelper.validateSingleLineText(
-    rawText: input.title,
-    emptyError: localizations.taskNameErrorEmpty,
-    invalidError: localizations.historyErrorTextInvalid,
-    tooLongError: localizations.historyErrorTextTooLong,
+  final titleValidation = _validateTaskTitleInput(
+    board: board,
+    rawTitle: input.title,
+    excludingTaskId: null,
+    localizations: localizations,
   );
-  final titleError =
-      titleCheck.error ??
-      TaskScheduleHelper.validateTaskTitle(
-        board: board,
-        rawTitle: titleCheck.trimmed,
-        excludingTaskId: null,
-        localizations: localizations,
-      );
-  if (titleError != null) {
+  if (titleValidation.error case final titleError?) {
     fieldErrors['title'] = titleError;
   }
 
-  final normalizedNote = TaskScheduleHelper.normalizeSchedulingNote(input.note);
-  final noteError = TaskScheduleHelper.validateSchedulingNote(
-    normalizedNote,
-    localizations,
+  final normalizedNote = _validateOptionalSchedulingNote(
+    rawNote: input.note,
+    fieldKey: 'note',
+    localizations: localizations,
+    fieldErrors: fieldErrors,
   );
-  if (noteError != null) {
-    fieldErrors['note'] = noteError;
-  }
 
   final linksCheck = TaskScheduleHelper.validateLinksList(
     links: input.links,
@@ -2454,12 +2249,17 @@ _ValidatedTaskDraft _validateTaskDraft({
     localizations: localizations,
     fieldErrors: fieldErrors,
   );
-  final repeatRule = _validateDraftRepeat(
-    input: input,
-    hasDue: dueCheck.hasDue,
-    localizations: localizations,
-    fieldErrors: fieldErrors,
-  );
+  final repeatRule = input.isRepeating
+      ? _validateRepeatFields(
+          hasDue: dueCheck.hasDue,
+          rawCount: input.rawRepeatCount,
+          unit: input.repeatUnit,
+          rawLeadDays: input.rawRepeatLeadDays,
+          clock: TdfRepeatClock.midnight,
+          localizations: localizations,
+          fieldErrors: fieldErrors,
+        )
+      : null;
   final suspendedCheck = _validateDraftSuspended(
     input: input,
     configuration: configuration,
@@ -2494,7 +2294,7 @@ _ValidatedTaskDraft _validateTaskDraft({
   }
 
   return (
-    trimmedTitle: titleCheck.trimmed,
+    trimmedTitle: titleValidation.trimmed,
     normalizedNote: normalizedNote,
     labelIds: orderedLabelIds,
     links: linksCheck.links,
@@ -2510,4 +2310,28 @@ _ValidatedTaskDraft _validateTaskDraft({
     conditions: compiledConditions.conditions,
     fieldErrors: fieldErrors,
   );
+}
+
+/// Validates a task title against single-line `<text>` bounds and case-insensitive uniqueness on [board].
+({String trimmed, String? error}) _validateTaskTitleInput({
+  required TaskBoard board,
+  required String rawTitle,
+  required String? excludingTaskId,
+  required AppLocalizations localizations,
+}) {
+  final textCheck = TaskScheduleHelper.validateSingleLineText(
+    rawText: rawTitle,
+    emptyError: localizations.taskNameErrorEmpty,
+    invalidError: localizations.historyErrorTextInvalid,
+    tooLongError: localizations.historyErrorTextTooLong,
+  );
+  final error =
+      textCheck.error ??
+      TaskScheduleHelper.validateTaskTitle(
+        board: board,
+        rawTitle: textCheck.trimmed,
+        excludingTaskId: excludingTaskId,
+        localizations: localizations,
+      );
+  return (trimmed: textCheck.trimmed, error: error);
 }

@@ -147,14 +147,13 @@ class _ControllableWebDavRepository extends WebDavRepository {
 }
 
 void main() {
-  final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
+  final fixedDate = DateTime.utc(2026, 11, 1, 12);
 
   group('TaskNotifier Board Mutations & Atomic Rollback', () {
     test('executes task, subtask, queue, and label mutations and persists to storage', () async {
       var storedTdf = '';
       const config = WebDavConfig(
         storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
         language: AppLanguage.english,
       );
       final container = ProviderContainer(
@@ -258,7 +257,7 @@ void main() {
 
       await notifier.blockTask(
         'smd000OkD2',
-        suspendedUntil: DateTime.utc(2026, 11, 5, 9, 0),
+        suspendedUntil: DateTime.utc(2026, 11, 5, 9),
       );
       board = container.read(taskNotifierProvider).requireValue;
       expect(board.blocked.map((task) => task.id), equals(['smd000OkD2']));
@@ -287,7 +286,6 @@ void main() {
       var failSaves = false;
       const config = WebDavConfig(
         storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
         language: AppLanguage.english,
       );
       final container = ProviderContainer(
@@ -487,7 +485,6 @@ void main() {
       var storedTdf = '';
       const config = WebDavConfig(
         storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
         language: AppLanguage.english,
       );
       final settingsRepo = InMemorySettingsRepository(config);
@@ -562,7 +559,7 @@ void main() {
       board = container.read(taskNotifierProvider).requireValue;
       expect(board.labels.single.isScoped, isFalse);
 
-      final dueAt = DateTime.utc(2026, 11, 5, 14, 0);
+      final dueAt = DateTime.utc(2026, 11, 5, 14);
       const taskOrigin = TaskOrigin(namespace: 'jira', externalKey: 'OPS-42');
       await notifier.addTask(
         'Prepare Quarterly Report',
@@ -614,7 +611,6 @@ void main() {
       );
       await notifier.addTask(
         'Munich Only Task',
-        targetTier: TaskTier.planned,
         conditions: [
           LocationTaskCondition(locationIds: [munichId]),
         ],
@@ -656,7 +652,7 @@ void main() {
         final container = ProviderContainer(
           overrides: [
             settingsRepositoryProvider.overrideWithValue(
-              InMemorySettingsRepository(config),
+              InMemorySettingsRepository(),
             ),
             localFileRepositoryProvider.overrideWith(
               (ref) => _ControllableLocalRepository(
@@ -678,7 +674,6 @@ void main() {
           await notifier.addTask(
             'Task $i',
             id: id,
-            targetTier: TaskTier.planned,
             subtasksAutoFinish: i == 2,
             subtasks: i == 2
                 ? const <SubtaskItem>[SubtaskItem(title: 'Only step')]
@@ -853,9 +848,8 @@ void main() {
         await notifier.addTask(
           'Verify Metrics',
           id: 'verMetOkD2',
-          targetTier: TaskTier.planned,
           dependencies: const <TdfTaskDependency>[
-            TdfTaskDependency(taskId: 'depGtwOkD2', requiredCompletion: 1),
+            TdfTaskDependency(taskId: 'depGtwOkD2'),
           ],
         );
 
@@ -1057,10 +1051,8 @@ void main() {
       var readDigestCalls = 0;
       var maxFileBytesOverride = LocalFileRepository.defaultMaxFileBytes;
 
-      final settingsRepo = InMemorySettingsRepository(
-        const WebDavConfig(storageMode: StorageMode.local),
-      );
-      var currentTime = DateTime.utc(2026, 11, 14, 10, 0);
+      final settingsRepo = InMemorySettingsRepository();
+      var currentTime = DateTime.utc(2026, 11, 14, 10);
 
       final container = ProviderContainer(
         overrides: [
@@ -1230,7 +1222,7 @@ void main() {
           storageMode: StorageMode.local,
         ),
       );
-      var currentTime = DateTime.utc(2026, 11, 14, 11, 0);
+      var currentTime = DateTime.utc(2026, 11, 14, 11);
       final container = ProviderContainer(
         overrides: [
           settingsRepositoryProvider.overrideWithValue(settingsRepo),
@@ -1404,7 +1396,7 @@ void main() {
         storageMode: StorageMode.both,
       );
       final settingsRepo = InMemorySettingsRepository(bothConfig);
-      var currentTime = DateTime.utc(2026, 11, 14, 12, 0);
+      var currentTime = DateTime.utc(2026, 11, 14, 12);
 
       final container = ProviderContainer(
         overrides: [
@@ -1536,21 +1528,15 @@ void main() {
 
     test('prunes pending downgrade undo entry on external queue-only edits while preserving unaffected downgrade entries', () async {
       var diskContent = '';
-      var currentTime = DateTime.utc(2026, 11, 14, 13, 0);
-      final settingsRepo = InMemorySettingsRepository(
-        const WebDavConfig(
-          localFilePath: 'tasks.tdf',
-          storageMode: StorageMode.local,
-          localWatchEnabled: true,
-        ),
-      );
+      var currentTime = DateTime.utc(2026, 11, 14, 13);
+      final settingsRepo = InMemorySettingsRepository();
 
       final container = ProviderContainer(
         overrides: [
           settingsRepositoryProvider.overrideWithValue(settingsRepo),
           clockProvider.overrideWithValue(() => currentTime),
           localFileRepositoryProvider.overrideWith((ref) {
-            final config = resolveCurrentConfig(ref);
+            final config = _watchCurrentConfig(ref);
             return _GateableWatchLocalRepository(
               config: config,
               maxFileBytes: 10485760,
@@ -1620,7 +1606,7 @@ void main() {
       var diskContent = 'tdf 0.8.0\n\ntask broken0001 {\n';
       var remoteContent = 'tdf 0.8.0\n';
       Completer<void>? remoteFetchGate;
-      var currentTime = DateTime.utc(2026, 11, 14, 14, 0);
+      var currentTime = DateTime.utc(2026, 11, 14, 14);
 
       var failNextRemoteGet = false;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -1659,10 +1645,7 @@ void main() {
         serverUrl: 'http://127.0.0.1:${server.port}',
         username: 'example-user',
         password: 'example-password',
-        filePath: 'tasks.tdf',
-        localFilePath: 'tasks.tdf',
         storageMode: StorageMode.both,
-        localWatchEnabled: true,
       );
       final settingsRepo = InMemorySettingsRepository(config);
       final container = ProviderContainer(
@@ -1671,7 +1654,7 @@ void main() {
           settingsRepositoryProvider.overrideWithValue(settingsRepo),
           clockProvider.overrideWithValue(() => currentTime),
           localFileRepositoryProvider.overrideWith((ref) {
-            final latest = resolveCurrentConfig(ref);
+            final latest = _watchCurrentConfig(ref);
             return _GateableWatchLocalRepository(
               config: latest,
               maxFileBytes: 10485760,
@@ -1747,7 +1730,7 @@ void main() {
     test('executes TDF 0.7.0 label links, task suspendedNote, passive due, dueNote, and history CRUD with no-op guards and AppLogger privacy redaction', () async {
       var storedTdf = '';
       var saveCount = 0;
-      var currentTime = DateTime.utc(2026, 11, 11, 10, 0);
+      var currentTime = DateTime.utc(2026, 11, 11, 10);
       AppLogger.resetForTesting(clock: () => currentTime);
       AppLogger.setEnabled(
         true,
@@ -1758,7 +1741,6 @@ void main() {
 
       const config = WebDavConfig(
         storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
         diagnosticsEnabled: true,
         logLevel: LogLevel.debug,
       );
@@ -1833,14 +1815,14 @@ void main() {
       await notifier.addTask(
         'Release Prep',
         id: 'relPrep001',
-        dueAt: DateTime.utc(2026, 11, 20, 15, 0),
+        dueAt: DateTime.utc(2026, 11, 20, 15),
         isDuePassive: true,
         dueNote: 'ConfidentialDueNote',
-        suspendedAt: DateTime.utc(2026, 11, 15, 9, 0),
+        suspendedAt: DateTime.utc(2026, 11, 15, 9),
         suspendedNote: 'ConfidentialSuspendedNote',
         history: <TaskHistoryEntry>[
           TaskHistoryEntry(
-            timestampUtc: DateTime.utc(2026, 11, 11, 9, 0),
+            timestampUtc: DateTime.utc(2026, 11, 11, 9),
             text: 'InitialSecretHistoryEntry',
           ),
         ],
@@ -2006,15 +1988,12 @@ void main() {
 
     test('captures stripped previouslyBlockedDependencies on completeTask, auto-finish toggleSubtask, and deleteTask, and preserves undo across pure block-cleanup syncs while pruning when previouslyBlockedDependencies tasks change', () async {
       var storedTdf = '';
-      var currentTime = DateTime.utc(2026, 11, 11, 12, 0);
-      const config = WebDavConfig(
-        storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
-      );
+      var currentTime = DateTime.utc(2026, 11, 11, 12);
+      const config = WebDavConfig(storageMode: StorageMode.local);
       final container = ProviderContainer(
         overrides: [
           settingsRepositoryProvider.overrideWithValue(
-            InMemorySettingsRepository(config),
+            InMemorySettingsRepository(),
           ),
           clockProvider.overrideWithValue(() => currentTime),
           localFileRepositoryProvider.overrideWith(
@@ -2044,14 +2023,14 @@ void main() {
         'Dependent On Complete',
         id: 'depComp001',
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'blkrUndo01', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'blkrUndo01'),
         ],
       );
       await notifier.addTask(
         'Dependent On AutoFinish',
         id: 'depAuto002',
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'autoUndo02', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'autoUndo02'),
         ],
       );
       await notifier.addTask(
@@ -2208,7 +2187,7 @@ void main() {
     });
 
     test('forwards DueLeadWindow across initial load, zero-I/O preference updates, mutations, downgrade/undo, external watch, and mid-flight sync await gaps', () async {
-      var currentTime = DateTime.utc(2026, 11, 15, 12, 0);
+      var currentTime = DateTime.utc(2026, 11, 15, 12);
       final settingsRepo = InMemorySettingsRepository();
       final localFiles = <String, String>{};
       final remoteFiles = <String, String>{};
@@ -2237,8 +2216,6 @@ void main() {
           serverUrl: 'https://cloud.example.com/dav',
           username: 'alice',
           password: 'secret',
-          filePath: 'tasks.tdf',
-          localFilePath: 'tasks.tdf',
           storageMode: StorageMode.both,
           dueLeadWindow: DueLeadWindow.days7,
         ),
@@ -2249,7 +2226,7 @@ void main() {
           clockProvider.overrideWithValue(() => currentTime),
           settingsRepositoryProvider.overrideWithValue(settingsRepo),
           localFileRepositoryProvider.overrideWith((ref) {
-            final config = resolveCurrentConfig(ref);
+            final config = _watchCurrentConfig(ref);
             final key = config.localFilePath;
             return _GateableWatchLocalRepository(
               config: config,
@@ -2263,7 +2240,7 @@ void main() {
             );
           }),
           webDavRepositoryProvider.overrideWith((ref) {
-            final config = resolveCurrentConfig(ref);
+            final config = _watchCurrentConfig(ref);
             return _GatedCountingWebDavRepository(
               config: config,
               remoteFiles: remoteFiles,
@@ -2555,7 +2532,7 @@ void main() {
 
       var localStore = 'tdf ${TdfService.supportedVersion}\n';
       var localSaves = 0;
-      var nowUtc = DateTime.utc(2026, 11, 15, 9, 0);
+      var nowUtc = DateTime.utc(2026, 11, 15, 9);
       final config = WebDavConfig(
         storageMode: StorageMode.both,
         serverUrl: 'http://127.0.0.1:${server.port}',
@@ -2753,9 +2730,7 @@ void main() {
           settingsRepositoryProvider.overrideWithValue(
             InMemorySettingsRepository(config),
           ),
-          clockProvider.overrideWithValue(
-            () => DateTime.utc(2026, 11, 1, 8, 0),
-          ),
+          clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 8)),
           localFileRepositoryProvider.overrideWith(
             (ref) => _ControllableLocalRepository(
               config: config,
@@ -2774,8 +2749,8 @@ void main() {
       await notifier.addTask(
         'Local Calendar Scheduled Task',
         id: 'calIn00001',
-        dueLocalInput: TdfLocalDateTime(2026, 11, 10, 14, 30, 0),
-        suspendedLocalInput: TdfLocalDateTime(2026, 11, 5, 10, 0, 0),
+        dueLocalInput: TdfLocalDateTime(2026, 11, 10, 14, 30),
+        suspendedLocalInput: TdfLocalDateTime(2026, 11, 5, 10),
       );
 
       var created = container
@@ -2783,24 +2758,18 @@ void main() {
           .requireValue
           .findTask('calIn00001')!;
       expect(created.dueAt, equals(DateTime.utc(2026, 11, 10, 12, 30)));
-      expect(
-        created.dueAnchor,
-        equals(TdfLocalDateTime(2026, 11, 10, 14, 30, 0)),
-      );
-      expect(created.suspendedAt, equals(DateTime.utc(2026, 11, 5, 8, 0)));
+      expect(created.dueAnchor, equals(TdfLocalDateTime(2026, 11, 10, 14, 30)));
+      expect(created.suspendedAt, equals(DateTime.utc(2026, 11, 5, 8)));
 
       await notifier.updateTask(
         'calIn00001',
-        dueAnchor: TdfLocalDateTime(2026, 11, 10, 16, 0, 0),
+        dueAnchor: TdfLocalDateTime(2026, 11, 10, 16),
       );
       created = container
           .read(taskNotifierProvider)
           .requireValue
           .findTask('calIn00001')!;
-      expect(
-        created.dueAnchor,
-        equals(TdfLocalDateTime(2026, 11, 10, 16, 0, 0)),
-      );
+      expect(created.dueAnchor, equals(TdfLocalDateTime(2026, 11, 10, 16)));
 
       await notifier.updateTask('calIn00001', clearDueAnchor: true);
       created = container
@@ -2812,7 +2781,7 @@ void main() {
 
     test('resolves DeletionConflict (including bound decisions and stale dueAnchor mismatch), RecoveryRequired (discard + recoverAsNew reference rewriting), and SyncGenerationRollback while setting localized banners and clearing undo stack', () async {
       var diskTdf = 'tdf 0.8.0\n';
-      var nowUtc = DateTime.utc(2026, 11, 15, 10, 0);
+      var nowUtc = DateTime.utc(2026, 11, 15, 10);
       const config = WebDavConfig(
         storageMode: StorageMode.local,
         language: AppLanguage.english,
@@ -2843,8 +2812,8 @@ void main() {
       await notifier.addTask(
         'Conflict Anchor Task',
         id: 'cflAnc0001',
-        dueAt: DateTime.utc(2026, 11, 20, 12, 0),
-        dueAnchor: TdfLocalDateTime(2026, 11, 20, 13, 0, 0),
+        dueAt: DateTime.utc(2026, 11, 20, 12),
+        dueAnchor: TdfLocalDateTime(2026, 11, 20, 13),
       );
       nowUtc = DateTime.utc(2026, 11, 15, 10, 1);
       await notifier.completeTask('undoSeed01');
@@ -2869,7 +2838,7 @@ void main() {
       nowUtc = DateTime.utc(2026, 11, 15, 10, 3);
       await notifier.updateTask(
         'cflAnc0001',
-        dueAnchor: TdfLocalDateTime(2026, 11, 20, 14, 0, 0),
+        dueAnchor: TdfLocalDateTime(2026, 11, 20, 14),
       );
       expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
       expect(
@@ -2883,13 +2852,13 @@ void main() {
           .findTask('cflAnc0001')!;
       expect(
         liveConflictedTask.dueAnchor,
-        equals(TdfLocalDateTime(2026, 11, 20, 14, 0, 0)),
+        equals(TdfLocalDateTime(2026, 11, 20, 14)),
         reason: 'In-memory candidate L must preserve user edit awaiting conflict resolution',
       );
 
       // Stale bound decision (wrong dueAnchor in payload signature) MUST re-throw DeletionConflict!
       final staleTask = liveConflictedTask.copyWith(
-        dueAnchor: TdfLocalDateTime(2026, 11, 20, 15, 0, 0),
+        dueAnchor: TdfLocalDateTime(2026, 11, 20, 15),
       );
       await expectLater(
         () => notifier.resolveDeletionConflicts(
@@ -3100,7 +3069,6 @@ void main() {
           '}\n';
       const localConfig = WebDavConfig(
         storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
         language: AppLanguage.english,
       );
       final settings = InMemorySettingsRepository(localConfig);
@@ -3166,11 +3134,9 @@ void main() {
       const bothConfig = WebDavConfig(
         storageMode: StorageMode.both,
         language: AppLanguage.english,
-        localFilePath: 'tasks.tdf',
         serverUrl: 'https://cloud.example.com/dav/',
         username: 'alice',
         password: 'secret',
-        filePath: 'tasks.tdf',
       );
       final settings = InMemorySettingsRepository(bothConfig);
       final container = ProviderContainer(
@@ -3251,11 +3217,8 @@ void main() {
           '    created  2026-11-15 10:00:00\n'
           '    modified 2026-11-15 10:00:00\n'
           '}\n';
-      const localConfig1 = WebDavConfig(
-        storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
-      );
-      final settings1 = InMemorySettingsRepository(localConfig1);
+      const localConfig1 = WebDavConfig(storageMode: StorageMode.local);
+      final settings1 = InMemorySettingsRepository();
       var gateNextRead1 = false;
       final readStarted1 = Completer<void>();
       final releaseRead1 = Completer<void>();
@@ -3313,12 +3276,8 @@ void main() {
           '    created  2026-11-15 10:00:00\n'
           '    modified 2026-11-15 10:00:00\n'
           '}\n';
-      const localConfig2 = WebDavConfig(
-        storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
-        localWatchEnabled: true,
-      );
-      final settings2 = InMemorySettingsRepository(localConfig2);
+      const localConfig2 = WebDavConfig(storageMode: StorageMode.local);
+      final settings2 = InMemorySettingsRepository();
       var readCount2 = 0;
       var gateOnSyncRead2 = false;
       final syncReadStarted2 = Completer<void>();
@@ -3394,7 +3353,7 @@ void main() {
       Completer<void>? remoteGetGate;
       Completer<void>? remoteGetEntered;
       var failNextRemoteGet = false;
-      var currentTime = DateTime.utc(2026, 11, 14, 14, 0);
+      var currentTime = DateTime.utc(2026, 11, 14, 14);
 
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
@@ -3445,7 +3404,6 @@ void main() {
         serverUrl: 'http://127.0.0.1:${server.port}',
         username: 'example-user',
         password: 'example-password',
-        filePath: 'tasks.tdf',
         storageMode: StorageMode.webdav,
         language: AppLanguage.english,
       );
@@ -3536,25 +3494,17 @@ void main() {
       AppLogger.resetForTesting();
       addTearDown(AppLogger.resetForTesting);
 
-      final currentTime = DateTime.utc(2026, 11, 21, 12, 0);
+      final currentTime = DateTime.utc(2026, 11, 21, 12);
       const initialConfig = WebDavConfig(
         storageMode: StorageMode.both,
         serverUrl: 'https://cloud.example.com',
         username: 'alice',
         password: 'secret',
-        filePath: 'tasks.tdf',
-        localFilePath: 'tasks.tdf',
         language: AppLanguage.english,
         themeMode: AppThemeMode.light,
-        themePalette: AppThemePalette.calm,
-        locationEnabled: false,
         timeZoneMode: AppTimeZoneMode.manual,
-        manualTimeZoneOffsetMinutes: 0,
         diagnosticsEnabled: true,
         logLevel: LogLevel.debug,
-        logStorageMode: StorageMode.local,
-        localWatchEnabled: true,
-        dueLeadWindow: DueLeadWindow.hours24,
       );
       final settingsRepo = InMemorySettingsRepository(initialConfig);
       final seedBoard = TaskBoard.empty().addTask(
@@ -3576,7 +3526,7 @@ void main() {
           clockProvider.overrideWithValue(() => currentTime),
           localFileRepositoryProvider.overrideWith(
             (ref) => _GateableWatchLocalRepository(
-              config: resolveCurrentConfig(ref),
+              config: _watchCurrentConfig(ref),
               maxFileBytes: LocalFileRepository.defaultMaxFileBytes,
               getStore: () => localFiles['tasks.tdf'] ?? '',
               setStore: (value) => localFiles['tasks.tdf'] = value,
@@ -3587,7 +3537,7 @@ void main() {
           ),
           webDavRepositoryProvider.overrideWith(
             (ref) => _GatedCountingWebDavRepository(
-              config: resolveCurrentConfig(ref),
+              config: _watchCurrentConfig(ref),
               remoteFiles: remoteFiles,
               onFetch: () async {
                 remoteFetchCount++;
@@ -3683,11 +3633,8 @@ void main() {
     });
 
     test('updateTaskAndComplete and createLabelAndAssignToTask commit in one atomic persistence cycle each', () async {
-      final now = DateTime.utc(2026, 11, 16, 12, 0);
-      const config = WebDavConfig(
-        storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
-      );
+      final now = DateTime.utc(2026, 11, 16, 12);
+      const config = WebDavConfig(storageMode: StorageMode.local);
       var localContent =
           'tdf 0.8.0\n\n'
           'queue {\n'
@@ -3711,7 +3658,7 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           settingsRepositoryProvider.overrideWithValue(
-            InMemorySettingsRepository(config),
+            InMemorySettingsRepository(),
           ),
           localFileRepositoryProvider.overrideWithValue(localRepo),
           clockProvider.overrideWithValue(() => now),
@@ -3764,6 +3711,306 @@ void main() {
         isTrue,
         reason: 'updateTaskAndComplete must capture a completion Undo entry',
       );
+    });
+
+    test('selectLocalFile, testConnectionAndSync, and wipeLocalFile survive active-listener invalidation without UnmountedRefException', () async {
+      final localDir = await Directory.systemTemp.createTemp(
+        'tiertask_invalidation_guard_',
+      );
+      addTearDown(() async {
+        if (await localDir.exists()) {
+          await localDir.delete(recursive: true);
+        }
+      });
+      final firstPath = '${localDir.path}${Platform.pathSeparator}first.tdf';
+      final secondPath = '${localDir.path}${Platform.pathSeparator}second.tdf';
+      await File(firstPath).writeAsString(
+        'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 08:00:00\n    task 000001OkD2\n}\n\ntask 000001OkD2 {\n    name "First"\n    created 2026-11-01 08:00:00\n    modified 2026-11-01 08:00:00\n}\n',
+        flush: true,
+      );
+      await File(secondPath).writeAsString(
+        'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 09:00:00\n    task 000002OkD2\n}\n\ntask 000002OkD2 {\n    name "Second"\n    created 2026-11-01 09:00:00\n    modified 2026-11-01 09:00:00\n}\n',
+        flush: true,
+      );
+
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      var remoteTdf =
+          'tdf 0.8.0\n\nqueue {\n    modified 2026-11-01 10:00:00\n    task 000003OkD2\n}\n\ntask 000003OkD2 {\n    name "Remote"\n    created 2026-11-01 10:00:00\n    modified 2026-11-01 10:00:00\n}\n';
+      server.listen((request) async {
+        if (request.method == 'GET') {
+          request.response
+            ..statusCode = HttpStatus.ok
+            ..headers.set(HttpHeaders.etagHeader, '"v1"')
+            ..write(remoteTdf);
+          await request.response.close();
+          return;
+        }
+        if (request.method == 'PUT') {
+          remoteTdf = await utf8.decoder.bind(request).join();
+          request.response
+            ..statusCode = HttpStatus.noContent
+            ..headers.set(HttpHeaders.etagHeader, '"v2"');
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.methodNotAllowed;
+        await request.response.close();
+      });
+
+      final initialConfig = WebDavConfig(
+        storageMode: StorageMode.local,
+        localFilePath: firstPath,
+        language: AppLanguage.english,
+      );
+      final container = ProviderContainer(
+        retry: disableProviderRetry,
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(initialConfig),
+          ),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      // Actively listen to taskNotifierProvider just like TierTaskShellScreen / LocalFileWatcherNotifier.
+      final taskSub = container.listen(taskNotifierProvider, (_, _) {});
+      addTearDown(taskSub.close);
+      final loaded = await container.read(taskNotifierProvider.future);
+      expect(loaded.allTasks.map((t) => t.title), equals(<String>['First']));
+
+      // 1. selectLocalFile changes localFilePath while taskNotifierProvider is actively listened to.
+      await container
+          .read(taskNotifierProvider.notifier)
+          .selectLocalFile(initialConfig.copyWith(localFilePath: secondPath));
+      final afterSelect = await container.read(taskNotifierProvider.future);
+      expect(
+        afterSelect.allTasks.map((t) => t.title),
+        equals(<String>['Second']),
+        reason: 'selectLocalFile must load the newly selected file cleanly under active listeners',
+      );
+
+      // 2. testConnectionAndSync changes storageMode/serverUrl/credentials while actively listened to.
+      final remoteConfig = WebDavConfig(
+        storageMode: StorageMode.both,
+        localFilePath: secondPath,
+        serverUrl: 'http://127.0.0.1:${server.port}',
+        username: 'alice',
+        password: 'secret',
+        filePath: '/sync.tdf',
+        language: AppLanguage.english,
+      );
+      await container
+          .read(taskNotifierProvider.notifier)
+          .testConnectionAndSync(remoteConfig);
+      final afterTestSync = await container.read(taskNotifierProvider.future);
+      expect(
+        afterTestSync.allTasks.map((t) => t.title).toSet(),
+        equals(<String>{'Second', 'Remote'}),
+        reason: 'testConnectionAndSync with changed WebDAV credentials must converge without UnmountedRefException',
+      );
+      expect(
+        container.read(webDavConfigProvider).requireValue.serverUrl,
+        equals('http://127.0.0.1:${server.port}'),
+      );
+
+      // 3. wipeLocalFile with modified config binding must not crash on invalidated ref.
+      await container
+          .read(taskNotifierProvider.notifier)
+          .wipeLocalFile(remoteConfig.copyWith(filePath: '/sync2.tdf'));
+      final afterWipe = await container.read(taskNotifierProvider.future);
+      expect(afterWipe.allTasks, isNotNull);
+    });
+
+    test('reconcileExternalLocalChanges catches non-LocalFileException errors safely without crashing', () async {
+      const config = WebDavConfig(
+        storageMode: StorageMode.local,
+        language: AppLanguage.english,
+      );
+      var throwUnexpected = false;
+      final localRepo = _GateableWatchLocalRepository(
+        config: config,
+        maxFileBytes: LocalFileRepository.defaultMaxFileBytes,
+        getStore: () => 'tdf 0.8.0\n',
+        setStore: (_) {},
+        onReadTdfWithDigest: () async {
+          if (throwUnexpected) {
+            throw StateError('Unexpected platform watch read failure');
+          }
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localFileRepositoryProvider.overrideWithValue(localRepo),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      throwUnexpected = true;
+
+      final reconciled = await container
+          .read(taskNotifierProvider.notifier)
+          .reconcileExternalLocalChanges();
+      expect(
+        reconciled,
+        isFalse,
+        reason: 'Non-LocalFileException during watch reconcile must be caught cleanly and return false',
+      );
+      expect(
+        container.read(syncStateProvider).errorMessage,
+        isNotNull,
+        reason: 'Caught unexpected watch reconcile error must still surface in syncStateProvider',
+      );
+    });
+
+    test(
+      'disposing TaskNotifier unregisters its WorkspaceUnloadCoordinator hook',
+      () async {
+        const config = WebDavConfig(
+          storageMode: StorageMode.local,
+          language: AppLanguage.english,
+        );
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(
+              InMemorySettingsRepository(config),
+            ),
+            localFileRepositoryProvider.overrideWithValue(
+              _GateableWatchLocalRepository(
+                config: config,
+                maxFileBytes: LocalFileRepository.defaultMaxFileBytes,
+                getStore: () => 'tdf 0.8.0\n',
+                setStore: (_) {},
+                onReadTdfWithDigest: () async {},
+              ),
+            ),
+            clockProvider.overrideWithValue(() => fixedDate),
+          ],
+        );
+        await container.read(taskNotifierProvider.future);
+        final coordinator = container.read(workspaceUnloadCoordinatorProvider);
+        container.dispose();
+
+        // Running coordinator after container disposal must not invoke disposed TaskNotifier hooks.
+        await expectLater(coordinator.runBeforeUnload(), completes);
+      },
+    );
+
+    test('mutation methods return Future<bool> directly per call and preserve _pendingConflictOriginBoard B0 over B1 across pending conflict', () async {
+      const config = WebDavConfig(
+        storageMode: StorageMode.local,
+        language: AppLanguage.english,
+      );
+      final baseTime = DateTime.utc(2026, 11, 10, 12);
+      final initialBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: 'confA00001',
+            title: 'Task Alpha',
+            createdAt: baseTime,
+            modifiedAt: baseTime,
+          ),
+          TaskItem(
+            id: 'confB00002',
+            title: 'Task Beta',
+            createdAt: baseTime,
+            modifiedAt: baseTime,
+          ),
+        ],
+        queueBlock: TdfQueueBlock(
+          taskIds: const <String>['confA00001', 'confB00002'],
+          modifiedAt: baseTime,
+        ),
+        evaluationTime: baseTime,
+      );
+      var diskContent = const TdfService().serialize(initialBoard);
+      var failSave = false;
+      final localRepo = _GateableWatchLocalRepository(
+        config: config,
+        maxFileBytes: LocalFileRepository.defaultMaxFileBytes,
+        getStore: () => diskContent,
+        setStore: (value) {
+          if (failSave) {
+            throw const LocalFileException('Simulated save failure');
+          }
+          diskContent = value;
+        },
+        onReadTdfWithDigest: () async {},
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          localFileRepositoryProvider.overrideWithValue(localRepo),
+          clockProvider.overrideWithValue(() => baseTime),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(taskNotifierProvider.future);
+      final notifier = container.read(taskNotifierProvider.notifier);
+
+      // Direct bool return on commit vs rollback.
+      final bool added = await notifier.addTask(
+        'Committed Task',
+        id: 'commT00003',
+        currentDate: baseTime.add(const Duration(minutes: 1)),
+      );
+      expect(added, isTrue);
+
+      failSave = true;
+      final bool rolledBack = await notifier.updateTask(
+        'commT00003',
+        title: 'Rolled Back Title',
+        currentDate: baseTime.add(const Duration(minutes: 2)),
+      );
+      expect(rolledBack, isFalse);
+      failSave = false;
+
+      // Externally delete confA00001 on disk while memory still holds B0 (confA00001 + confB00002).
+      final diskAfterExternalDelete = const TdfService()
+          .parse(
+            diskContent,
+            evaluationTime: baseTime.add(const Duration(minutes: 3)),
+            localEvaluationTime: baseTime.add(const Duration(minutes: 3)),
+          )
+          .deleteTask(
+            'confA00001',
+            currentDate: baseTime.add(const Duration(minutes: 3)),
+            localEvaluationTime: baseTime.add(const Duration(minutes: 3)),
+          );
+      diskContent = const TdfService().serialize(diskAfterExternalDelete);
+
+      // Mutation 1 (B0 -> B1): edits externally deleted confA00001 -> DeletionConflict!
+      // _pendingConflictOriginBoard must capture B0.
+      final bool firstAttempt = await notifier.updateTask(
+        'confA00001',
+        title: 'Local Edit on Deleted Alpha',
+        currentDate: baseTime.add(const Duration(minutes: 4)),
+      );
+      expect(firstAttempt, isFalse);
+      expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
+
+      // Mutation 2 (B1 -> B2): edits confB00002 while Mutation 1 conflict is STILL pending.
+      // Must preserve B0 (not overwrite origin with B1), so confA00001 still reports DeletionConflict!
+      final bool secondAttempt = await notifier.updateTask(
+        'confB00002',
+        title: 'Edit Beta During Pending Conflict',
+        currentDate: baseTime.add(const Duration(minutes: 5)),
+      );
+      expect(
+        secondAttempt,
+        isFalse,
+        reason: 'Preserving _pendingConflictOriginBoard B0 over B1 must keep the unresolved DeletionConflict active instead of silently dropping confA00001',
+      );
+      expect(container.read(syncStateProvider).hasOpenConflict, isTrue);
     });
   });
 }
@@ -3859,3 +4106,8 @@ class _GatedCountingWebDavRepository extends WebDavRepository {
     remoteFiles[path] = tdfContent;
   }
 }
+
+WebDavConfig _watchCurrentConfig(Ref ref) =>
+    ref.watch(webDavConfigProvider).asData?.value ??
+    ref.watch(activeWorkspaceProvider).asData?.value.config ??
+    const WebDavConfig();

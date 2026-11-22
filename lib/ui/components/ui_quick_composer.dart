@@ -132,6 +132,9 @@ class _UiQuickComposerState extends State<UiQuickComposer> {
   /// Overlay controller synchronized with `widget.isPopoverOpen`.
   final OverlayPortalController _overlayController = OverlayPortalController();
 
+  /// Replaced internal focus nodes awaiting post-frame disposal after the input detaches.
+  final List<FocusNode> _pendingDisposals = <FocusNode>[];
+
   /// Shared `TapRegion` group ID keeping clicks inside composer and popover from dismissing.
   final Object _tapRegionGroupId = Object();
 
@@ -140,6 +143,12 @@ class _UiQuickComposerState extends State<UiQuickComposer> {
 
   /// Internal compact expanded flag used when `widget.isCompactExpanded == null`.
   bool _internalCompactExpanded = false;
+
+  /// Whether a post-frame disposal flush is already scheduled.
+  bool _isDisposalScheduled = false;
+
+  /// Whether a post-frame overlay visibility sync is already scheduled.
+  bool _isOverlaySyncScheduled = false;
 
   /// Internal focus node created only when `widget.focusNode == null`.
   FocusNode? _ownedFocusNode;
@@ -163,24 +172,34 @@ class _UiQuickComposerState extends State<UiQuickComposer> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncOverlayVisibility();
+  }
+
+  @override
   void didUpdateWidget(covariant UiQuickComposer oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.focusNode != widget.focusNode &&
-        widget.focusNode != null &&
-        _ownedFocusNode != null) {
-      _ownedFocusNode?.dispose();
-      _ownedFocusNode = null;
+    if (oldWidget.focusNode != widget.focusNode && widget.focusNode != null) {
+      if (_ownedFocusNode case final previousOwned?) {
+        _ownedFocusNode = null;
+        _enqueueDisposal(previousOwned);
+      }
     }
     final wasShowing =
         oldWidget.isPopoverOpen && oldWidget.popoverContent != null;
     final shouldShow = widget.isPopoverOpen && widget.popoverContent != null;
-    if (wasShowing != shouldShow) {
+    final compactStateChanged =
+        oldWidget.isCollapsibleOnCompact != widget.isCollapsibleOnCompact ||
+        oldWidget.isCompactExpanded != widget.isCompactExpanded;
+    if (wasShowing != shouldShow || compactStateChanged) {
       _syncOverlayVisibility();
     }
   }
 
   @override
   void dispose() {
+    _flushPendingDisposals();
     _ownedFocusNode?.dispose();
     super.dispose();
   }
@@ -253,11 +272,42 @@ class _UiQuickComposerState extends State<UiQuickComposer> {
     );
   }
 
+  /// Queues a replaced internal [node] for post-frame disposal after the input detaches.
+  void _enqueueDisposal(FocusNode node) {
+    _pendingDisposals.add(node);
+    if (_isDisposalScheduled) {
+      return;
+    }
+    _isDisposalScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _flushPendingDisposals();
+    });
+  }
+
+  /// Disposes all queued internal focus nodes after the frame or during unmount.
+  void _flushPendingDisposals() {
+    _isDisposalScheduled = false;
+    if (_pendingDisposals.isEmpty) {
+      return;
+    }
+    final nodes = List<FocusNode>.of(_pendingDisposals);
+    _pendingDisposals.clear();
+    for (final node in nodes) {
+      node.dispose();
+    }
+  }
+
   /// Updates focus-within border highlight state when descendant focus changes.
   void _handleFocusWithinChanged(bool focused) {
     if (_hasFocusWithin != focused) {
       setState(() => _hasFocusWithin = focused);
     }
+  }
+
+  /// Returns whether the [OverlayPortal] subtree is mounted at the active viewport width.
+  bool _isOverlayPortalMounted(BuildContext context) {
+    final isCompact = UiBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
+    return !(isCompact && widget.isCollapsibleOnCompact && !_isCompactExpanded);
   }
 
   /// Updates compact expanded state and focuses title input when opening.
@@ -266,6 +316,7 @@ class _UiQuickComposerState extends State<UiQuickComposer> {
       setState(() => _internalCompactExpanded = expanded);
     }
     widget.onCompactExpandedChanged?.call(expanded);
+    _syncOverlayVisibility();
     if (expanded) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -275,13 +326,21 @@ class _UiQuickComposerState extends State<UiQuickComposer> {
     }
   }
 
-  /// Synchronizes [OverlayPortalController] after frame build so overlay toggles safely.
+  /// Synchronizes [OverlayPortalController] after frame build when the portal subtree is mounted.
   void _syncOverlayVisibility() {
+    if (_isOverlaySyncScheduled) {
+      return;
+    }
+    _isOverlaySyncScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isOverlaySyncScheduled = false;
       if (!mounted) {
         return;
       }
-      final shouldShow = widget.isPopoverOpen && widget.popoverContent != null;
+      final shouldShow =
+          _isOverlayPortalMounted(context) &&
+          widget.isPopoverOpen &&
+          widget.popoverContent != null;
       if (shouldShow && !_overlayController.isShowing) {
         _overlayController.show();
       } else if (!shouldShow && _overlayController.isShowing) {
@@ -391,7 +450,6 @@ class _UiComposerPopoverOverlay extends StatelessWidget {
       child: CompositedTransformFollower(
         link: layerLink,
         showWhenUnlinked: false,
-        targetAnchor: Alignment.topLeft,
         followerAnchor: Alignment.bottomLeft,
         offset: const Offset(0.0, -8.0),
         child: TapRegion(
@@ -494,7 +552,6 @@ class _UiQuickComposerCompactActions extends StatelessWidget {
           label: config.submitLabel,
           leadingIcon: config.submitLeadingIcon,
           variant: UiButtonVariant.primary,
-          density: UiButtonDensity.standard,
           onPressed: config.enabled ? config.onSubmit : null,
         ),
       ],
@@ -647,7 +704,6 @@ class _UiQuickComposerDesktopFooterRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
       children: <Widget>[
         Expanded(child: chips),
         if (config.expandDraftLabel case final draftLabel?) ...<Widget>[
@@ -710,7 +766,6 @@ class _UiQuickComposerDesktopTopRow extends StatelessWidget {
           label: config.submitLabel,
           leadingIcon: config.submitLeadingIcon,
           variant: UiButtonVariant.primary,
-          density: UiButtonDensity.standard,
           onPressed: config.enabled ? config.onSubmit : null,
         ),
       ],

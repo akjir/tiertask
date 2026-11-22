@@ -74,6 +74,21 @@ class _DelayedWorkspaceSettingsRepository extends InMemorySettingsRepository {
     persistedConfigs.add(config);
     await super.saveConfig(config);
   }
+
+  @override
+  Future<void> saveConfigForWorkspace(
+    String workspaceId,
+    WebDavConfig config,
+  ) async {
+    if (saveGates.isNotEmpty) {
+      await saveGates.removeAt(0).future;
+    }
+    if (errorToThrow case final error?) {
+      throw error;
+    }
+    persistedConfigs.add(config);
+    await super.saveConfigForWorkspace(workspaceId, config);
+  }
 }
 
 class _RecordingWebDavConfigNotifier extends WebDavConfigNotifier {
@@ -81,7 +96,7 @@ class _RecordingWebDavConfigNotifier extends WebDavConfigNotifier {
 
   final WebDavConfig initialConfig;
   final List<String> calls = <String>[];
-  Object? changeLocationErrorToThrow;
+  Exception? changeLocationErrorToThrow;
   Completer<void>? pendingUpdateCompleter;
   WorkspaceException? updateErrorToThrow;
 
@@ -162,10 +177,10 @@ class _RecordingTaskNotifier extends FakeTaskNotifier {
   WebDavConfig? lastTestedConfig;
   bool? lastWipeCreateBackup;
   Completer<void>? pendingActionCompleter;
-  Object? selectLocalErrorToThrow;
-  Object? testSyncErrorToThrow;
-  Object? wipeLocalErrorToThrow;
-  Object? wipeRemoteErrorToThrow;
+  Exception? selectLocalErrorToThrow;
+  Exception? testSyncErrorToThrow;
+  Exception? wipeLocalErrorToThrow;
+  Exception? wipeRemoteErrorToThrow;
 
   @override
   Future<void> selectLocalFile(WebDavConfig newConfig) async {
@@ -230,7 +245,6 @@ void main() {
     username: 'alice',
     password: 'super-secret-password',
     filePath: 'notes/tasks.tdf',
-    localFilePath: 'tasks.tdf',
     storageMode: StorageMode.both,
     language: AppLanguage.english,
   );
@@ -284,7 +298,6 @@ void main() {
         passwordError: 'bad pass',
         filePathError: 'bad path',
         statusBanner: bannerA,
-        busyOperation: SettingsBusyOperation.idle,
         resolvedLocalPathPreview: '/tmp/tasks.tdf',
       );
 
@@ -348,7 +361,7 @@ void main() {
       expect(cleared.resolvedLocalPathPreview, isNull);
       expect(cleared, isNot(equals(base)));
 
-      const emptyEndpoint = SettingsDraftState(serverUrl: '');
+      const emptyEndpoint = SettingsDraftState();
       expect(emptyEndpoint.endpointPreview, isEmpty);
     });
   });
@@ -1742,7 +1755,6 @@ void main() {
     test('gates moveLocalDirectory, selects by bare filename, and rejects invalid wipe paths when supportsDirectoryPickerProvider is false', () async {
       final localizations = lookupAppLocalizations(const Locale('en'));
       const localOnlyConfig = WebDavConfig(
-        localFilePath: 'tasks.tdf',
         storageMode: StorageMode.local,
         language: AppLanguage.english,
       );
@@ -1842,7 +1854,6 @@ void main() {
 
     test('preserves bare filename on rename when no base directory or path separator exists', () async {
       const bareConfig = WebDavConfig(
-        localFilePath: 'tasks.tdf',
         storageMode: StorageMode.local,
         language: AppLanguage.english,
       );
@@ -2024,5 +2035,89 @@ void main() {
         isFalse,
       );
     });
+
+    test('aborts moveLocalDirectory and selectLocalFile when workspace switches (including ABA) or provider disposes during native picker', () async {
+      final dirPickerGate = Completer<String?>();
+      final filePickerGate = Completer<String?>();
+      final workspaceNotifier = _ControllableSettingsWorkspaceNotifier();
+      final configNotifier = _RecordingWebDavConfigNotifier(
+        initialConfig: const WebDavConfig(
+          storageMode: StorageMode.local,
+          localFilePath: 'alpha.tdf',
+          filePath: 'alpha.tdf',
+          language: AppLanguage.english,
+        ),
+      );
+      final taskNotifier = _RecordingTaskNotifier();
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(configNotifier.initialConfig),
+          ),
+          activeWorkspaceProvider.overrideWith(() => workspaceNotifier),
+          webDavConfigProvider.overrideWith(() => configNotifier),
+          taskNotifierProvider.overrideWith(() => taskNotifier),
+          supportsDirectoryPickerProvider.overrideWithValue(true),
+          directoryPickerProvider.overrideWithValue(
+            ({String? initialDirectory}) => dirPickerGate.future,
+          ),
+          filePickerProvider.overrideWithValue(
+            ({String? initialDirectory, String? currentFileName}) =>
+                filePickerGate.future,
+          ),
+          appLocaleProvider.overrideWithValue(const Locale('en')),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final workspaceA = await container.read(activeWorkspaceProvider.future);
+      await container.read(webDavConfigProvider.future);
+      await container.read(taskNotifierProvider.future);
+      final draftSub = container.listen(settingsDraftProvider, (_, _) {});
+      addTearDown(draftSub.close);
+
+      // 1. ABA workspace switch (A -> B -> A) while native directory picker is open must abort moveLocalDirectory!
+      final draftNotifier = container.read(settingsDraftProvider.notifier);
+      final moveFuture = draftNotifier.moveLocalDirectory();
+      workspaceNotifier.emitWorkspace(
+        const AppWorkspace(
+          id: 'workspace_b',
+          name: 'B',
+          config: WebDavConfig(
+            storageMode: StorageMode.local,
+            localFilePath: 'beta.tdf',
+            filePath: 'beta.tdf',
+          ),
+        ),
+      );
+      workspaceNotifier.emitWorkspace(workspaceA);
+      dirPickerGate.complete('/tmp/picked_dir');
+      await moveFuture;
+      expect(
+        configNotifier.calls,
+        isEmpty,
+        reason: 'ABA workspace switch during native directory picker must abort changeLocalFileLocation',
+      );
+
+      // 2. Disposing autoDispose settingsDraftProvider while native file picker is open must abort selectLocalFile safely!
+      final selectFuture = container
+          .read(settingsDraftProvider.notifier)
+          .selectLocalFile();
+      draftSub.close();
+      await Future<void>.delayed(Duration.zero);
+      filePickerGate.complete('/tmp/picked_file.tdf');
+      await expectLater(selectFuture, completes);
+      expect(
+        taskNotifier.calls,
+        isEmpty,
+        reason: 'Disposing settingsDraftProvider during native file picker must not invoke TaskNotifier.selectLocalFile',
+      );
+    });
   });
+}
+
+class _ControllableSettingsWorkspaceNotifier extends ActiveWorkspaceNotifier {
+  void emitWorkspace(AppWorkspace workspace) {
+    state = AsyncData<AppWorkspace>(workspace);
+  }
 }

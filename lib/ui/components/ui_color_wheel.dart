@@ -219,7 +219,6 @@ class _UiColorWheelState extends State<UiColorWheel> {
             SizedBox(
               width: 110.0,
               child: UiField(
-                kind: UiFieldKind.text,
                 controller: _hexController,
                 enabled: widget.enabled,
                 maxLength: 7,
@@ -232,7 +231,6 @@ class _UiColorWheelState extends State<UiColorWheel> {
             UiButton(
               label: widget.customButtonLabel,
               leadingIcon: Icons.palette_outlined,
-              variant: UiButtonVariant.secondary,
               density: UiButtonDensity.compact,
               onPressed: widget.enabled ? _openWheelModal : null,
             ),
@@ -495,7 +493,6 @@ class _UiColorWheelModalState extends State<_UiColorWheelModal> {
         children: <Widget>[
           UiButton(
             label: widget.cancelLabel,
-            variant: UiButtonVariant.secondary,
             density: UiButtonDensity.compact,
             onPressed: () => Navigator.of(context).pop(),
           ),
@@ -566,12 +563,14 @@ class _UiHsvWheelCanvas extends StatelessWidget {
           ),
         );
       },
-      child: SizedBox.square(
-        dimension: _wheelSize,
-        child: CustomPaint(
-          painter: _UiHsvWheelPainter(
-            hsvColor: hsvColor,
-            borderColor: borderColor,
+      child: RepaintBoundary(
+        child: SizedBox.square(
+          dimension: _wheelSize,
+          child: CustomPaint(
+            painter: _UiHsvWheelPainter(
+              hsvColor: hsvColor,
+              borderColor: borderColor,
+            ),
           ),
         ),
       ),

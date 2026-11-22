@@ -157,8 +157,21 @@ class TdfDeletedBlock {
          _sortLocationRecords(locations),
        );
 
+  /// Creates a [TdfDeletedBlock] from already-sorted, unmodifiable deletion record lists.
+  const TdfDeletedBlock._presorted({
+    required this.generation,
+    required this.tasks,
+    required this.labels,
+    required this.locations,
+  });
+
   /// Empty default `deleted` block (`generation = 0`, no records).
-  static final TdfDeletedBlock empty = TdfDeletedBlock();
+  static const TdfDeletedBlock empty = TdfDeletedBlock._presorted(
+    generation: 0,
+    tasks: <TdfDeletedTaskRecord>[],
+    labels: <TdfDeletedLabelRecord>[],
+    locations: <TdfDeletedLocationRecord>[],
+  );
 
   /// Maximum allowed `deleted` records (`task` + `label` + `location` combined) per `spec/TDF_SPEC_0.8.0.md` Section 6.2.
   static const int maxDeletedRecords = maxTdfDeletedRecords;
@@ -192,39 +205,82 @@ class TdfDeletedBlock {
     Iterable<TdfDeletedLabelRecord>? labels,
     Iterable<TdfDeletedLocationRecord>? locations,
   }) {
-    return TdfDeletedBlock(
-      generation: generation ?? this.generation,
-      tasks: tasks ?? this.tasks,
-      labels: labels ?? this.labels,
-      locations: locations ?? this.locations,
+    final nextGeneration = generation ?? this.generation;
+    assert(
+      nextGeneration >= 0 && nextGeneration <= maxGeneration,
+      'generation must be within 0..$maxGeneration',
+    );
+    return TdfDeletedBlock._presorted(
+      generation: nextGeneration,
+      tasks: tasks == null
+          ? this.tasks
+          : List<TdfDeletedTaskRecord>.unmodifiable(_sortTaskRecords(tasks)),
+      labels: labels == null
+          ? this.labels
+          : List<TdfDeletedLabelRecord>.unmodifiable(_sortLabelRecords(labels)),
+      locations: locations == null
+          ? this.locations
+          : List<TdfDeletedLocationRecord>.unmodifiable(
+              _sortLocationRecords(locations),
+            ),
     );
   }
 
-  /// Looks up the deletion record for [labelId], or returns `null` if absent.
+  /// Looks up the deletion record for [labelId] in $O(\log D)$ time, or returns `null` if absent.
   TdfDeletedLabelRecord? findLabelRecord(String labelId) {
-    for (final record in labels) {
-      if (record.labelId == labelId) {
+    var low = 0;
+    var high = labels.length - 1;
+    while (low <= high) {
+      final mid = (low + high) >>> 1;
+      final record = labels[mid];
+      final comparison = record.labelId.compareTo(labelId);
+      if (comparison == 0) {
         return record;
+      }
+      if (comparison < 0) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
       }
     }
     return null;
   }
 
-  /// Looks up the deletion record for [locationId], or returns `null` if absent.
+  /// Looks up the deletion record for [locationId] in $O(\log D)$ time, or returns `null` if absent.
   TdfDeletedLocationRecord? findLocationRecord(String locationId) {
-    for (final record in locations) {
-      if (record.locationId == locationId) {
+    var low = 0;
+    var high = locations.length - 1;
+    while (low <= high) {
+      final mid = (low + high) >>> 1;
+      final record = locations[mid];
+      final comparison = record.locationId.compareTo(locationId);
+      if (comparison == 0) {
         return record;
+      }
+      if (comparison < 0) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
       }
     }
     return null;
   }
 
-  /// Looks up the deletion record for [taskId], or returns `null` if absent.
+  /// Looks up the deletion record for [taskId] in $O(\log D)$ time, or returns `null` if absent.
   TdfDeletedTaskRecord? findTaskRecord(String taskId) {
-    for (final record in tasks) {
-      if (record.taskId == taskId) {
+    var low = 0;
+    var high = tasks.length - 1;
+    while (low <= high) {
+      final mid = (low + high) >>> 1;
+      final record = tasks[mid];
+      final comparison = record.taskId.compareTo(taskId);
+      if (comparison == 0) {
         return record;
+      }
+      if (comparison < 0) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
       }
     }
     return null;
@@ -410,7 +466,7 @@ class TdfQueueBlock {
        taskIds = List<String>.unmodifiable(taskIds);
 
   /// Default epoch timestamp (`1970-01-01 00:00:00` UTC) for an omitted or initial empty `queue` block.
-  static final DateTime epochModifiedAt = DateTime.utc(1970, 1, 1, 0, 0, 0);
+  static final DateTime epochModifiedAt = DateTime.utc(1970);
 
   /// Empty default `queue` block at the Unix epoch (`1970-01-01 00:00:00` UTC).
   static final TdfQueueBlock empty = TdfQueueBlock();

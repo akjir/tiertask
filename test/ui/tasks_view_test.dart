@@ -30,16 +30,24 @@ import 'package:tiertask/providers/floating_notice_providers.dart';
 import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
+import 'package:tiertask/providers/task_schedule_helper.dart';
+import 'package:tiertask/ui/components/ui_quick_composer.dart';
 import 'package:tiertask/ui/components/ui_searchable_picker.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
+import 'package:tiertask/ui/primitives/ui_card.dart';
 import 'package:tiertask/ui/primitives/ui_pill.dart';
 import 'package:tiertask/ui/primitives/ui_segmented_control.dart';
 import 'package:tiertask/ui/tokens/ui_spacing_tokens.dart';
+import 'package:tiertask/ui/views/task_card.dart';
+import 'package:tiertask/ui/views/task_detail_editors.dart';
+import 'package:tiertask/ui/views/task_schedule_editors.dart';
 import 'package:tiertask/ui/views/tasks_view.dart';
+import 'package:tiertask/ui/widgets/entity_conditions_section.dart';
+import 'package:tiertask/ui/widgets/entity_links_section.dart';
 
 import 'test_helpers.dart';
 
-final DateTime _fixedNowUtc = DateTime.utc(2026, 11, 10, 12, 0);
+final DateTime _fixedNowUtc = DateTime.utc(2026, 11, 10, 12);
 
 /// Task notifier double that suspends initial board loading on a [Completer] for loading-state tests.
 class _CompleterTaskNotifier extends FakeTaskNotifier {
@@ -66,9 +74,9 @@ class _FailingTaskNotifier extends FakeTaskNotifier {
   final VoidCallback? onBuildAttempt;
 
   @override
-  Future<TaskBoard> build() async {
+  Future<TaskBoard> build() {
     onBuildAttempt?.call();
-    throw error;
+    return Future<TaskBoard>.error(error);
   }
 }
 
@@ -314,7 +322,7 @@ void main() {
           id: 'tsk_rich',
           title: 'Deploy migration',
           labelIds: const <String>['lbl_ops'],
-          dueAt: DateTime.utc(2026, 11, 9, 10, 0),
+          dueAt: DateTime.utc(2026, 11, 9, 10),
           isPriority: true,
           isSuspendedForever: true,
           blockedByTaskIds: const <String>['tsk_dep'],
@@ -332,7 +340,7 @@ void main() {
           ],
           history: <TaskHistoryEntry>[
             TaskHistoryEntry(
-              timestampUtc: DateTime.utc(2026, 11, 8, 9, 0),
+              timestampUtc: DateTime.utc(2026, 11, 8, 9),
               text: 'Prepared draft',
             ),
           ],
@@ -427,7 +435,7 @@ void main() {
         final task = TaskItem(
           id: 'tsk_search',
           title: 'Audit firewall',
-          dueAt: DateTime.utc(2026, 11, 20, 12, 0),
+          dueAt: DateTime.utc(2026, 11, 20, 12),
         );
         final board = _buildBoard(tasks: <TaskItem>[task]);
 
@@ -882,7 +890,6 @@ void main() {
           const _TasksHarness(),
           board: board,
           nowUtc: _fixedNowUtc,
-          surfaceSize: desktopSize,
         );
         await tester.tap(
           find.byKey(const ValueKey<String>('task_label_chip_tsk_ctx_lbl_ctx')),
@@ -954,7 +961,7 @@ void main() {
           id: 'tsk_done',
           title: 'Pay electric bill',
           isCompleted: true,
-          completedAt: DateTime.utc(2026, 11, 9, 15, 0),
+          completedAt: DateTime.utc(2026, 11, 9, 15),
           labelIds: const <String>['lbl_home'],
           note: 'Paid via online banking',
           subtasks: const <SubtaskItem>[
@@ -962,7 +969,7 @@ void main() {
           ],
           history: <TaskHistoryEntry>[
             TaskHistoryEntry(
-              timestampUtc: DateTime.utc(2026, 11, 9, 14, 0),
+              timestampUtc: DateTime.utc(2026, 11, 9, 14),
               text: 'Received bill',
             ),
           ],
@@ -1662,6 +1669,126 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'TaskDraftCard reuses shared EntityLinksEditorBody, EntityConditionsEditorBody segmented controls, and shared schedule/subtask editors',
+      (tester) async {
+        final container = await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: _buildBoard(),
+        );
+        await tester.tap(find.text('Open as draft'));
+        await tester.pumpAndSettle();
+
+        final titleInput = find.descendant(
+          of: find.byKey(const ValueKey<String>('task_draft_title_input')),
+          matching: find.byType(TextField),
+        );
+        await tester.enterText(titleInput, 'Unified Draft Task');
+
+        for (final chipKey in const <String>[
+          'draft_add_links_chip',
+          'draft_add_subtasks_chip',
+          'draft_add_due_chip',
+          'draft_add_repeat_chip',
+          'draft_add_suspended_chip',
+          'draft_add_conditions_chip',
+        ]) {
+          final chip = find.byKey(ValueKey<String>(chipKey));
+          await tester.ensureVisible(chip);
+          await tester.pumpAndSettle();
+          await tester.tap(chip);
+          await tester.pumpAndSettle();
+        }
+
+        expect(find.byType(EntityLinksEditorBody), findsOneWidget);
+        expect(find.byType(EntityConditionsEditorBody), findsOneWidget);
+        expect(find.byType(TaskDueFields), findsOneWidget);
+        expect(find.byType(TaskRepeatFields), findsOneWidget);
+        expect(find.byType(TaskSuspendedFields), findsOneWidget);
+        expect(find.byType(TaskSubtasksEditorBody), findsOneWidget);
+        expect(
+          find.byType(UiSegmentedControl<ConditionDimensionMode>),
+          findsNWidgets(3),
+          reason: 'Draft conditions must use segmented controls consistently with live task cards',
+        );
+
+        // Close suspended section so conditions become interactive, then add a link and a weekday condition.
+        final closeSuspended = find.descendant(
+          of: find.byKey(const ValueKey<String>('draft_suspended_card')),
+          matching: find.byTooltip('Close'),
+        );
+        await tester.ensureVisible(closeSuspended);
+        await tester.pumpAndSettle();
+        await tester.tap(closeSuspended);
+        await tester.pumpAndSettle();
+
+        final linkInputs = find.descendant(
+          of: find.byType(EntityLinksEditorBody),
+          matching: find.byType(TextField),
+        );
+        await tester.ensureVisible(linkInputs.at(0));
+        await tester.pumpAndSettle();
+        await tester.enterText(linkInputs.at(0), 'Runbook');
+        await tester.enterText(linkInputs.at(1), 'https://example.com/runbook');
+        await tester.ensureVisible(find.text('Add link'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Add link'));
+        await tester.pumpAndSettle();
+
+        final daySegmented = find
+            .byType(UiSegmentedControl<ConditionDimensionMode>)
+            .first;
+        await tester.ensureVisible(daySegmented);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.descendant(
+            of: daySegmented,
+            matching: find.text('Custom condition'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final monPill = find.byKey(const ValueKey<String>('cond_day_1'));
+        await tester.ensureVisible(monPill);
+        await tester.pumpAndSettle();
+        await tester.tap(monPill);
+        await tester.pumpAndSettle();
+
+        // Close unused due/repeat sections before commit.
+        for (final cardKey in const <String>[
+          'draft_due_card',
+          'draft_repeat_card',
+          'draft_subtasks_card',
+        ]) {
+          final closeButton = find.descendant(
+            of: find.byKey(ValueKey<String>(cardKey)),
+            matching: find.byTooltip('Close'),
+          );
+          await tester.ensureVisible(closeButton);
+          await tester.pumpAndSettle();
+          await tester.tap(closeButton);
+          await tester.pumpAndSettle();
+        }
+
+        final createButton = find.byKey(
+          const ValueKey<String>('task_draft_create_button'),
+        );
+        await tester.ensureVisible(createButton);
+        await tester.pumpAndSettle();
+        await tester.tap(createButton);
+        await tester.pumpAndSettle();
+
+        final created = container
+            .read(taskNotifierProvider)
+            .requireValue
+            .allTasks
+            .firstWhere((item) => item.title == 'Unified Draft Task');
+        expect(created.links, hasLength(1));
+        expect(created.links.first.uri, equals('https://example.com/runbook'));
+        expect(created.conditions, hasLength(1));
+      },
+    );
   });
 
   group('Operational states & status banners (U-UX-007)', () {
@@ -1988,6 +2115,391 @@ void main() {
           isNotNull,
           reason:
               'Cycle-creating candidate must expose its localized cycle hint',
+        );
+      },
+    );
+
+    testWidgets(
+      'defers subtask row controller disposal when deleting a focused subtask row in editor and draft card',
+      (tester) async {
+        final task = TaskItem(
+          id: 'tsk_sub_del',
+          title: 'Subtask disposal check',
+          subtasks: const <SubtaskItem>[
+            SubtaskItem(title: 'Step Alpha'),
+            SubtaskItem(title: 'Step Beta'),
+          ],
+        );
+        final board = _buildBoard(
+          tasks: <TaskItem>[task],
+          queueIds: const <String>['tsk_sub_del'],
+        );
+
+        final container = await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: board,
+          nowUtc: _fixedNowUtc,
+        );
+
+        container
+            .read(shellProvider.notifier)
+            .expandEntity(
+              const EntityRef(kind: EntityKind.task, id: 'tsk_sub_del'),
+            );
+        await tester.pumpAndSettle();
+
+        await tester.tap(
+          find.byKey(
+            const ValueKey<String>('task_subtasks_edit_button_tsk_sub_del'),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final firstRowFinder = find.byKey(
+          const ValueKey<String>('subtask_edit_row_tsk_sub_del_1'),
+        );
+        final firstRowInput = find.descendant(
+          of: firstRowFinder,
+          matching: find.byType(TextField),
+        );
+        await tester.tap(firstRowInput);
+        await tester.enterText(firstRowInput, 'Step Alpha edited');
+        tester
+            .widget<TextField>(firstRowInput)
+            .controller
+            ?.value = const TextEditingValue(
+          text: 'Step Alpha edited',
+          selection: TextSelection.collapsed(offset: 17),
+          composing: TextRange(start: 0, end: 4),
+        );
+        await tester.pump();
+
+        final removeFirstRow = find.descendant(
+          of: firstRowFinder,
+          matching: find.byTooltip('Remove subtask'),
+        );
+        await tester.tap(removeFirstRow);
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Deleting a focused editable subtask row must defer TextEditingController disposal',
+        );
+        expect(firstRowFinder, findsNothing);
+
+        // Closing subtasks editor while second row is focused must also defer disposal.
+        final secondRowInput = find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('subtask_edit_row_tsk_sub_del_2'),
+          ),
+          matching: find.byType(TextField),
+        );
+        await tester.tap(secondRowInput);
+        await tester.pump();
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+
+        // Same lifecycle invariant inside TaskDraftCard when deleting a focused subtask or closing Subtasks section.
+        container.read(shellProvider.notifier).openDraft(EntityDraftKind.task);
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(const ValueKey<String>('draft_add_subtasks_chip')),
+        );
+        await tester.pumpAndSettle();
+        final draftSubtaskInput = find.descendant(
+          of: find.byKey(const ValueKey<String>('draft_subtask_add_input')),
+          matching: find.byType(TextField),
+        );
+        await tester.enterText(draftSubtaskInput, 'Draft Step 1');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+
+        final draftRowFinder = find.byKey(
+          const ValueKey<String>('draft_subtask_row_1'),
+        );
+        final draftRowInput = find.descendant(
+          of: draftRowFinder,
+          matching: find.byType(TextField),
+        );
+        await tester.tap(draftRowInput);
+        await tester.enterText(draftRowInput, 'Draft Step 1 focused');
+        await tester.pump();
+
+        await tester.tap(
+          find.descendant(
+            of: draftRowFinder,
+            matching: find.byTooltip('Remove subtask'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Deleting a focused subtask row inside TaskDraftCard must defer disposal',
+        );
+
+        // Closing the draft Subtasks section with a focused row must also defer disposal.
+        await tester.enterText(draftSubtaskInput, 'Draft Step 2');
+        await tester.testTextInput.receiveAction(TextInputAction.done);
+        await tester.pumpAndSettle();
+        final secondDraftRowInput = find.descendant(
+          of: find.byKey(const ValueKey<String>('draft_subtask_row_2')),
+          matching: find.byType(TextField),
+        );
+        await tester.tap(secondDraftRowInput);
+        await tester.pump();
+        await tester.tap(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('draft_subtasks_card')),
+            matching: find.byTooltip('Close'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Closing draft Subtasks section while a row is focused must defer row controller disposal',
+        );
+      },
+    );
+
+    testWidgets(
+      'preserves unsaved TaskHistorySection draft text when toggling Note section above it',
+      (tester) async {
+        final task = TaskItem(id: 'tsk_hist_keep', title: 'Preserve history');
+        final board = _buildBoard(
+          tasks: <TaskItem>[task],
+          queueIds: const <String>['tsk_hist_keep'],
+        );
+
+        final container = await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: board,
+          nowUtc: _fixedNowUtc,
+        );
+
+        container
+            .read(shellProvider.notifier)
+            .expandEntity(
+              const EntityRef(kind: EntityKind.task, id: 'tsk_hist_keep'),
+            );
+        await tester.pumpAndSettle();
+
+        // Open Due below History first so switching to Note removes a trailing section
+        // while inserting a leading section around TaskHistorySection.
+        await tester.tap(
+          find.byKey(const ValueKey<String>('task_add_due_tsk_hist_keep')),
+        );
+        await tester.pumpAndSettle();
+
+        final historyInput = find.descendant(
+          of: find.byKey(
+            const ValueKey<String>('history_add_text_tsk_hist_keep'),
+          ),
+          matching: find.byType(TextField),
+        );
+        await tester.enterText(historyInput, 'Unsaved draft log entry');
+        await tester.pump();
+
+        final addNoteChip = find.byKey(
+          const ValueKey<String>('task_add_note_tsk_hist_keep'),
+        );
+        await tester.ensureVisible(addNoteChip);
+        await tester.pumpAndSettle();
+        await tester.tap(addNoteChip);
+        await tester.pumpAndSettle();
+
+        final survivingText =
+            tester.widget<TextField>(historyInput).controller?.text ?? '';
+        expect(
+          survivingText,
+          equals('Unsaved draft log entry'),
+          reason: 'Stable ValueKeys on expanded task sections must preserve downstream TaskHistorySection State when Note opens above it',
+        );
+
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
+        final textAfterClose =
+            tester.widget<TextField>(historyInput).controller?.text ?? '';
+        expect(
+          textAfterClose,
+          equals('Unsaved draft log entry'),
+          reason: 'Closing Note above TaskHistorySection must preserve unsaved history input',
+        );
+      },
+    );
+
+    testWidgets(
+      'pre-scrolls offscreen SliverList task card into view on revealEntityRequest with 50 tasks',
+      (tester) async {
+        final tasks = <TaskItem>[
+          for (var i = 1; i <= 50; i++)
+            TaskItem(
+              id: 'tsk_${i.toString().padLeft(3, '0')}',
+              title: 'Backlog item ${i.toString().padLeft(3, '0')}',
+            ),
+        ];
+        final board = _buildBoard(
+          tasks: tasks,
+          queueIds: <String>[for (final task in tasks) task.id],
+        );
+        expect(
+          board.planned.length,
+          equals(42),
+          reason: '50 queued tasks fill Focus (3), Ready (5), and 42 items in Planned',
+        );
+        final scrollController = ScrollController();
+        addTearDown(scrollController.dispose);
+
+        final container = await pumpLeafWidget(
+          tester,
+          Scaffold(body: TasksView(scrollController: scrollController)),
+          board: board,
+          nowUtc: _fixedNowUtc,
+          surfaceSize: const Size(1280, 720),
+        );
+
+        // Switch to Planned tier containing tasks 9..50 (42 tasks), well beyond cacheExtent.
+        container.read(shellProvider.notifier).selectTier(TaskTier.planned);
+        await tester.pumpAndSettle();
+
+        const targetId = 'tsk_050';
+        final targetCardFinder = find.byKey(
+          const ValueKey<String>('task_card_$targetId'),
+        );
+        expect(
+          targetCardFinder,
+          findsNothing,
+          reason: 'Bottom task in 42-item Planned list must start offscreen/unmaterialized',
+        );
+
+        container
+            .read(shellProvider.notifier)
+            .expandEntity(const EntityRef(kind: EntityKind.task, id: targetId));
+        await tester.pumpAndSettle();
+
+        expect(
+          container.read(shellProvider).revealEntityRequest,
+          isNull,
+          reason:
+              'One-shot revealEntityRequest must clear after revealing task',
+        );
+        expect(
+          scrollController.offset,
+          greaterThan(0.0),
+          reason: 'Reveal must scroll TasksView down toward the offscreen task',
+        );
+        expect(
+          targetCardFinder,
+          findsOneWidget,
+          reason: 'Offscreen bottom task card must materialize and scroll into view',
+        );
+      },
+    );
+
+    testWidgets(
+      'isolates TasksQuickAddDock from unrelated task edits, wraps TaskCard in RepaintBoundary, and populates ConditionDraft on edit entry',
+      (tester) async {
+        const workLabel = TdfLabel(
+          id: 'lbl_work',
+          name: 'Work',
+          color: '#2196F3',
+        );
+        final task = TaskItem(
+          id: 'tsk_iso',
+          title: 'Write performance tests',
+          labelIds: const <String>['lbl_work'],
+          note: 'Initial note',
+          conditions: <TaskCondition>[
+            DayTaskCondition.fromWeekdays(const <int>[DateTime.tuesday]),
+          ],
+        );
+        final board = _buildBoard(
+          tasks: <TaskItem>[task],
+          labels: const <TdfLabel>[workLabel],
+        );
+
+        const desktopSize = Size(1280.0, 860.0);
+        _setViewport(tester, desktopSize);
+        final container = await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: board,
+          nowUtc: _fixedNowUtc,
+        );
+
+        // 1. TaskCard isolates repaints inside a RepaintBoundary.
+        final cardFinder = find.byType(TaskCard);
+        expect(cardFinder, findsOneWidget);
+        expect(
+          find.descendant(
+            of: cardFinder,
+            matching: find.byWidgetPredicate(
+              (widget) => widget is RepaintBoundary,
+            ),
+          ),
+          findsWidgets,
+          reason: 'TaskCard must wrap its frame in a RepaintBoundary',
+        );
+        expect(
+          find.ancestor(
+            of: find.descendant(of: cardFinder, matching: find.byType(UiCard)),
+            matching: find.descendant(
+              of: cardFinder,
+              matching: find.byType(RepaintBoundary),
+            ),
+          ),
+          findsOneWidget,
+          reason: 'TaskCard UiCard must be directly isolated by a TaskCard RepaintBoundary',
+        );
+
+        // 2. Unrelated task edits (note/history) must not rebuild TasksQuickAddDock.
+        final composerBefore = tester.widget<UiQuickComposer>(
+          find.byKey(const ValueKey<String>('tasks_quick_add_composer')),
+        );
+        await container
+            .read(taskNotifierProvider.notifier)
+            .updateTask('tsk_iso', note: 'Updated note without label changes');
+        await tester.pump();
+        final composerAfterNote = tester.widget<UiQuickComposer>(
+          find.byKey(const ValueKey<String>('tasks_quick_add_composer')),
+        );
+        expect(
+          identical(composerAfterNote, composerBefore),
+          isTrue,
+          reason: 'Unrelated task note edit must not rebuild TasksQuickAddDock when sortedLabels and openLabelCounts are unchanged',
+        );
+
+        // 3. Expanding a task with conditions in read-only mode then entering edit mode seeds real ConditionDraft.
+        container
+            .read(shellProvider.notifier)
+            .expandEntity(
+              const EntityRef(kind: EntityKind.task, id: 'tsk_iso'),
+            );
+        await tester.pumpAndSettle();
+
+        final conditionsSection = find.byKey(
+          const ValueKey<String>('task_section_conditions_tsk_iso'),
+        );
+        expect(conditionsSection, findsOneWidget);
+        await tester.tap(
+          find.descendant(
+            of: conditionsSection,
+            matching: find.byTooltip('Edit'),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final tuesdayPill = tester.widget<UiPill>(
+          find.byKey(const ValueKey<String>('cond_day_2')),
+        );
+        expect(
+          tuesdayPill.isSelected,
+          isTrue,
+          reason: 'Entering edit mode on task conditions must seed real ConditionDraft weekdays',
         );
       },
     );

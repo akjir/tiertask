@@ -13,7 +13,6 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -105,15 +104,45 @@ class TaskHistoryEntry {
       b.timestampUtc.millisecondsSinceEpoch,
     );
     if (timeCompare != 0) return timeCompare;
-    if (a.text == b.text) return 0;
-    final leftBytes = utf8.encode(a.text);
-    final rightBytes = utf8.encode(b.text);
-    final minLength = math.min(leftBytes.length, rightBytes.length);
-    for (var i = 0; i < minLength; i++) {
-      final diff = (leftBytes[i] & 0xFF) - (rightBytes[i] & 0xFF);
-      if (diff != 0) return diff;
+    return compareUtf8Strings(a.text, b.text);
+  }
+
+  /// Compares [left] and [right] in exact unsigned UTF-8 byte order without allocating intermediate byte buffers.
+  static int compareUtf8Strings(String left, String right) {
+    if (identical(left, right)) {
+      return 0;
     }
-    return leftBytes.length.compareTo(rightBytes.length);
+    final leftLength = left.length;
+    final rightLength = right.length;
+    var leftIndex = 0;
+    var rightIndex = 0;
+    while (leftIndex < leftLength && rightIndex < rightLength) {
+      final leftUnit = left.codeUnitAt(leftIndex);
+      final rightUnit = right.codeUnitAt(rightIndex);
+      if (leftUnit < 0xD800 && rightUnit < 0xD800) {
+        if (leftUnit != rightUnit) {
+          return leftUnit < rightUnit ? -1 : 1;
+        }
+        leftIndex++;
+        rightIndex++;
+        continue;
+      }
+      if (leftUnit == rightUnit && leftUnit > 0xDFFF) {
+        leftIndex++;
+        rightIndex++;
+        continue;
+      }
+      final leftStep = _decodeUtf8Scalar(left, leftIndex, leftLength);
+      final rightStep = _decodeUtf8Scalar(right, rightIndex, rightLength);
+      if (leftStep.scalar != rightStep.scalar) {
+        return leftStep.scalar < rightStep.scalar ? -1 : 1;
+      }
+      leftIndex = leftStep.nextIndex;
+      rightIndex = rightStep.nextIndex;
+    }
+    if (leftIndex < leftLength) return 1;
+    if (rightIndex < rightLength) return -1;
+    return 0;
   }
 
   /// Sorts [entries] via [compareCanonical] and deduplicates exact `(timestampUtc, text)` pairs into an unmodifiable list.
@@ -133,6 +162,26 @@ class TaskHistoryEntry {
       }
     }
     return List<TaskHistoryEntry>.unmodifiable(deduplicated);
+  }
+
+  /// Decodes the next UTF-8-equivalent Unicode scalar value at [index] in [value], mapping unpaired surrogates to `U+FFFD`.
+  static ({int scalar, int nextIndex}) _decodeUtf8Scalar(
+    String value,
+    int index,
+    int length,
+  ) {
+    final unit = value.codeUnitAt(index);
+    if (unit < 0xD800 || unit > 0xDFFF) {
+      return (scalar: unit, nextIndex: index + 1);
+    }
+    if (unit <= 0xDBFF && index + 1 < length) {
+      final low = value.codeUnitAt(index + 1);
+      if (low >= 0xDC00 && low <= 0xDFFF) {
+        final scalar = 0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00);
+        return (scalar: scalar, nextIndex: index + 2);
+      }
+    }
+    return (scalar: 0xFFFD, nextIndex: index + 1);
   }
 
   @override
@@ -304,7 +353,10 @@ class TaskRepeatRule {
     if (!TdfCalendar.isWithinTimestampBounds(normalizedCompletionUtc)) {
       _throwInvalidRecurrenceTimestamp();
     }
-    final localNow = timeZone.toLocalWallClock(normalizedCompletionUtc);
+    final localNow = _toLocalDateTimeOrThrowTdf(
+      timeZone,
+      normalizedCompletionUtc,
+    );
     final targetLocal = switch (unit) {
       RepeatUnit.days => _addDays(
         localNow,
@@ -357,7 +409,7 @@ class TaskRepeatRule {
 
   /// Adds [daysToAdd] calendar days to [baseDate] with the given time-of-day components.
   static DateTime _addDays(
-    DateTime baseDate,
+    TdfLocalDateTime baseDate,
     int daysToAdd,
     int hour,
     int minute,
@@ -380,7 +432,7 @@ class TaskRepeatRule {
 
   /// Adds [monthsToAdd] calendar months to [baseDate], clamping the day to the target month's length.
   static DateTime _addMonths(
-    DateTime baseDate,
+    TdfLocalDateTime baseDate,
     int monthsToAdd,
     int hour,
     int minute,
@@ -422,7 +474,7 @@ class TaskRepeatRule {
   }) {
     final stepDays = unit == RepeatUnit.weeks ? count * 7 : count;
     final anchorDateUtc = DateTime.utc(anchor.year, anchor.month, anchor.day);
-    final refLocal = timeZone.toLocalWallClock(referenceUtc);
+    final refLocal = _toLocalDateTimeOrThrowTdf(timeZone, referenceUtc);
     final refDateUtc = DateTime.utc(
       refLocal.year,
       refLocal.month,
@@ -487,8 +539,8 @@ class TaskRepeatRule {
     required DateTime referenceUtc,
     required TdfTimeZoneContext timeZone,
   }) {
-    final oldDueLocal = timeZone.toLocalWallClock(oldDueUtc);
-    final refLocal = timeZone.toLocalWallClock(referenceUtc);
+    final oldDueLocal = _toLocalDateTimeOrThrowTdf(timeZone, oldDueUtc);
+    final refLocal = _toLocalDateTimeOrThrowTdf(timeZone, referenceUtc);
     final diffMonths =
         (refLocal.year - oldDueLocal.year) * 12 +
         (refLocal.month - oldDueLocal.month);
@@ -602,18 +654,7 @@ class TaskRepeatRule {
     TdfTimeZoneContext timeZone,
   ) {
     if (oldAnchor != null) return oldAnchor;
-    try {
-      return TdfLocalDateTime.fromWallClock(timeZone.toLocalWallClock(oldDue));
-    } on FormatException catch (_, stackTrace) {
-      Error.throwWithStackTrace(
-        const TdfException(
-          kind: TdfErrorKind.invalidTimestamp,
-          line: 1,
-          message: 'Mode 2 recurrence local anchor exceeds 0001..9999 range.',
-        ),
-        stackTrace,
-      );
-    }
+    return _toLocalDateTimeOrThrowTdf(timeZone, oldDue);
   }
 
   /// Throws a canonical [TdfException] (`TdfErrorKind.invalidTimestamp`) for recurrence boundary overflows.
@@ -623,6 +664,25 @@ class TaskRepeatRule {
       line: 1,
       message: 'Resolved recurring timestamp exceeds 0001..9999 UTC range.',
     );
+  }
+
+  /// Converts [instantUtc] into a validated `0001..9999` [TdfLocalDateTime] via [timeZone], mapping out-of-bounds [FormatException] to [TdfException].
+  static TdfLocalDateTime _toLocalDateTimeOrThrowTdf(
+    TdfTimeZoneContext timeZone,
+    DateTime instantUtc,
+  ) {
+    try {
+      return timeZone.toLocalDateTime(instantUtc);
+    } on FormatException catch (_, stackTrace) {
+      Error.throwWithStackTrace(
+        const TdfException(
+          kind: TdfErrorKind.invalidTimestamp,
+          line: 1,
+          message: 'Local calendar conversion exceeds 0001..9999 range.',
+        ),
+        stackTrace,
+      );
+    }
   }
 
   @override
@@ -698,11 +758,38 @@ class TaskItem {
        conditions = List<TaskCondition>.unmodifiable(conditions),
        subtasks = List<SubtaskItem>.unmodifiable(subtasks);
 
-  /// Fallback UTC creation timestamp when none is provided explicitly.
-  static final DateTime defaultCreatedAt = DateTime.utc(2026, 11, 1, 8, 0);
+  /// Creates a [TaskItem] from already-normalized, unmodifiable collections without re-wrapping or re-sorting unchanged lists.
+  const TaskItem._normalized({
+    required this.id,
+    required this.title,
+    required this.note,
+    required this.isCompleted,
+    required this.isPriority,
+    required this.completions,
+    required this.createdAt,
+    required this.completedAt,
+    required this.modifiedAt,
+    required this.suspendedAt,
+    required this.isSuspendedForever,
+    required this.suspendedNote,
+    required this.dueAt,
+    required this.dueAnchor,
+    required this.isDuePassive,
+    required this.dueNote,
+    required this.origin,
+    required this.repeatRule,
+    required this.labelIds,
+    required this.blockedByTaskIds,
+    required this.dependencies,
+    required this.links,
+    required this.history,
+    required this.conditions,
+    required this.subtasksAutoFinish,
+    required this.subtasks,
+  });
 
-  /// Far-future UTC deferral timestamp sentinel retained for legacy compatibility.
-  static final DateTime defaultSuspendedAt = DateTime.utc(9999, 12, 31, 23, 59);
+  /// Fallback UTC creation timestamp when none is provided explicitly.
+  static final DateTime defaultCreatedAt = DateTime.utc(2026, 11, 1, 8);
 
   /// Prerequisite task IDs (`blocked` directive).
   final List<String> blockedByTaskIds;
@@ -847,15 +934,44 @@ class TaskItem {
     bool clearOrigin = false,
     bool clearRepeatRule = false,
   }) {
-    final resolvedDependencies = _resolveCopyWithDependencies(
-      currentDependencies: this.dependencies,
-      newDependencies: dependencies,
-      newBlockedByTaskIds: blockedByTaskIds,
-    );
-    final resolvedBlockedIds =
-        blockedByTaskIds ??
-        <String>[for (final dep in resolvedDependencies) dep.taskId];
-    return TaskItem(
+    final nextSuspendedAt = clearSuspendedAt
+        ? null
+        : (suspendedAt ?? this.suspendedAt);
+    final nextIsSuspendedForever = clearSuspendedAt
+        ? (isSuspendedForever ?? false)
+        : (isSuspendedForever ??
+              (suspendedAt == null && this.isSuspendedForever));
+    final rawSuspendedNote = clearSuspendedNote
+        ? null
+        : (suspendedNote ?? this.suspendedNote);
+    final nextDueAt = clearDueAt ? null : (dueAt ?? this.dueAt);
+    final rawDueAnchor = (clearDueAt || clearDueAnchor)
+        ? null
+        : (dueAnchor ?? this.dueAnchor);
+    final rawDuePassive = !clearDueAt && (isDuePassive ?? this.isDuePassive);
+    final rawDueNote = clearDueNote ? null : (dueNote ?? this.dueNote);
+
+    final List<TdfTaskDependency> nextDependencies;
+    final List<String> nextBlockedIds;
+    if (dependencies == null && blockedByTaskIds == null) {
+      nextDependencies = this.dependencies;
+      nextBlockedIds = this.blockedByTaskIds;
+    } else {
+      final resolvedDependencies = _resolveCopyWithDependencies(
+        currentDependencies: this.dependencies,
+        newDependencies: dependencies,
+        newBlockedByTaskIds: blockedByTaskIds,
+      );
+      nextDependencies = List<TdfTaskDependency>.unmodifiable(
+        resolvedDependencies,
+      );
+      nextBlockedIds = blockedByTaskIds != null
+          ? List<String>.unmodifiable(blockedByTaskIds)
+          : List<String>.unmodifiable(<String>[
+              for (final dependency in resolvedDependencies) dependency.taskId,
+            ]);
+    }
+    return TaskItem._normalized(
       id: id ?? this.id,
       title: title ?? this.title,
       note: clearNote ? null : (note ?? this.note),
@@ -865,30 +981,33 @@ class TaskItem {
       createdAt: createdAt ?? this.createdAt,
       completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
       modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
-      suspendedAt: clearSuspendedAt ? null : (suspendedAt ?? this.suspendedAt),
-      isSuspendedForever: clearSuspendedAt
-          ? (isSuspendedForever ?? false)
-          : (isSuspendedForever ??
-                (suspendedAt != null ? false : this.isSuspendedForever)),
-      suspendedNote: clearSuspendedNote
-          ? null
-          : (suspendedNote ?? this.suspendedNote),
-      dueAt: clearDueAt ? null : (dueAt ?? this.dueAt),
-      dueAnchor: (clearDueAt || clearDueAnchor)
-          ? null
-          : (dueAnchor ?? this.dueAnchor),
-      isDuePassive: clearDueAt ? false : (isDuePassive ?? this.isDuePassive),
-      dueNote: clearDueNote ? null : (dueNote ?? this.dueNote),
+      suspendedAt: nextSuspendedAt,
+      isSuspendedForever: nextIsSuspendedForever,
+      suspendedNote: (nextIsSuspendedForever || nextSuspendedAt != null)
+          ? rawSuspendedNote
+          : null,
+      dueAt: nextDueAt,
+      dueAnchor: nextDueAt != null ? rawDueAnchor : null,
+      isDuePassive: nextDueAt != null && rawDuePassive,
+      dueNote: nextDueAt != null ? rawDueNote : null,
       origin: clearOrigin ? null : (origin ?? this.origin),
       repeatRule: clearRepeatRule ? null : (repeatRule ?? this.repeatRule),
-      labelIds: labelIds ?? this.labelIds,
-      blockedByTaskIds: resolvedBlockedIds,
-      dependencies: resolvedDependencies,
-      links: links ?? this.links,
-      history: history ?? this.history,
-      conditions: conditions ?? this.conditions,
+      labelIds: labelIds != null
+          ? List<String>.unmodifiable(labelIds)
+          : this.labelIds,
+      blockedByTaskIds: nextBlockedIds,
+      dependencies: nextDependencies,
+      links: links != null ? List<TaskLink>.unmodifiable(links) : this.links,
+      history: history != null
+          ? TaskHistoryEntry.normalizeList(history)
+          : this.history,
+      conditions: conditions != null
+          ? List<TaskCondition>.unmodifiable(conditions)
+          : this.conditions,
       subtasksAutoFinish: subtasksAutoFinish ?? this.subtasksAutoFinish,
-      subtasks: subtasks ?? this.subtasks,
+      subtasks: subtasks != null
+          ? List<SubtaskItem>.unmodifiable(subtasks)
+          : this.subtasks,
     );
   }
 
@@ -1126,20 +1245,8 @@ class TaskItem {
   }
 
   /// Parses a strict 24-hour `<HH:MM>` token into minutes from `00:00` (`0..1439`), or `null` if invalid.
-  static int? tryParseTimeMinutes(String rawTime) {
-    if (rawTime.length != 5 || rawTime.codeUnitAt(2) != 0x3A) {
-      return null;
-    }
-    final hour = _parseFixedDigits(rawTime, 0, 2);
-    final minute = _parseFixedDigits(rawTime, 3, 5);
-    if (hour == null || minute == null) {
-      return null;
-    }
-    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-      return null;
-    }
-    return hour * 60 + minute;
-  }
+  static int? tryParseTimeMinutes(String rawTime) =>
+      TdfMetadata.tryParseTimeMinutes(rawTime);
 
   /// Returns the latest non-null UTC timestamp between [created] and [completed].
   static DateTime _latestTimestamp(DateTime created, DateTime? completed) {

@@ -44,6 +44,51 @@ import '../tokens/ui_theme_tokens.dart';
 import '../tokens/ui_typography_tokens.dart';
 import '../ui_domain_mappers.dart';
 
+/// Identifies one of the four local `.tdf` file management action buttons in [_LocalActionsGrid].
+enum _LocalStorageActionKind {
+  /// Selects an existing or new local `.tdf` file via native picker or in-app modal.
+  select,
+
+  /// Moves the active local `.tdf` file to another directory (desktop-only).
+  move,
+
+  /// Renames the active local `.tdf` file.
+  rename,
+
+  /// Destructively wipes the active local `.tdf` file via typed-filename confirmation.
+  wipe,
+}
+
+/// Identifies one of the four auto-saved segmented preference cards in [_SettingsPreferenceGrid].
+enum _SegmentedPreferenceKind {
+  /// Display language preference (`System` / `English` / `Deutsch`).
+  language,
+
+  /// Color brightness preference (`System` / `Light` / `Dark`).
+  appearance,
+
+  /// Design-system color palette preference (`Calm` / `Plum Umber`).
+  colorPalette,
+
+  /// Foreground location determination toggle (`Off` / `On`).
+  foregroundLocation,
+}
+
+/// Identifies one of the four WebDAV credential and remote path draft fields.
+enum _WebDavFieldKind {
+  /// WebDAV base server URL.
+  serverUrl,
+
+  /// WebDAV authentication username.
+  username,
+
+  /// WebDAV authentication password.
+  password,
+
+  /// Relative remote `.tdf` file path.
+  filePath,
+}
+
 /// Pinned bottom dock footer hosting conditional `Unsaved changes` pill, `Save`,
 /// and `Test Connection / Sync Now` buttons decoupled outside the Settings scroll region (`U-LAYOUT-006`, `U-UX-006`).
 class SettingsActionDock extends ConsumerWidget {
@@ -116,144 +161,91 @@ class SettingsView extends ConsumerStatefulWidget {
   ConsumerState<SettingsView> createState() => _SettingsViewState();
 }
 
-/// Auto-saved color brightness preference card (`System` / `Light` / `Dark`).
-class _AppearanceCard extends ConsumerWidget {
-  /// Creates an [_AppearanceCard].
-  const _AppearanceCard();
+/// Granular auto-saved dropdown selector watching one narrow [WebDavConfig] slice.
+class _ConfigSelectField<T extends Object> extends ConsumerWidget {
+  /// Creates a [_ConfigSelectField].
+  const _ConfigSelectField({
+    required this.fieldKey,
+    required this.label,
+    required this.select,
+    required this.fallback,
+    required this.formatValue,
+    required this.options,
+    required this.parseValue,
+    required this.onCommit,
+  });
+
+  /// Fallback value used while workspace configuration loads.
+  final T fallback;
+
+  /// Stable key assigned to the underlying [UiField].
+  final Key fieldKey;
+
+  /// Converts the selected [T] value into the matching option string value.
+  final String Function(T value) formatValue;
+
+  /// Localized visible field label.
+  final String label;
+
+  /// Persists the parsed selection through [WebDavConfigNotifier].
+  final Future<void> Function(WebDavConfigNotifier notifier, T value) onCommit;
+
+  /// Selectable dropdown options.
+  final List<UiSelectOption> options;
+
+  /// Safely parses a selected option string back into [T].
+  final T? Function(String raw) parseValue;
+
+  /// Narrow [WebDavConfig] selector preserving rebuild isolation.
+  final T Function(WebDavConfig config) select;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final themeMode = _watchConfigSlice<AppThemeMode>(
-      ref,
-      (config) => config.themeMode,
-      fallback: AppThemeMode.system,
-    );
+    final currentValue = _watchConfigSlice<T>(ref, select, fallback: fallback);
 
-    return _SettingsAutoSavedCard(
-      cardKey: const ValueKey<String>('settings_appearance_card'),
-      icon: Icons.brightness_6_outlined,
-      title: localizations.themeSectionTitle,
-      description: localizations.themeSectionDescription,
-      child: UiSegmentedControl<AppThemeMode>(
-        key: const ValueKey<String>('settings_theme_mode_control'),
-        value: themeMode,
-        semanticLabel: localizations.themeSectionTitle,
-        segments: _themeModeSegments(localizations),
-        onChanged: (next) => _commitThemeMode(context, ref, next),
-      ),
-    );
-  }
-
-  /// Commits a theme mode change immediately via [SettingsDraftNotifier.savePreference].
-  void _commitThemeMode(
-    BuildContext context,
-    WidgetRef ref,
-    AppThemeMode next,
-  ) {
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateThemeMode(next),
-            locale: locale,
-          ),
-    );
-  }
-}
-
-/// Auto-saved design-system color palette preference card (`Calm` / `Plum Umber`).
-class _ColorPaletteCard extends ConsumerWidget {
-  /// Creates a [_ColorPaletteCard].
-  const _ColorPaletteCard();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final themePalette = _watchConfigSlice<AppThemePalette>(
-      ref,
-      (config) => config.themePalette,
-      fallback: AppThemePalette.calm,
-    );
-
-    return _SettingsAutoSavedCard(
-      cardKey: const ValueKey<String>('settings_palette_card'),
-      icon: Icons.palette_outlined,
-      title: localizations.themePaletteSectionTitle,
-      description: localizations.themePaletteSectionDescription,
-      child: UiSegmentedControl<AppThemePalette>(
-        key: const ValueKey<String>('settings_theme_palette_control'),
-        value: themePalette,
-        semanticLabel: localizations.themePaletteSectionTitle,
-        segments: _themePaletteSegments(localizations),
-        onChanged: (next) => _commitPalette(context, ref, next),
-      ),
-    );
-  }
-
-  /// Commits a palette change immediately via [SettingsDraftNotifier.savePreference].
-  void _commitPalette(
-    BuildContext context,
-    WidgetRef ref,
-    AppThemePalette next,
-  ) {
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateThemePalette(next),
-            locale: locale,
-          ),
+    return UiField(
+      key: fieldKey,
+      kind: UiFieldKind.select,
+      label: label,
+      selectValue: formatValue(currentValue),
+      selectOptions: options,
+      onSelectChanged: (raw) {
+        final parsed = parseValue(raw);
+        if (parsed != null) {
+          _saveConfigPreference(
+            context,
+            ref,
+            (notifier) => onCommit(notifier, parsed),
+          );
+        }
+      },
     );
   }
 }
 
 /// Auto-saved per-workspace deadline lead-window prioritization card.
-class _DeadlinePrioritizationCard extends ConsumerWidget {
+class _DeadlinePrioritizationCard extends StatelessWidget {
   /// Creates a [_DeadlinePrioritizationCard].
   const _DeadlinePrioritizationCard();
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final dueLeadWindow = _watchConfigSlice<DueLeadWindow>(
-      ref,
-      (config) => config.dueLeadWindow,
-      fallback: DueLeadWindow.hours24,
-    );
-
     return _SettingsAutoSavedCard(
       cardKey: const ValueKey<String>('settings_due_lead_card'),
       icon: Icons.bolt_outlined,
       title: localizations.dueLeadWindowSectionTitle,
       description: localizations.dueLeadWindowSectionDescription,
-      child: UiField(
-        key: const ValueKey<String>('settings_due_lead_select'),
-        kind: UiFieldKind.select,
+      child: _ConfigSelectField<DueLeadWindow>(
+        fieldKey: const ValueKey<String>('settings_due_lead_select'),
         label: localizations.dueLeadWindowLabel,
-        selectValue: dueLeadWindow.name,
-        selectOptions: _dueLeadOptions(localizations),
-        onSelectChanged: (raw) => _commitDueLead(context, ref, raw),
+        select: (config) => config.dueLeadWindow,
+        fallback: DueLeadWindow.hours24,
+        formatValue: (window) => window.name,
+        options: _dueLeadOptions(localizations),
+        parseValue: (raw) => _parseEnumByName(raw, DueLeadWindow.values),
+        onCommit: (notifier, value) => notifier.updateDueLeadWindow(value),
       ),
-    );
-  }
-
-  /// Parses [raw] into a [DueLeadWindow] and commits via [SettingsDraftNotifier.savePreference].
-  void _commitDueLead(BuildContext context, WidgetRef ref, String raw) {
-    final parsed = _parseDueLeadWindow(raw);
-    if (parsed == null) {
-      return;
-    }
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateDueLeadWindow(parsed),
-            locale: locale,
-          ),
     );
   }
 }
@@ -286,7 +278,11 @@ class _DiagnosticsCard extends ConsumerWidget {
             label: localizations.diagnosticsSectionTitle,
             description: localizations.diagnosticsSectionDescription,
             value: diagnosticsEnabled,
-            onChanged: (enabled) => _commitDiagnostics(context, ref, enabled),
+            onChanged: (enabled) => _saveConfigPreference(
+              context,
+              ref,
+              (notifier) => notifier.updateDiagnosticsEnabled(enabled),
+            ),
           ),
           if (diagnosticsEnabled) ...<Widget>[
             SizedBox(height: tokens.spacing.space3),
@@ -294,19 +290,6 @@ class _DiagnosticsCard extends ConsumerWidget {
           ],
         ],
       ),
-    );
-  }
-
-  /// Commits diagnostic logging opt-in state via [SettingsDraftNotifier.savePreference].
-  void _commitDiagnostics(BuildContext context, WidgetRef ref, bool enabled) {
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateDiagnosticsEnabled(enabled),
-            locale: locale,
-          ),
     );
   }
 }
@@ -318,16 +301,36 @@ class _DiagnosticsDetailsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
+    final localizations = AppLocalizations.of(context);
+    final spacing = UiThemeTokens.of(context).spacing.space3;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
       children: <Widget>[
-        const _DiagnosticsLogLevelSelect(),
-        SizedBox(height: tokens.spacing.space3),
-        const _DiagnosticsLogStorageSelect(),
-        SizedBox(height: tokens.spacing.space3),
+        _ConfigSelectField<LogLevel>(
+          fieldKey: const ValueKey<String>('settings_log_level_select'),
+          label: localizations.logLevelLabel,
+          select: (config) => config.logLevel,
+          fallback: LogLevel.info,
+          formatValue: (level) => level.name,
+          options: _logLevelOptions(localizations),
+          parseValue: (raw) =>
+              _parseEnumByName(raw, configurableDiagnosticLogLevels),
+          onCommit: (notifier, value) => notifier.updateLogLevel(value),
+        ),
+        SizedBox(height: spacing),
+        _ConfigSelectField<StorageMode>(
+          fieldKey: const ValueKey<String>('settings_log_storage_select'),
+          label: localizations.logStorageLabel,
+          select: (config) => config.logStorageMode,
+          fallback: StorageMode.local,
+          formatValue: (mode) => mode.name,
+          options: _logStorageOptions(localizations),
+          parseValue: (raw) => _parseEnumByName(raw, StorageMode.values),
+          onCommit: (notifier, value) => notifier.updateLogStorageMode(value),
+        ),
+        SizedBox(height: spacing),
         const _DiagnosticsLogFooter(),
       ],
     );
@@ -376,226 +379,6 @@ class _DiagnosticsLogFooter extends ConsumerWidget {
   }
 }
 
-/// Diagnostic log verbosity selector inside [_DiagnosticsDetailsPanel].
-class _DiagnosticsLogLevelSelect extends ConsumerWidget {
-  /// Creates a [_DiagnosticsLogLevelSelect].
-  const _DiagnosticsLogLevelSelect();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final logLevel = _watchConfigSlice<LogLevel>(
-      ref,
-      (config) => config.logLevel,
-      fallback: LogLevel.info,
-    );
-
-    return UiField(
-      key: const ValueKey<String>('settings_log_level_select'),
-      kind: UiFieldKind.select,
-      label: localizations.logLevelLabel,
-      selectValue: logLevel.name,
-      selectOptions: _logLevelOptions(localizations),
-      onSelectChanged: (raw) => _commitLogLevel(context, ref, raw),
-    );
-  }
-
-  /// Parses [raw] into a [LogLevel] and commits via [SettingsDraftNotifier.savePreference].
-  void _commitLogLevel(BuildContext context, WidgetRef ref, String raw) {
-    final parsed = _parseLogLevel(raw);
-    if (parsed == null) {
-      return;
-    }
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateLogLevel(parsed),
-            locale: locale,
-          ),
-    );
-  }
-}
-
-/// Diagnostic log storage destination selector inside [_DiagnosticsDetailsPanel].
-class _DiagnosticsLogStorageSelect extends ConsumerWidget {
-  /// Creates a [_DiagnosticsLogStorageSelect].
-  const _DiagnosticsLogStorageSelect();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final logStorageMode = _watchConfigSlice<StorageMode>(
-      ref,
-      (config) => config.logStorageMode,
-      fallback: StorageMode.local,
-    );
-
-    return UiField(
-      key: const ValueKey<String>('settings_log_storage_select'),
-      kind: UiFieldKind.select,
-      label: localizations.logStorageLabel,
-      selectValue: logStorageMode.name,
-      selectOptions: _logStorageOptions(localizations),
-      onSelectChanged: (raw) => _commitLogStorageMode(context, ref, raw),
-    );
-  }
-
-  /// Parses [raw] into a [StorageMode] and commits via [SettingsDraftNotifier.savePreference].
-  void _commitLogStorageMode(BuildContext context, WidgetRef ref, String raw) {
-    final parsed = _parseStorageMode(raw);
-    if (parsed == null) {
-      return;
-    }
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateLogStorageMode(parsed),
-            locale: locale,
-          ),
-    );
-  }
-}
-
-/// Auto-saved foreground location determination card using a 2-way segmented control (`U-COMP-002`).
-class _ForegroundLocationCard extends ConsumerWidget {
-  /// Creates a [_ForegroundLocationCard].
-  const _ForegroundLocationCard();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final locationEnabled = _watchConfigSlice<bool>(
-      ref,
-      (config) => config.locationEnabled,
-      fallback: false,
-    );
-
-    return _SettingsAutoSavedCard(
-      cardKey: const ValueKey<String>('settings_location_card'),
-      icon: Icons.my_location_rounded,
-      title: localizations.locationSectionTitle,
-      description: localizations.locationSectionDescription,
-      child: UiSegmentedControl<bool>(
-        key: const ValueKey<String>('settings_location_control'),
-        value: locationEnabled,
-        semanticLabel: localizations.locationSectionTitle,
-        segments: _locationSegments(localizations),
-        onChanged: (next) => _commitLocationEnabled(context, ref, next),
-      ),
-    );
-  }
-
-  /// Commits foreground location state immediately via [SettingsDraftNotifier.savePreference].
-  void _commitLocationEnabled(BuildContext context, WidgetRef ref, bool next) {
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateLocationEnabled(next),
-            locale: locale,
-          ),
-    );
-  }
-}
-
-/// Auto-saved display language preference card (`System` / `English` / `Deutsch`).
-class _LanguageCard extends ConsumerWidget {
-  /// Creates a [_LanguageCard].
-  const _LanguageCard();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final language = _watchConfigSlice<AppLanguage>(
-      ref,
-      (config) => config.language,
-      fallback: AppLanguage.system,
-    );
-
-    return _SettingsAutoSavedCard(
-      cardKey: const ValueKey<String>('settings_language_card'),
-      icon: Icons.language_rounded,
-      title: localizations.languageSectionTitle,
-      description: localizations.languageSectionDescription,
-      child: UiSegmentedControl<AppLanguage>(
-        key: const ValueKey<String>('settings_language_control'),
-        value: language,
-        semanticLabel: localizations.languageSectionTitle,
-        segments: _languageSegments(localizations),
-        onChanged: (next) => _commitLanguage(context, ref, next),
-      ),
-    );
-  }
-
-  /// Commits display language immediately via [SettingsDraftNotifier.savePreference].
-  void _commitLanguage(BuildContext context, WidgetRef ref, AppLanguage next) {
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateLanguage(next),
-            locale: locale,
-          ),
-    );
-  }
-}
-
-/// Compact full-width action button cell inside [_LocalActionsGrid].
-class _LocalActionButton extends StatelessWidget {
-  /// Creates a [_LocalActionButton].
-  const _LocalActionButton({
-    required this.buttonKey,
-    required this.label,
-    required this.icon,
-    required this.onPressed,
-    this.variant = UiButtonVariant.secondary,
-    this.tooltip,
-    this.semanticLabel,
-  });
-
-  /// Stable key assigned to the underlying [UiButton].
-  final Key buttonKey;
-
-  /// Leading outline icon glyph.
-  final IconData icon;
-
-  /// Localized visible action text.
-  final String label;
-
-  /// Tap callback, or `null` when disabled.
-  final VoidCallback? onPressed;
-
-  /// Optional accessible label overriding [label].
-  final String? semanticLabel;
-
-  /// Optional pointer tooltip explaining disabled desktop-only behavior.
-  final String? tooltip;
-
-  /// Visual button variant.
-  final UiButtonVariant variant;
-
-  @override
-  Widget build(BuildContext context) {
-    return UiButton(
-      key: buttonKey,
-      label: label,
-      semanticLabel: semanticLabel,
-      leadingIcon: icon,
-      variant: variant,
-      density: UiButtonDensity.compact,
-      isFullWidth: true,
-      tooltip: tooltip,
-      onPressed: onPressed,
-    );
-  }
-}
-
 /// Responsive 4-column (`2x2` compact) action button grid for local `.tdf` file management.
 class _LocalActionsGrid extends StatelessWidget {
   /// Creates a [_LocalActionsGrid].
@@ -611,84 +394,16 @@ class _LocalActionsGrid extends StatelessWidget {
       spacing: gap,
       runSpacing: gap,
       children: const <Widget>[
-        _LocalSelectActionButton(),
-        _LocalMoveActionButton(),
-        _LocalRenameActionButton(),
-        _LocalWipeActionButton(),
+        _LocalStorageActionButton(kind: _LocalStorageActionKind.select),
+        _LocalStorageActionButton(kind: _LocalStorageActionKind.move),
+        _LocalStorageActionButton(kind: _LocalStorageActionKind.rename),
+        _LocalStorageActionButton(kind: _LocalStorageActionKind.wipe),
       ],
     );
   }
 }
 
-/// Capability-gated `Move` action button displaying a desktop-only tooltip when unsupported (`U-UX-006`).
-class _LocalMoveActionButton extends ConsumerWidget {
-  /// Creates a [_LocalMoveActionButton].
-  const _LocalMoveActionButton();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final supportsDirectoryPicker = ref.watch(supportsDirectoryPickerProvider);
-    final isBusy = ref.watch(
-      settingsDraftProvider.select((draft) => draft.isBusy),
-    );
-
-    return _LocalActionButton(
-      buttonKey: const ValueKey<String>('settings_move_local_button'),
-      label: localizations.actionMoveLocalFile,
-      icon: Icons.drive_file_move_outlined,
-      tooltip: supportsDirectoryPicker
-          ? null
-          : localizations.settingsMoveDesktopOnlyTooltip,
-      onPressed: (supportsDirectoryPicker && !isBusy)
-          ? () => _handleMove(context, ref)
-          : null,
-    );
-  }
-
-  /// Moves the active local `.tdf` file via [SettingsDraftNotifier.moveLocalDirectory].
-  void _handleMove(BuildContext context, WidgetRef ref) {
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .moveLocalDirectory(locale: locale),
-    );
-  }
-}
-
-/// `Rename` action button opening [showRenameLocalFileModal] with the active filename.
-class _LocalRenameActionButton extends ConsumerWidget {
-  /// Creates a [_LocalRenameActionButton].
-  const _LocalRenameActionButton();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final localFilePath = _watchConfigSlice<String>(
-      ref,
-      (config) => config.localFilePath,
-      fallback: WebDavConfig.defaultFileName,
-    );
-    final isBusy = ref.watch(
-      settingsDraftProvider.select((draft) => draft.isBusy),
-    );
-    final localFileName = TdfFilePath.extractFileNameFromPath(localFilePath);
-
-    return _LocalActionButton(
-      buttonKey: const ValueKey<String>('settings_rename_local_button'),
-      label: localizations.actionRenameLocalFile,
-      icon: Icons.drive_file_rename_outline,
-      onPressed: isBusy
-          ? null
-          : () => unawaited(
-              showRenameLocalFileModal(context, currentFileName: localFileName),
-            ),
-    );
-  }
-}
-
-/// Read-only resolved local `.tdf` path preview inside [_LocalStorageCardBody].
+/// Read-only resolved local `.tdf` path preview inside [_LocalStorageCard].
 class _LocalResolvedPathField extends ConsumerWidget {
   /// Creates a [_LocalResolvedPathField].
   const _LocalResolvedPathField();
@@ -711,49 +426,71 @@ class _LocalResolvedPathField extends ConsumerWidget {
   }
 }
 
-/// Capability-gated `Select` action button invoking native file picker or in-app modal (`U-UX-006`).
-class _LocalSelectActionButton extends ConsumerWidget {
-  /// Creates a [_LocalSelectActionButton].
-  const _LocalSelectActionButton();
+/// Parameterized local `.tdf` file action button watching only the slices required by [kind] (`U-UX-006`).
+class _LocalStorageActionButton extends ConsumerWidget {
+  /// Creates a [_LocalStorageActionButton].
+  const _LocalStorageActionButton({required this.kind});
+
+  /// Specific local storage action rendered by this cell.
+  final _LocalStorageActionKind kind;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final supportsDirectoryPicker = ref.watch(supportsDirectoryPickerProvider);
     final isBusy = ref.watch(
       settingsDraftProvider.select((draft) => draft.isBusy),
     );
+    final supportsPicker = _watchSupportsPicker(ref);
+    final localFilePath = _watchLocalFilePath(ref);
+    final spec = _localActionSpec(
+      kind,
+      localizations: localizations,
+      isBusy: isBusy,
+      supportsDirectoryPicker: supportsPicker,
+    );
 
-    return _LocalActionButton(
-      buttonKey: const ValueKey<String>('settings_select_local_button'),
-      label: localizations.actionSelectLocalFile,
-      icon: Icons.file_open_outlined,
-      onPressed: isBusy
-          ? null
-          : () => _handleSelect(
+    return UiButton(
+      key: spec.buttonKey,
+      label: spec.label,
+      semanticLabel: spec.semanticLabel,
+      leadingIcon: spec.icon,
+      variant: spec.variant,
+      density: UiButtonDensity.compact,
+      isFullWidth: true,
+      tooltip: spec.tooltip,
+      onPressed: spec.enabled
+          ? () => _dispatchLocalStorageAction(
               context,
               ref,
-              supportsNativePicker: supportsDirectoryPicker,
-            ),
+              kind: kind,
+              supportsDirectoryPicker: supportsPicker,
+              localFilePath: localFilePath,
+            )
+          : null,
     );
   }
 
-  /// Invokes the native file picker when [supportsNativePicker] is true, or opens the in-app modal otherwise.
-  void _handleSelect(
-    BuildContext context,
-    WidgetRef ref, {
-    required bool supportsNativePicker,
-  }) {
-    if (supportsNativePicker) {
-      final locale = Localizations.localeOf(context);
-      unawaited(
-        ref
-            .read(settingsDraftProvider.notifier)
-            .selectLocalFile(locale: locale),
-      );
-      return;
+  /// Watches [WebDavConfig.localFilePath] only for actions that need the active filename.
+  String _watchLocalFilePath(WidgetRef ref) {
+    final needsPath =
+        kind == _LocalStorageActionKind.rename ||
+        kind == _LocalStorageActionKind.wipe;
+    if (!needsPath) {
+      return WebDavConfig.defaultFileName;
     }
-    unawaited(showSelectLocalFileModal(context));
+    return _watchConfigSlice<String>(
+      ref,
+      (config) => config.localFilePath,
+      fallback: WebDavConfig.defaultFileName,
+    );
+  }
+
+  /// Watches [supportsDirectoryPickerProvider] only for capability-gated picker actions.
+  bool _watchSupportsPicker(WidgetRef ref) {
+    final needsCapability =
+        kind == _LocalStorageActionKind.select ||
+        kind == _LocalStorageActionKind.move;
+    return needsCapability && ref.watch(supportsDirectoryPickerProvider);
   }
 }
 
@@ -765,40 +502,29 @@ class _LocalStorageCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final gap = UiThemeTokens.of(context).spacing.space3;
+
     return _SettingsAutoSavedCard(
       cardKey: const ValueKey<String>('settings_local_card'),
       icon: Icons.folder_outlined,
       title: localizations.localSectionTitle,
       description: localizations.localSectionDescription,
-      child: const _LocalStorageCardBody(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          const _LocalResolvedPathField(),
+          SizedBox(height: gap),
+          const _LocalActionsGrid(),
+          SizedBox(height: gap),
+          const _LocalWatchToggle(),
+        ],
+      ),
     );
   }
 }
 
-/// Body layout inside [_LocalStorageCard] pairing path readout, 4-action grid, and watch toggle.
-class _LocalStorageCardBody extends StatelessWidget {
-  /// Creates a [_LocalStorageCardBody].
-  const _LocalStorageCardBody();
-
-  @override
-  Widget build(BuildContext context) {
-    final gap = UiThemeTokens.of(context).spacing.space3;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        const _LocalResolvedPathField(),
-        SizedBox(height: gap),
-        const _LocalActionsGrid(),
-        SizedBox(height: gap),
-        const _LocalWatchToggle(),
-      ],
-    );
-  }
-}
-
-/// Auto-saved external local file watching checkbox row inside [_LocalStorageCardBody].
+/// Auto-saved external local file watching checkbox row inside [_LocalStorageCard].
 class _LocalWatchToggle extends ConsumerWidget {
   /// Creates a [_LocalWatchToggle].
   const _LocalWatchToggle();
@@ -821,60 +547,78 @@ class _LocalWatchToggle extends ConsumerWidget {
       description: localizations.localWatchDescription,
       value: localWatchEnabled,
       enabled: !isStorageOperationBusy,
-      onChanged: (enabled) => _commitLocalWatch(context, ref, enabled),
-    );
-  }
-
-  /// Commits external file watching preference via [SettingsDraftNotifier.savePreference].
-  void _commitLocalWatch(BuildContext context, WidgetRef ref, bool enabled) {
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateLocalWatchEnabled(enabled),
-            locale: locale,
-          ),
+      onChanged: (enabled) => _saveConfigPreference(
+        context,
+        ref,
+        (notifier) => notifier.updateLocalWatchEnabled(enabled),
+      ),
     );
   }
 }
 
-/// Danger `Wipe` action button opening [showWipeTdfModal] for the active local `.tdf` file.
-class _LocalWipeActionButton extends ConsumerWidget {
-  /// Creates a [_LocalWipeActionButton].
-  const _LocalWipeActionButton();
+/// Granular auto-saved segmented preference card watching one narrow [WebDavConfig] slice.
+class _SegmentedPreferenceCard<T extends Object> extends ConsumerWidget {
+  /// Creates a [_SegmentedPreferenceCard].
+  const _SegmentedPreferenceCard({required this.spec});
+
+  /// Static card metadata, config slice selector, segments, and commit mutation.
+  final _SegmentedPreferenceSpec<T> spec;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final localFilePath = _watchConfigSlice<String>(
+    final currentValue = _watchConfigSlice<T>(
       ref,
-      (config) => config.localFilePath,
-      fallback: WebDavConfig.defaultFileName,
+      spec.select,
+      fallback: spec.fallback,
     );
-    final isBusy = ref.watch(
-      settingsDraftProvider.select((draft) => draft.isBusy),
-    );
-    final localFileName = TdfFilePath.extractFileNameFromPath(localFilePath);
-    final localFileBaseName = TdfFilePath.extractFileBaseName(localFilePath);
 
-    return _LocalActionButton(
-      buttonKey: const ValueKey<String>('settings_wipe_local_button'),
-      label: localizations.actionDelete,
-      semanticLabel: localizations.actionWipeLocalFile,
-      icon: Icons.delete_outline_rounded,
-      variant: UiButtonVariant.danger,
-      onPressed: isBusy
-          ? null
-          : () => unawaited(
-              showWipeTdfModal(
-                context,
-                isRemote: false,
-                fileName: localFileName,
-                baseName: localFileBaseName,
-              ),
-            ),
+    return _SettingsAutoSavedCard(
+      cardKey: spec.cardKey,
+      icon: spec.icon,
+      title: spec.title,
+      description: spec.description,
+      child: UiSegmentedControl<T>(
+        key: spec.controlKey,
+        value: currentValue,
+        semanticLabel: spec.title,
+        segments: spec.segments,
+        onChanged: (next) => _saveConfigPreference(
+          context,
+          ref,
+          (notifier) => spec.onCommit(notifier, next),
+        ),
+      ),
     );
+  }
+}
+
+/// Dispatches one of the four simple segmented preference cards to [_SegmentedPreferenceCard].
+class _SegmentedPreferenceCardSlot extends StatelessWidget {
+  /// Creates a [_SegmentedPreferenceCardSlot].
+  const _SegmentedPreferenceCardSlot({required this.kind});
+
+  /// Preference card variant rendered by this slot.
+  final _SegmentedPreferenceKind kind;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return switch (kind) {
+      _SegmentedPreferenceKind.language =>
+        _SegmentedPreferenceCard<AppLanguage>(
+          spec: _languageCardSpec(localizations),
+        ),
+      _SegmentedPreferenceKind.appearance =>
+        _SegmentedPreferenceCard<AppThemeMode>(
+          spec: _appearanceCardSpec(localizations),
+        ),
+      _SegmentedPreferenceKind.colorPalette =>
+        _SegmentedPreferenceCard<AppThemePalette>(
+          spec: _colorPaletteCardSpec(localizations),
+        ),
+      _SegmentedPreferenceKind.foregroundLocation =>
+        _SegmentedPreferenceCard<bool>(spec: _locationCardSpec(localizations)),
+    };
   }
 }
 
@@ -1058,12 +802,16 @@ class _SettingsPreferenceGrid extends StatelessWidget {
       key: ValueKey<String>('settings_preferences_grid'),
       preset: UiGridPreset.twoColumnMediumCollapse,
       children: <Widget>[
-        _LanguageCard(),
-        _AppearanceCard(),
-        _ColorPaletteCard(),
+        _SegmentedPreferenceCardSlot(kind: _SegmentedPreferenceKind.language),
+        _SegmentedPreferenceCardSlot(kind: _SegmentedPreferenceKind.appearance),
+        _SegmentedPreferenceCardSlot(
+          kind: _SegmentedPreferenceKind.colorPalette,
+        ),
         _TimeZoneCard(),
         _DeadlinePrioritizationCard(),
-        _ForegroundLocationCard(),
+        _SegmentedPreferenceCardSlot(
+          kind: _SegmentedPreferenceKind.foregroundLocation,
+        ),
         _DiagnosticsCard(),
         _StorageModeCard(),
       ],
@@ -1074,24 +822,10 @@ class _SettingsPreferenceGrid extends StatelessWidget {
 /// Scrollable column body assembling header, optional status banner, preference grid, and storage cards.
 class _SettingsScrollContent extends StatelessWidget {
   /// Creates a [_SettingsScrollContent].
-  const _SettingsScrollContent({
-    required this.serverUrlController,
-    required this.usernameController,
-    required this.passwordController,
-    required this.filePathController,
-  });
+  const _SettingsScrollContent({required this.webDavControllers});
 
-  /// Controller bound to the WebDAV remote file path input.
-  final TextEditingController filePathController;
-
-  /// Controller bound to the WebDAV password input.
-  final TextEditingController passwordController;
-
-  /// Controller bound to the WebDAV server URL input.
-  final TextEditingController serverUrlController;
-
-  /// Controller bound to the WebDAV username input.
-  final TextEditingController usernameController;
+  /// Bundle owning the four WebDAV text controllers.
+  final _WebDavFieldControllers webDavControllers;
 
   @override
   Widget build(BuildContext context) {
@@ -1105,12 +839,7 @@ class _SettingsScrollContent extends StatelessWidget {
         const _SettingsStatusBannerHost(),
         SizedBox(height: tokens.spacing.space4),
         const _SettingsPreferenceGrid(),
-        _SettingsStorageSections(
-          serverUrlController: serverUrlController,
-          usernameController: usernameController,
-          passwordController: passwordController,
-          filePathController: filePathController,
-        ),
+        _SettingsStorageSections(webDavControllers: webDavControllers),
       ],
     );
   }
@@ -1129,30 +858,6 @@ class _SettingsStatusBannerHost extends ConsumerWidget {
     if (statusBanner == null) {
       return const SizedBox.shrink();
     }
-    return _SettingsStatusBannerSection(
-      banner: statusBanner,
-      onDismiss: () =>
-          ref.read(settingsDraftProvider.notifier).dismissStatusBanner(),
-    );
-  }
-}
-
-/// Top-spaced status banner section rendered inside [_SettingsStatusBannerHost].
-class _SettingsStatusBannerSection extends StatelessWidget {
-  /// Creates a [_SettingsStatusBannerSection].
-  const _SettingsStatusBannerSection({
-    required this.banner,
-    required this.onDismiss,
-  });
-
-  /// Active settings status banner snapshot.
-  final SettingsStatusBanner banner;
-
-  /// Callback dismissing [banner].
-  final VoidCallback onDismiss;
-
-  @override
-  Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
 
@@ -1161,10 +866,11 @@ class _SettingsStatusBannerSection extends StatelessWidget {
       child: UiBanner(
         key: const ValueKey<String>('settings_status_banner'),
         variant: UiBannerVariant.status,
-        tone: UiDomainMappers.settingsBannerTone(banner.tone),
-        message: banner.message,
+        tone: UiDomainMappers.settingsBannerTone(statusBanner.tone),
+        message: statusBanner.message,
         dismissTooltip: localizations.actionDismiss,
-        onDismiss: onDismiss,
+        onDismiss: () =>
+            ref.read(settingsDraftProvider.notifier).dismissStatusBanner(),
       ),
     );
   }
@@ -1173,24 +879,10 @@ class _SettingsStatusBannerSection extends StatelessWidget {
 /// Conditional Local and WebDAV storage section host watching only [WebDavConfig.storageMode].
 class _SettingsStorageSections extends ConsumerWidget {
   /// Creates a [_SettingsStorageSections].
-  const _SettingsStorageSections({
-    required this.serverUrlController,
-    required this.usernameController,
-    required this.passwordController,
-    required this.filePathController,
-  });
+  const _SettingsStorageSections({required this.webDavControllers});
 
-  /// Controller bound to the WebDAV remote file path input.
-  final TextEditingController filePathController;
-
-  /// Controller bound to the WebDAV password input.
-  final TextEditingController passwordController;
-
-  /// Controller bound to the WebDAV server URL input.
-  final TextEditingController serverUrlController;
-
-  /// Controller bound to the WebDAV username input.
-  final TextEditingController usernameController;
+  /// Bundle owning the four WebDAV text controllers.
+  final _WebDavFieldControllers webDavControllers;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1211,12 +903,7 @@ class _SettingsStorageSections extends ConsumerWidget {
         ],
         if (storageMode.usesWebDav) ...<Widget>[
           SizedBox(height: gap),
-          _WebDavStorageCard(
-            serverUrlController: serverUrlController,
-            usernameController: usernameController,
-            passwordController: passwordController,
-            filePathController: filePathController,
-          ),
+          _WebDavStorageCard(controllers: webDavControllers),
         ],
       ],
     );
@@ -1225,27 +912,19 @@ class _SettingsStorageSections extends ConsumerWidget {
 
 /// Manages WebDAV [TextEditingController] lifecycles and external draft sync for [SettingsView].
 class _SettingsViewState extends ConsumerState<SettingsView> {
-  late final TextEditingController _filePathController;
-  late final TextEditingController _passwordController;
-  late final TextEditingController _serverUrlController;
-  late final TextEditingController _usernameController;
+  late final _WebDavFieldControllers _webDavControllers;
 
   @override
   void initState() {
     super.initState();
-    final initial = ref.read(settingsDraftProvider);
-    _serverUrlController = TextEditingController(text: initial.serverUrl);
-    _usernameController = TextEditingController(text: initial.username);
-    _passwordController = TextEditingController(text: initial.password);
-    _filePathController = TextEditingController(text: initial.filePath);
+    _webDavControllers = _WebDavFieldControllers.fromDraft(
+      ref.read(settingsDraftProvider),
+    );
   }
 
   @override
   void dispose() {
-    _filePathController.dispose();
-    _passwordController.dispose();
-    _serverUrlController.dispose();
-    _usernameController.dispose();
+    _webDavControllers.dispose();
     super.dispose();
   }
 
@@ -1260,7 +939,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
           username: draft.username,
         ),
       ),
-      _handleDraftTextChanged,
+      (_, next) => _webDavControllers.syncFrom(next),
     );
     final tokens = UiThemeTokens.of(context);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
@@ -1269,34 +948,7 @@ class _SettingsViewState extends ConsumerState<SettingsView> {
       key: const ValueKey<String>('settings_scroll_view'),
       controller: widget.scrollController,
       padding: tokens.spacing.mainContentPadding(viewport),
-      child: _SettingsScrollContent(
-        serverUrlController: _serverUrlController,
-        usernameController: _usernameController,
-        passwordController: _passwordController,
-        filePathController: _filePathController,
-      ),
-    );
-  }
-
-  /// Synchronizes the four WebDAV controllers when external state resets or updates draft values.
-  void _handleDraftTextChanged(
-    _WebDavDraftTextSlice? previous,
-    _WebDavDraftTextSlice next,
-  ) {
-    _syncController(_serverUrlController, next.serverUrl);
-    _syncController(_usernameController, next.username);
-    _syncController(_passwordController, next.password);
-    _syncController(_filePathController, next.filePath);
-  }
-
-  /// Updates [controller] only when its text differs from [expectedText], preserving active caret edits.
-  void _syncController(TextEditingController controller, String expectedText) {
-    if (controller.text == expectedText) {
-      return;
-    }
-    controller.value = TextEditingValue(
-      text: expectedText,
-      selection: TextSelection.collapsed(offset: expectedText.length),
+      child: _SettingsScrollContent(webDavControllers: _webDavControllers),
     );
   }
 }
@@ -1378,7 +1030,11 @@ class _TimeZoneCard extends ConsumerWidget {
             value: timeZoneMode,
             semanticLabel: localizations.timeZoneSectionTitle,
             segments: _timeZoneModeSegments(localizations),
-            onChanged: (next) => _commitTimeZoneMode(context, ref, next),
+            onChanged: (next) => _saveConfigPreference(
+              context,
+              ref,
+              (notifier) => notifier.updateTimeZoneMode(next),
+            ),
           ),
           if (timeZoneMode == AppTimeZoneMode.manual) ...<Widget>[
             SizedBox(height: tokens.spacing.space3),
@@ -1388,27 +1044,10 @@ class _TimeZoneCard extends ConsumerWidget {
       ),
     );
   }
-
-  /// Commits time zone mode immediately via [SettingsDraftNotifier.savePreference].
-  void _commitTimeZoneMode(
-    BuildContext context,
-    WidgetRef ref,
-    AppTimeZoneMode next,
-  ) {
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateTimeZoneMode(next),
-            locale: locale,
-          ),
-    );
-  }
 }
 
 /// Conditional 37-offset UTC select dropdown shown inside [_TimeZoneCard] in manual mode.
-class _TimeZoneOffsetSelect extends ConsumerWidget {
+class _TimeZoneOffsetSelect extends StatelessWidget {
   /// Creates a [_TimeZoneOffsetSelect].
   const _TimeZoneOffsetSelect();
 
@@ -1423,140 +1062,116 @@ class _TimeZoneOffsetSelect extends ConsumerWidget {
       ]);
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-    final manualOffsetMinutes = _watchConfigSlice<int>(
-      ref,
-      (config) => config.manualTimeZoneOffsetMinutes,
-      fallback: 0,
-    );
-
-    return UiField(
-      key: const ValueKey<String>('settings_timezone_offset_select'),
-      kind: UiFieldKind.select,
+    return _ConfigSelectField<int>(
+      fieldKey: const ValueKey<String>('settings_timezone_offset_select'),
       label: localizations.timeZoneOffsetLabel,
-      selectValue: '$manualOffsetMinutes',
-      selectOptions: _utcOffsetOptions,
-      onSelectChanged: (raw) => _commitUtcOffset(context, ref, raw),
-    );
-  }
-
-  /// Parses [raw] offset minutes and commits immediately via [SettingsDraftNotifier.savePreference].
-  void _commitUtcOffset(BuildContext context, WidgetRef ref, String raw) {
-    final parsed = int.tryParse(raw);
-    if (parsed == null) {
-      return;
-    }
-    final locale = Localizations.localeOf(context);
-    unawaited(
-      ref
-          .read(settingsDraftProvider.notifier)
-          .savePreference(
-            (notifier) => notifier.updateManualTimeZoneOffsetMinutes(parsed),
-            locale: locale,
-          ),
+      select: (config) => config.manualTimeZoneOffsetMinutes,
+      fallback: 0,
+      formatValue: (minutes) => '$minutes',
+      options: _utcOffsetOptions,
+      parseValue: int.tryParse,
+      onCommit: (notifier, value) =>
+          notifier.updateManualTimeZoneOffsetMinutes(value),
     );
   }
 }
 
-/// Responsive 2-column (`1` column compact) WebDAV credentials and remote file path field grid.
-class _WebDavFieldsGrid extends StatelessWidget {
-  /// Creates a [_WebDavFieldsGrid].
-  const _WebDavFieldsGrid({
-    required this.serverUrlController,
-    required this.usernameController,
-    required this.passwordController,
-    required this.filePathController,
-  });
+/// Parameterized WebDAV draft text input watching only `(isBusy, fieldError)` for its [kind].
+class _WebDavDraftTextField extends ConsumerWidget {
+  /// Creates a [_WebDavDraftTextField].
+  const _WebDavDraftTextField({required this.kind, required this.controller});
+
+  /// Text controller bound to this WebDAV draft field.
+  final TextEditingController controller;
+
+  /// Specific WebDAV field rendered by this widget.
+  final _WebDavFieldKind kind;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final slice = ref.watch(
+      settingsDraftProvider.select(
+        (draft) =>
+            (isBusy: draft.isBusy, error: _selectWebDavFieldError(draft, kind)),
+      ),
+    );
+    final spec = _webDavFieldSpec(kind, localizations);
+
+    return UiField(
+      key: spec.key,
+      kind: spec.fieldKind,
+      label: spec.label,
+      hintText: spec.hintText,
+      controller: controller,
+      isMonospace: spec.isMonospace,
+      keyboardType: spec.keyboardType,
+      enabled: !slice.isBusy,
+      showPasswordTooltip: spec.showPasswordTooltip,
+      hidePasswordTooltip: spec.hidePasswordTooltip,
+      errorText: slice.error,
+      onChanged: (value) => _updateWebDavField(ref, kind, value),
+    );
+  }
+}
+
+/// Owns the four WebDAV text controllers and synchronizes external draft resets without resetting active carets.
+class _WebDavFieldControllers {
+  /// Creates a [_WebDavFieldControllers] seeded from [draft].
+  _WebDavFieldControllers.fromDraft(SettingsDraftState draft)
+    : serverUrl = TextEditingController(text: draft.serverUrl),
+      username = TextEditingController(text: draft.username),
+      password = TextEditingController(text: draft.password),
+      filePath = TextEditingController(text: draft.filePath);
 
   /// Controller bound to the remote `.tdf` file path input.
-  final TextEditingController filePathController;
+  final TextEditingController filePath;
 
   /// Controller bound to the WebDAV password input.
-  final TextEditingController passwordController;
+  final TextEditingController password;
 
   /// Controller bound to the WebDAV server URL input.
-  final TextEditingController serverUrlController;
+  final TextEditingController serverUrl;
 
   /// Controller bound to the WebDAV username input.
-  final TextEditingController usernameController;
+  final TextEditingController username;
 
-  @override
-  Widget build(BuildContext context) {
-    return UiResponsiveGrid(
-      key: const ValueKey<String>('settings_webdav_fields_grid'),
-      preset: UiGridPreset.twoColumnCompactCollapse,
-      children: <Widget>[
-        _WebDavServerUrlField(controller: serverUrlController),
-        _WebDavUsernameField(controller: usernameController),
-        _WebDavPasswordField(controller: passwordController),
-        _WebDavFilePathField(controller: filePathController),
-      ],
-    );
+  /// Returns the controller bound to WebDAV draft field [kind].
+  TextEditingController controllerFor(_WebDavFieldKind kind) {
+    return switch (kind) {
+      _WebDavFieldKind.serverUrl => serverUrl,
+      _WebDavFieldKind.username => username,
+      _WebDavFieldKind.password => password,
+      _WebDavFieldKind.filePath => filePath,
+    };
   }
-}
 
-/// Monospace remote `.tdf` file path field inside [_WebDavFieldsGrid].
-class _WebDavFilePathField extends ConsumerWidget {
-  /// Creates a [_WebDavFilePathField].
-  const _WebDavFilePathField({required this.controller});
-
-  /// Text controller bound to the remote file path.
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsDraftProvider.select(
-        (draft) => (filePathError: draft.filePathError, isBusy: draft.isBusy),
-      ),
-    );
-
-    return UiField(
-      key: const ValueKey<String>('settings_webdav_file_path_field'),
-      label: localizations.filePathLabel,
-      hintText: localizations.filePathHint,
-      controller: controller,
-      isMonospace: true,
-      enabled: !slice.isBusy,
-      errorText: slice.filePathError,
-      onChanged: (value) => ref
-          .read(settingsDraftProvider.notifier)
-          .updateWebDavDraft(filePath: value),
-    );
+  /// Disposes all four WebDAV text controllers.
+  void dispose() {
+    filePath.dispose();
+    password.dispose();
+    serverUrl.dispose();
+    username.dispose();
   }
-}
 
-/// Password input with visibility toggle inside [_WebDavFieldsGrid].
-class _WebDavPasswordField extends ConsumerWidget {
-  /// Creates a [_WebDavPasswordField].
-  const _WebDavPasswordField({required this.controller});
+  /// Synchronizes all four controllers against updated [slice] text values.
+  void syncFrom(_WebDavDraftTextSlice slice) {
+    _syncController(serverUrl, slice.serverUrl);
+    _syncController(username, slice.username);
+    _syncController(password, slice.password);
+    _syncController(filePath, slice.filePath);
+  }
 
-  /// Text controller bound to the WebDAV password.
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsDraftProvider.select(
-        (draft) => (isBusy: draft.isBusy, passwordError: draft.passwordError),
-      ),
-    );
-
-    return UiField(
-      key: const ValueKey<String>('settings_webdav_password_field'),
-      kind: UiFieldKind.password,
-      label: localizations.passwordLabel,
-      controller: controller,
-      enabled: !slice.isBusy,
-      showPasswordTooltip: localizations.tooltipShowPassword,
-      hidePasswordTooltip: localizations.tooltipHidePassword,
-      errorText: slice.passwordError,
-      onChanged: (value) => ref
-          .read(settingsDraftProvider.notifier)
-          .updateWebDavDraft(password: value),
+  /// Updates [controller] only when its text differs from [expectedText].
+  void _syncController(TextEditingController controller, String expectedText) {
+    if (controller.text == expectedText) {
+      return;
+    }
+    controller.value = TextEditingValue(
+      text: expectedText,
+      selection: TextSelection.collapsed(offset: expectedText.length),
     );
   }
 }
@@ -1582,60 +1197,13 @@ class _WebDavResolvedEndpointField extends ConsumerWidget {
   }
 }
 
-/// Monospace WebDAV server URL input inside [_WebDavFieldsGrid].
-class _WebDavServerUrlField extends ConsumerWidget {
-  /// Creates a [_WebDavServerUrlField].
-  const _WebDavServerUrlField({required this.controller});
-
-  /// Text controller bound to the WebDAV server URL.
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsDraftProvider.select(
-        (draft) => (isBusy: draft.isBusy, serverUrlError: draft.serverUrlError),
-      ),
-    );
-
-    return UiField(
-      key: const ValueKey<String>('settings_webdav_server_url_field'),
-      label: localizations.serverUrlLabel,
-      hintText: 'https://cloud.example.com',
-      controller: controller,
-      isMonospace: true,
-      keyboardType: TextInputType.url,
-      enabled: !slice.isBusy,
-      errorText: slice.serverUrlError,
-      onChanged: (value) => ref
-          .read(settingsDraftProvider.notifier)
-          .updateWebDavDraft(serverUrl: value),
-    );
-  }
-}
-
 /// Full-width WebDAV Synchronization card with conditional `Unsaved changes` pill, fields, endpoint readout, and Wipe button.
 class _WebDavStorageCard extends ConsumerWidget {
   /// Creates a [_WebDavStorageCard].
-  const _WebDavStorageCard({
-    required this.serverUrlController,
-    required this.usernameController,
-    required this.passwordController,
-    required this.filePathController,
-  });
+  const _WebDavStorageCard({required this.controllers});
 
-  /// Controller bound to the remote `.tdf` file path field.
-  final TextEditingController filePathController;
-
-  /// Controller bound to the WebDAV password field.
-  final TextEditingController passwordController;
-
-  /// Controller bound to the WebDAV server URL field.
-  final TextEditingController serverUrlController;
-
-  /// Controller bound to the WebDAV username field.
-  final TextEditingController usernameController;
+  /// Bundle owning the four WebDAV text controllers.
+  final _WebDavFieldControllers controllers;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1655,12 +1223,7 @@ class _WebDavStorageCard extends ConsumerWidget {
               tone: UiPillTone.warning,
             )
           : null,
-      child: _WebDavStorageCardBody(
-        serverUrlController: serverUrlController,
-        usernameController: usernameController,
-        passwordController: passwordController,
-        filePathController: filePathController,
-      ),
+      child: _WebDavStorageCardBody(controllers: controllers),
     );
   }
 }
@@ -1668,29 +1231,16 @@ class _WebDavStorageCard extends ConsumerWidget {
 /// Body layout inside [_WebDavStorageCard] hosting description, field grid, endpoint preview, and remote wipe trigger.
 class _WebDavStorageCardBody extends StatelessWidget {
   /// Creates a [_WebDavStorageCardBody].
-  const _WebDavStorageCardBody({
-    required this.serverUrlController,
-    required this.usernameController,
-    required this.passwordController,
-    required this.filePathController,
-  });
+  const _WebDavStorageCardBody({required this.controllers});
 
-  /// Controller bound to the remote `.tdf` file path field.
-  final TextEditingController filePathController;
-
-  /// Controller bound to the WebDAV password field.
-  final TextEditingController passwordController;
-
-  /// Controller bound to the WebDAV server URL field.
-  final TextEditingController serverUrlController;
-
-  /// Controller bound to the WebDAV username field.
-  final TextEditingController usernameController;
+  /// Bundle owning the four WebDAV text controllers.
+  final _WebDavFieldControllers controllers;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
+    final gap = tokens.spacing.space3;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1700,49 +1250,23 @@ class _WebDavStorageCardBody extends StatelessWidget {
           localizations.webdavSectionDescription,
           style: tokens.typography.meta.copyWith(color: tokens.colors.muted),
         ),
-        SizedBox(height: tokens.spacing.space3),
-        _WebDavFieldsGrid(
-          serverUrlController: serverUrlController,
-          usernameController: usernameController,
-          passwordController: passwordController,
-          filePathController: filePathController,
+        SizedBox(height: gap),
+        UiResponsiveGrid(
+          key: const ValueKey<String>('settings_webdav_fields_grid'),
+          preset: UiGridPreset.twoColumnCompactCollapse,
+          children: <Widget>[
+            for (final kind in _WebDavFieldKind.values)
+              _WebDavDraftTextField(
+                kind: kind,
+                controller: controllers.controllerFor(kind),
+              ),
+          ],
         ),
-        SizedBox(height: tokens.spacing.space3),
+        SizedBox(height: gap),
         const _WebDavResolvedEndpointField(),
-        SizedBox(height: tokens.spacing.space3),
+        SizedBox(height: gap),
         const _WebDavWipeFooter(),
       ],
-    );
-  }
-}
-
-/// WebDAV username input inside [_WebDavFieldsGrid].
-class _WebDavUsernameField extends ConsumerWidget {
-  /// Creates a [_WebDavUsernameField].
-  const _WebDavUsernameField({required this.controller});
-
-  /// Text controller bound to the WebDAV username.
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final localizations = AppLocalizations.of(context);
-    final slice = ref.watch(
-      settingsDraftProvider.select(
-        (draft) => (isBusy: draft.isBusy, usernameError: draft.usernameError),
-      ),
-    );
-
-    return UiField(
-      key: const ValueKey<String>('settings_webdav_username_field'),
-      label: localizations.usernameLabel,
-      hintText: 'example-user',
-      controller: controller,
-      enabled: !slice.isBusy,
-      errorText: slice.usernameError,
-      onChanged: (value) => ref
-          .read(settingsDraftProvider.notifier)
-          .updateWebDavDraft(username: value),
     );
   }
 }
@@ -1811,6 +1335,30 @@ class _WebDavWipeFooter extends ConsumerWidget {
   }
 }
 
+/// Metadata descriptor for one local storage action button in [_LocalStorageActionButton].
+typedef _LocalActionSpec = ({
+  Key buttonKey,
+  String label,
+  String? semanticLabel,
+  IconData icon,
+  UiButtonVariant variant,
+  String? tooltip,
+  bool enabled,
+});
+
+/// Metadata descriptor for one segmented preference card rendered by [_SegmentedPreferenceCard].
+typedef _SegmentedPreferenceSpec<T extends Object> = ({
+  Key cardKey,
+  Key controlKey,
+  IconData icon,
+  String title,
+  String description,
+  T Function(WebDavConfig config) select,
+  T fallback,
+  List<UiSegment<T>> segments,
+  Future<void> Function(WebDavConfigNotifier notifier, T value) onCommit,
+});
+
 /// Narrow record of dock-relevant flags projected from [SettingsDraftState].
 typedef _SettingsDockDraftSlice = ({
   bool isBusy,
@@ -1826,6 +1374,97 @@ typedef _WebDavDraftTextSlice = ({
   String serverUrl,
   String username,
 });
+
+/// Metadata descriptor for one WebDAV draft input rendered by [_WebDavDraftTextField].
+typedef _WebDavFieldSpec = ({
+  Key key,
+  UiFieldKind fieldKind,
+  String label,
+  String? hintText,
+  bool isMonospace,
+  TextInputType? keyboardType,
+  String? showPasswordTooltip,
+  String? hidePasswordTooltip,
+});
+
+/// Builds the metadata descriptor for the auto-saved Appearance preference card.
+_SegmentedPreferenceSpec<AppThemeMode> _appearanceCardSpec(
+  AppLocalizations localizations,
+) {
+  return (
+    cardKey: const ValueKey<String>('settings_appearance_card'),
+    controlKey: const ValueKey<String>('settings_theme_mode_control'),
+    icon: Icons.brightness_6_outlined,
+    title: localizations.themeSectionTitle,
+    description: localizations.themeSectionDescription,
+    select: (config) => config.themeMode,
+    fallback: AppThemeMode.system,
+    segments: _themeModeSegments(localizations),
+    onCommit: (notifier, next) => notifier.updateThemeMode(next),
+  );
+}
+
+/// Builds the metadata descriptor for the auto-saved Color Palette preference card.
+_SegmentedPreferenceSpec<AppThemePalette> _colorPaletteCardSpec(
+  AppLocalizations localizations,
+) {
+  return (
+    cardKey: const ValueKey<String>('settings_palette_card'),
+    controlKey: const ValueKey<String>('settings_theme_palette_control'),
+    icon: Icons.palette_outlined,
+    title: localizations.themePaletteSectionTitle,
+    description: localizations.themePaletteSectionDescription,
+    select: (config) => config.themePalette,
+    fallback: AppThemePalette.calm,
+    segments: _themePaletteSegments(localizations),
+    onCommit: (notifier, next) => notifier.updateThemePalette(next),
+  );
+}
+
+/// Dispatches the selected local storage file action from [_LocalStorageActionButton].
+void _dispatchLocalStorageAction(
+  BuildContext context,
+  WidgetRef ref, {
+  required _LocalStorageActionKind kind,
+  required bool supportsDirectoryPicker,
+  required String localFilePath,
+}) {
+  final locale = Localizations.localeOf(context);
+  switch (kind) {
+    case _LocalStorageActionKind.select:
+      if (supportsDirectoryPicker) {
+        unawaited(
+          ref
+              .read(settingsDraftProvider.notifier)
+              .selectLocalFile(locale: locale),
+        );
+      } else {
+        unawaited(showSelectLocalFileModal(context));
+      }
+    case _LocalStorageActionKind.move:
+      unawaited(
+        ref
+            .read(settingsDraftProvider.notifier)
+            .moveLocalDirectory(locale: locale),
+      );
+    case _LocalStorageActionKind.rename:
+      unawaited(
+        showRenameLocalFileModal(
+          context,
+          currentFileName: TdfFilePath.extractFileNameFromPath(localFilePath),
+        ),
+      );
+    case _LocalStorageActionKind.wipe:
+      unawaited(
+        showWipeTdfModal(
+          context,
+          isRemote: false,
+          fileName: TdfFilePath.extractFileNameFromPath(localFilePath),
+          baseName: TdfFilePath.extractFileBaseName(localFilePath),
+        ),
+      );
+  }
+}
 
 /// Maps [window] exhaustively to its localized deadline lead-window display label.
 String _dueLeadLabel(DueLeadWindow window, AppLocalizations localizations) {
@@ -1850,6 +1489,23 @@ List<UiSelectOption> _dueLeadOptions(AppLocalizations localizations) {
   ];
 }
 
+/// Builds the metadata descriptor for the auto-saved Language preference card.
+_SegmentedPreferenceSpec<AppLanguage> _languageCardSpec(
+  AppLocalizations localizations,
+) {
+  return (
+    cardKey: const ValueKey<String>('settings_language_card'),
+    controlKey: const ValueKey<String>('settings_language_control'),
+    icon: Icons.language_rounded,
+    title: localizations.languageSectionTitle,
+    description: localizations.languageSectionDescription,
+    select: (config) => config.language,
+    fallback: AppLanguage.system,
+    segments: _languageSegments(localizations),
+    onCommit: (notifier, next) => notifier.updateLanguage(next),
+  );
+}
+
 /// Builds segmented options for [AppLanguage].
 List<UiSegment<AppLanguage>> _languageSegments(AppLocalizations localizations) {
   return <UiSegment<AppLanguage>>[
@@ -1866,6 +1522,72 @@ List<UiSegment<AppLanguage>> _languageSegments(AppLocalizations localizations) {
       label: localizations.languageGerman,
     ),
   ];
+}
+
+/// Resolves deterministic key, copy, icon, variant, and enabled gating for [kind].
+_LocalActionSpec _localActionSpec(
+  _LocalStorageActionKind kind, {
+  required AppLocalizations localizations,
+  required bool isBusy,
+  required bool supportsDirectoryPicker,
+}) {
+  return switch (kind) {
+    _LocalStorageActionKind.select => (
+      buttonKey: const ValueKey<String>('settings_select_local_button'),
+      label: localizations.actionSelectLocalFile,
+      semanticLabel: null,
+      icon: Icons.file_open_outlined,
+      variant: UiButtonVariant.secondary,
+      tooltip: null,
+      enabled: !isBusy,
+    ),
+    _LocalStorageActionKind.move => (
+      buttonKey: const ValueKey<String>('settings_move_local_button'),
+      label: localizations.actionMoveLocalFile,
+      semanticLabel: null,
+      icon: Icons.drive_file_move_outlined,
+      variant: UiButtonVariant.secondary,
+      tooltip: supportsDirectoryPicker
+          ? null
+          : localizations.settingsMoveDesktopOnlyTooltip,
+      enabled: supportsDirectoryPicker && !isBusy,
+    ),
+    _LocalStorageActionKind.rename => (
+      buttonKey: const ValueKey<String>('settings_rename_local_button'),
+      label: localizations.actionRenameLocalFile,
+      semanticLabel: null,
+      icon: Icons.drive_file_rename_outline,
+      variant: UiButtonVariant.secondary,
+      tooltip: null,
+      enabled: !isBusy,
+    ),
+    _LocalStorageActionKind.wipe => (
+      buttonKey: const ValueKey<String>('settings_wipe_local_button'),
+      label: localizations.actionDelete,
+      semanticLabel: localizations.actionWipeLocalFile,
+      icon: Icons.delete_outline_rounded,
+      variant: UiButtonVariant.danger,
+      tooltip: null,
+      enabled: !isBusy,
+    ),
+  };
+}
+
+/// Builds the metadata descriptor for the auto-saved Foreground Location card.
+_SegmentedPreferenceSpec<bool> _locationCardSpec(
+  AppLocalizations localizations,
+) {
+  return (
+    cardKey: const ValueKey<String>('settings_location_card'),
+    controlKey: const ValueKey<String>('settings_location_control'),
+    icon: Icons.my_location_rounded,
+    title: localizations.locationSectionTitle,
+    description: localizations.locationSectionDescription,
+    select: (config) => config.locationEnabled,
+    fallback: false,
+    segments: _locationSegments(localizations),
+    onCommit: (notifier, next) => notifier.updateLocationEnabled(next),
+  );
 }
 
 /// Builds 2-way segmented options for foreground location determination (`Off` / `On`).
@@ -1887,10 +1609,10 @@ String _logLevelLabel(LogLevel level, AppLocalizations localizations) {
   };
 }
 
-/// Builds localized select options for every [LogLevel].
+/// Builds localized select options for every configurable [LogLevel].
 List<UiSelectOption> _logLevelOptions(AppLocalizations localizations) {
   return <UiSelectOption>[
-    for (final level in LogLevel.values)
+    for (final level in configurableDiagnosticLogLevels)
       UiSelectOption(
         value: level.name,
         label: _logLevelLabel(level, localizations),
@@ -1918,34 +1640,28 @@ List<UiSelectOption> _logStorageOptions(AppLocalizations localizations) {
   ];
 }
 
-/// Parses [raw] into a [DueLeadWindow], returning `null` if unknown.
-DueLeadWindow? _parseDueLeadWindow(String raw) {
-  for (final window in DueLeadWindow.values) {
-    if (window.name == raw) {
-      return window;
+/// Parses [raw] into the matching enum value in [values], returning `null` if unknown.
+T? _parseEnumByName<T extends Enum>(String raw, Iterable<T> values) {
+  for (final value in values) {
+    if (value.name == raw) {
+      return value;
     }
   }
   return null;
 }
 
-/// Parses [raw] into a [LogLevel], returning `null` if unknown.
-LogLevel? _parseLogLevel(String raw) {
-  for (final level in LogLevel.values) {
-    if (level.name == raw) {
-      return level;
-    }
-  }
-  return null;
-}
-
-/// Parses [raw] into a [StorageMode], returning `null` if unknown.
-StorageMode? _parseStorageMode(String raw) {
-  for (final mode in StorageMode.values) {
-    if (mode.name == raw) {
-      return mode;
-    }
-  }
-  return null;
+/// Commits an immediate auto-saved preference [mutation] via [SettingsDraftNotifier.savePreference].
+void _saveConfigPreference(
+  BuildContext context,
+  WidgetRef ref,
+  Future<void> Function(WebDavConfigNotifier notifier) mutation,
+) {
+  final locale = Localizations.localeOf(context);
+  unawaited(
+    ref
+        .read(settingsDraftProvider.notifier)
+        .savePreference(mutation, locale: locale),
+  );
 }
 
 /// Projects dock-relevant dirty and busy flags from [state] for [SettingsActionDock].
@@ -1956,6 +1672,19 @@ _SettingsDockDraftSlice _selectDockDraft(SettingsDraftState state) {
     isSavingWebDav: state.isSavingWebDav,
     isTestingConnection: state.isTestingConnection,
   );
+}
+
+/// Projects the inline validation error for WebDAV [kind] from [draft].
+String? _selectWebDavFieldError(
+  SettingsDraftState draft,
+  _WebDavFieldKind kind,
+) {
+  return switch (kind) {
+    _WebDavFieldKind.serverUrl => draft.serverUrlError,
+    _WebDavFieldKind.username => draft.usernameError,
+    _WebDavFieldKind.password => draft.passwordError,
+    _WebDavFieldKind.filePath => draft.filePathError,
+  };
 }
 
 /// Builds segmented options for [StorageMode].
@@ -2030,6 +1759,21 @@ List<UiSegment<AppTimeZoneMode>> _timeZoneModeSegments(
   ];
 }
 
+/// Updates the matching WebDAV draft field [kind] with [value] on [settingsDraftProvider].
+void _updateWebDavField(WidgetRef ref, _WebDavFieldKind kind, String value) {
+  final notifier = ref.read(settingsDraftProvider.notifier);
+  switch (kind) {
+    case _WebDavFieldKind.serverUrl:
+      notifier.updateWebDavDraft(serverUrl: value);
+    case _WebDavFieldKind.username:
+      notifier.updateWebDavDraft(username: value);
+    case _WebDavFieldKind.password:
+      notifier.updateWebDavDraft(password: value);
+    case _WebDavFieldKind.filePath:
+      notifier.updateWebDavDraft(filePath: value);
+  }
+}
+
 /// Watches a single narrow field from [webDavConfigProvider], falling back to
 /// [activeWorkspaceProvider] or [fallback] while initial configuration loads.
 T _watchConfigSlice<T extends Object>(
@@ -2057,4 +1801,53 @@ T _watchConfigSlice<T extends Object>(
         }),
       ) ??
       fallback;
+}
+
+/// Resolves deterministic key, field kind, copy, and input attributes for WebDAV [kind].
+_WebDavFieldSpec _webDavFieldSpec(
+  _WebDavFieldKind kind,
+  AppLocalizations localizations,
+) {
+  return switch (kind) {
+    _WebDavFieldKind.serverUrl => (
+      key: const ValueKey<String>('settings_webdav_server_url_field'),
+      fieldKind: UiFieldKind.text,
+      label: localizations.serverUrlLabel,
+      hintText: 'https://cloud.example.com',
+      isMonospace: true,
+      keyboardType: TextInputType.url,
+      showPasswordTooltip: null,
+      hidePasswordTooltip: null,
+    ),
+    _WebDavFieldKind.username => (
+      key: const ValueKey<String>('settings_webdav_username_field'),
+      fieldKind: UiFieldKind.text,
+      label: localizations.usernameLabel,
+      hintText: 'example-user',
+      isMonospace: false,
+      keyboardType: null,
+      showPasswordTooltip: null,
+      hidePasswordTooltip: null,
+    ),
+    _WebDavFieldKind.password => (
+      key: const ValueKey<String>('settings_webdav_password_field'),
+      fieldKind: UiFieldKind.password,
+      label: localizations.passwordLabel,
+      hintText: null,
+      isMonospace: false,
+      keyboardType: null,
+      showPasswordTooltip: localizations.tooltipShowPassword,
+      hidePasswordTooltip: localizations.tooltipHidePassword,
+    ),
+    _WebDavFieldKind.filePath => (
+      key: const ValueKey<String>('settings_webdav_file_path_field'),
+      fieldKind: UiFieldKind.text,
+      label: localizations.filePathLabel,
+      hintText: localizations.filePathHint,
+      isMonospace: true,
+      keyboardType: null,
+      showPasswordTooltip: null,
+      hidePasswordTooltip: null,
+    ),
+  };
 }

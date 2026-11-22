@@ -36,7 +36,6 @@ import '../dialogs/compact_label_picker_sheet.dart';
 import '../primitives/ui_button.dart';
 import '../primitives/ui_card.dart';
 import '../primitives/ui_pill.dart';
-import '../primitives/ui_segmented_control.dart';
 import '../tokens/ui_breakpoints.dart';
 import '../tokens/ui_theme_tokens.dart';
 import '../ui_domain_mappers.dart';
@@ -129,26 +128,28 @@ class TaskCard extends ConsumerWidget {
         !task.isCompleted &&
         headerSlice.isTitleEditActive;
 
-    return _TaskCardFrame(
-      contextData: _TaskCardContext(
-        task: task,
-        tier: tier,
-        labelsById: labelsById,
-        locationsById: locationsById,
-        tasksById: tasksById,
-        allLabels: allLabels,
-        allLocations: allLocations,
-        openLabelCounts: openLabelCounts,
-        isSearchMode: isSearchMode,
-        activeLabelId: activeLabelId,
-        configuration: configuration,
-        nowUtc: nowUtc,
-        localNow: localNow,
-        activeFix: activeFix,
+    return RepaintBoundary(
+      child: _TaskCardFrame(
+        contextData: _TaskCardContext(
+          task: task,
+          tier: tier,
+          labelsById: labelsById,
+          locationsById: locationsById,
+          tasksById: tasksById,
+          allLabels: allLabels,
+          allLocations: allLocations,
+          openLabelCounts: openLabelCounts,
+          isSearchMode: isSearchMode,
+          activeLabelId: activeLabelId,
+          configuration: configuration,
+          nowUtc: nowUtc,
+          localNow: localNow,
+          activeFix: activeFix,
+        ),
+        entityRef: entityRef,
+        isExpanded: headerSlice.isExpanded,
+        isEditingTitle: isEditingTitle,
       ),
-      entityRef: entityRef,
-      isExpanded: headerSlice.isExpanded,
-      isEditingTitle: isEditingTitle,
     );
   }
 }
@@ -1268,6 +1269,9 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     required this.onOpenLabelPicker,
   });
 
+  /// Shared empty placeholder draft reused while [EntityConditionsSection] is read-only.
+  static final ConditionDraft _readOnlyConditionDraft = ConditionDraft();
+
   /// Currently active inline section editor on this task, if any.
   final TaskSectionKind? activeSection;
 
@@ -1334,19 +1338,20 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
       locationsById: contextData.locationsById,
       localizations: localizations,
     );
-    final conditionDraft = TaskScheduleHelper.buildConditionDraft(
-      task.conditions,
-      isTask: true,
-    );
+    final isEditing =
+        activeSection == TaskSectionKind.conditions && !task.isCompleted;
+    final conditionDraft = isEditing
+        ? TaskScheduleHelper.buildConditionDraft(task.conditions, isTask: true)
+        : _readOnlyConditionDraft;
 
     return EntityConditionsSection(
+      key: ValueKey<String>('task_section_conditions_${task.id}'),
       isTask: true,
       hasConditions: flags.hasConditions,
       conditionsSummary: conditionsSummary,
       conditionDraft: conditionDraft,
       allLocations: contextData.allLocations,
-      isEditing:
-          activeSection == TaskSectionKind.conditions && !task.isCompleted,
+      isEditing: isEditing,
       canEdit: !task.isCompleted,
       isSuspended: flags.isSuspended,
       conditionsStatusLabel: conditionsSatisfied
@@ -1384,6 +1389,7 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     if (hasNote || activeSection == TaskSectionKind.note) {
       sections.add(
         EntityNoteSection(
+          key: ValueKey<String>('task_section_note_${task.id}'),
           note: task.note,
           isEditing: activeSection == TaskSectionKind.note && !task.isCompleted,
           canEdit: !task.isCompleted,
@@ -1404,6 +1410,7 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     if (task.links.isNotEmpty || activeSection == TaskSectionKind.links) {
       sections.add(
         EntityLinksSection(
+          key: ValueKey<String>('task_section_links_${task.id}'),
           links: task.links,
           isEditing:
               activeSection == TaskSectionKind.links && !task.isCompleted,
@@ -1423,6 +1430,7 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     if (task.subtasks.isNotEmpty || activeSection == TaskSectionKind.subtasks) {
       sections.add(
         TaskSubtasksSection(
+          key: ValueKey<String>('task_section_subtasks_${task.id}'),
           task: task,
           isEditing:
               activeSection == TaskSectionKind.subtasks && !task.isCompleted,
@@ -1437,6 +1445,7 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     // History is ALWAYS visible and live interactive even on Completed tasks (U-CARD-004).
     sections.add(
       TaskHistorySection(
+        key: ValueKey<String>('task_section_history_${task.id}'),
         task: task,
         configuration: contextData.configuration,
         currentLocalDateTimeHint: currentLocalDateTimeHint,
@@ -1446,6 +1455,7 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     if (assignedLabels.isNotEmpty || isInlineLabelPickerOpen) {
       sections.add(
         _TaskLabelsSection(
+          key: ValueKey<String>('task_section_labels_${task.id}'),
           task: task,
           assignedLabels: assignedLabels,
           allLabels: contextData.allLabels,
@@ -1481,6 +1491,7 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     if (task.dueAt != null || activeSection == TaskSectionKind.due) {
       sections.add(
         TaskDueSection(
+          key: ValueKey<String>('task_section_due_${task.id}'),
           task: task,
           isSomeday: contextData.isSomeday,
           isEditing: activeSection == TaskSectionKind.due && !task.isCompleted,
@@ -1497,8 +1508,10 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
 
     if (!task.isCompleted && (task.isPriority || contextData.isSomeday)) {
       sections.add(
-        _TaskPlacementSection(
-          taskId: task.id,
+        TaskPlacementCard(
+          key: ValueKey<String>('task_section_placement_${task.id}'),
+          cardKey: ValueKey<String>('task_placement_section_${task.id}'),
+          controlKey: ValueKey<String>('task_placement_control_${task.id}'),
           placement: flags.placement,
           isBusy: isBusy,
           onChanged: (nextPlacement) => unawaited(
@@ -1514,6 +1527,7 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     if (task.repeatRule != null || activeSection == TaskSectionKind.repeat) {
       sections.add(
         TaskRepeatSection(
+          key: ValueKey<String>('task_section_repeat_${task.id}'),
           task: task,
           isEditing:
               activeSection == TaskSectionKind.repeat && !task.isCompleted,
@@ -1528,6 +1542,7 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
     if (flags.isSuspended || activeSection == TaskSectionKind.suspended) {
       sections.add(
         TaskSuspendedSection(
+          key: ValueKey<String>('task_section_suspended_${task.id}'),
           task: task,
           isEditing:
               activeSection == TaskSectionKind.suspended && !task.isCompleted,
@@ -1546,6 +1561,7 @@ class _TaskExpandedSectionsList extends ConsumerWidget {
         activeSection == TaskSectionKind.prerequisites) {
       sections.add(
         TaskPrerequisitesSection(
+          key: ValueKey<String>('task_section_prerequisites_${task.id}'),
           task: task,
           tasksById: contextData.tasksById,
           isEditing:
@@ -1625,7 +1641,6 @@ class _TaskLabelsPickerCard extends StatelessWidget {
       ),
       headerTrailing: UiButton(
         label: localizations.actionDone,
-        variant: UiButtonVariant.secondary,
         density: UiButtonDensity.compact,
         onPressed: onClosePicker,
       ),
@@ -1702,6 +1717,7 @@ class _TaskLabelsReadCard extends StatelessWidget {
 class _TaskLabelsSection extends StatelessWidget {
   /// Creates a [_TaskLabelsSection].
   const _TaskLabelsSection({
+    super.key,
     required this.task,
     required this.assignedLabels,
     required this.allLabels,
@@ -1770,60 +1786,6 @@ class _TaskLabelsSection extends StatelessWidget {
       onToggleLabel: onToggleLabel,
       onOpenLabelInfo: onOpenLabelInfo,
       onOpenPicker: onOpenPicker,
-    );
-  }
-}
-
-/// Live Queue & Priority segmented switch rendered on active Priority or Someday tasks (`U-CARD-002`..`003`).
-class _TaskPlacementSection extends StatelessWidget {
-  /// Creates a [_TaskPlacementSection].
-  const _TaskPlacementSection({
-    required this.taskId,
-    required this.placement,
-    required this.isBusy,
-    required this.onChanged,
-  });
-
-  /// Whether a task mutation is in flight.
-  final bool isBusy;
-
-  /// Callback committing the new placement immediately.
-  final ValueChanged<QuickAddMode> onChanged;
-
-  /// Current task placement mode.
-  final QuickAddMode placement;
-
-  /// Owning task identifier for deterministic keys.
-  final String taskId;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiCard.inset(
-      key: ValueKey<String>('task_placement_section_$taskId'),
-      headerIcon: Icons.bolt_outlined,
-      headerTitle: localizations.inlinePlacementSectionTitle,
-      child: UiSegmentedControl<QuickAddMode>(
-        key: ValueKey<String>('task_placement_control_$taskId'),
-        segments: <UiSegment<QuickAddMode>>[
-          UiSegment<QuickAddMode>(
-            value: QuickAddMode.standard,
-            label: localizations.placementQueueOption,
-          ),
-          UiSegment<QuickAddMode>(
-            value: QuickAddMode.priority,
-            label: localizations.quickAddPriority,
-          ),
-          UiSegment<QuickAddMode>(
-            value: QuickAddMode.someday,
-            label: localizations.tier5Name,
-          ),
-        ],
-        value: placement,
-        enabled: !isBusy,
-        semanticLabel: localizations.inlinePlacementSectionTitle,
-        onChanged: onChanged,
-      ),
     );
   }
 }

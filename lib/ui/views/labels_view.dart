@@ -15,10 +15,12 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
+import '../../models/task_board.dart';
 import '../../models/tdf_error.dart';
 import '../../models/tdf_metadata.dart';
 import '../../providers/entity_actions_provider.dart';
@@ -31,13 +33,8 @@ import '../primitives/ui_banner.dart';
 import '../tokens/ui_breakpoints.dart';
 import '../tokens/ui_theme_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
+import '../widgets/entity_reveal_scroll_controller.dart';
 import 'label_card.dart';
-
-/// Estimated vertical extent per collapsed label card used to pre-scroll offscreen reveals.
-const double _estimatedCardExtent = 84.0;
-
-/// Duration for smooth scroll-to-card reveals (`U-CARD-001`).
-const Duration _revealScrollDuration = Duration(milliseconds: 220);
 
 /// Expandable Labels manager view with inline Quick-Create, uncommitted Label Draft Card,
 /// single-expand entity cards, live Board Scope toggle, inline Color wheel editor, and context-preserving Back navigation.
@@ -139,6 +136,27 @@ class _LabelQuickCreateBar extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Immutable value-equality label list slice watched by [_LabelsViewState].
+@immutable
+class _LabelsBoardSlice {
+  /// Creates a [_LabelsBoardSlice].
+  const _LabelsBoardSlice(this.labels);
+
+  /// Alphabetically sorted workspace labels.
+  final List<TdfLabel> labels;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is _LabelsBoardSlice && listEquals(other.labels, labels);
+  }
+
+  @override
+  int get hashCode => Object.hashAll(labels);
 }
 
 /// Vertical header plus Quick-Create bar or uncommitted Label Draft Card inside [_LabelsHeaderContent].
@@ -482,23 +500,22 @@ class _LabelsScrollBody extends StatelessWidget {
 }
 
 /// Coordinates Quick-Create, scroll reveal, and draft lifecycle for [LabelsView].
-class _LabelsViewState extends ConsumerState<LabelsView> {
-  final Map<String, GlobalKey> _ownedCardKeys = <String, GlobalKey>{};
+class _LabelsViewState extends ConsumerState<LabelsView>
+    with EntityRevealScrollMixin<LabelsView> {
   late final TextEditingController _quickCreateController;
   late final FocusNode _quickCreateFocusNode;
 
   bool _isQuickCreating = false;
-  ScrollController? _ownedScrollController;
-  String? _pendingRevealLabelId;
   String? _quickCreateError;
 
-  /// Effective scroll controller shared with the primary [CustomScrollView].
-  ScrollController get _effectiveScrollController {
-    if (widget.scrollController case final external?) {
-      return external;
-    }
-    return _ownedScrollController ??= ScrollController();
-  }
+  @override
+  ScrollController? get externalScrollController => widget.scrollController;
+
+  @override
+  EntityDraftKind get revealDraftKind => EntityDraftKind.label;
+
+  @override
+  EntityKind get revealEntityKind => EntityKind.label;
 
   @override
   void initState() {
@@ -506,53 +523,40 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
     _quickCreateController = TextEditingController()
       ..addListener(_handleQuickCreateTextChanged);
     _quickCreateFocusNode = FocusNode();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      _scheduleReveal(ref.read(shellProvider).revealEntityRequest);
-    });
+    initRevealScroll();
   }
 
   @override
   void didUpdateWidget(covariant LabelsView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.scrollController != widget.scrollController &&
-        widget.scrollController != null &&
-        _ownedScrollController != null) {
-      _ownedScrollController?.dispose();
-      _ownedScrollController = null;
-    }
+    handleScrollControllerSwap(oldWidget.scrollController);
   }
 
   @override
   void dispose() {
+    disposeRevealScroll();
     _quickCreateController
       ..removeListener(_handleQuickCreateTextChanged)
       ..dispose();
     _quickCreateFocusNode.dispose();
-    _ownedScrollController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    _registerShellListeners();
-    final labels = ref.watch(
-      taskNotifierProvider.select(
-        (boardAsync) =>
-            boardAsync.asData?.value.sortedLabels ?? const <TdfLabel>[],
-      ),
-    );
+    registerRevealShellListeners();
+    final labels = ref
+        .watch(taskNotifierProvider.select(_selectLabelsBoardSlice))
+        .labels;
     final isDraftOpen = ref.watch(
       shellProvider.select(
         (shell) => shell.activeDraft == EntityDraftKind.label,
       ),
     );
-    _pruneOwnedCardKeys(labels);
+    pruneOwnedCardKeys(labels.map((label) => label.id));
 
     return _LabelsScrollBody(
-      scrollController: _effectiveScrollController,
+      scrollController: effectiveScrollController,
       labels: labels,
       nextPresetColorHex:
           canonicalLabelPresetHexColors[labels.length %
@@ -562,7 +566,7 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
       quickCreateController: _quickCreateController,
       quickCreateFocusNode: _quickCreateFocusNode,
       quickCreateError: _quickCreateError,
-      cardKeyFor: _cardKeyFor,
+      cardKeyFor: resolveRevealCardKey,
       onBack: _handleBack,
       onExpandDraft: _handleExpandDraft,
       onQuickCreateSubmit: _handleQuickCreateSubmit,
@@ -570,9 +574,13 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
     );
   }
 
-  /// Returns a stable [GlobalKey] mapped to [labelId] for smooth reveal scrolling.
-  GlobalKey _cardKeyFor(String labelId) =>
-      _ownedCardKeys.putIfAbsent(labelId, GlobalKey.new);
+  @override
+  List<String> collectVisibleEntityIds() {
+    final labels =
+        ref.read(taskNotifierProvider).asData?.value.sortedLabels ??
+        const <TdfLabel>[];
+    return <String>[for (final label in labels) label.id];
+  }
 
   /// Restores saved task or search context via [shellProvider].
   void _handleBack() {
@@ -605,30 +613,26 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
       _isQuickCreating = true;
       _quickCreateError = null;
     });
-    final locale = Localizations.localeOf(context);
-    final result = await ref
-        .read(entityActionsProvider.notifier)
-        .quickCreateLabel(_quickCreateController.text, locale: locale);
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
-        _quickCreateController.clear();
-        setState(() {
-          _isQuickCreating = false;
-          _quickCreateError = null;
-        });
-      case ActionValidationFailed(:final message):
-        setState(() {
-          _isQuickCreating = false;
-          _quickCreateError = message;
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isQuickCreating = false;
-          _quickCreateError = message;
-        });
+    try {
+      final locale = Localizations.localeOf(context);
+      final result = await ref
+          .read(entityActionsProvider.notifier)
+          .quickCreateLabel(_quickCreateController.text, locale: locale);
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          _quickCreateController.clear();
+          setState(() => _quickCreateError = null);
+        case ActionValidationFailed(:final message):
+        case ActionPersistFailed(:final message):
+          setState(() => _quickCreateError = message);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isQuickCreating = false);
+      }
     }
   }
 
@@ -637,126 +641,6 @@ class _LabelsViewState extends ConsumerState<LabelsView> {
     if (_quickCreateError != null && mounted) {
       setState(() => _quickCreateError = null);
     }
-  }
-
-  /// Executes smooth `Scrollable.ensureVisible` to [labelId], pre-scrolling if offscreen in the lazy list.
-  Future<void> _performReveal(String labelId) async {
-    final targetContext = _ownedCardKeys[labelId]?.currentContext;
-    if (targetContext != null) {
-      _pendingRevealLabelId = null;
-      ref.read(shellProvider.notifier).clearRevealRequest();
-      await Scrollable.ensureVisible(
-        targetContext,
-        duration: _revealScrollDuration,
-        curve: Curves.easeOut,
-        alignment: 0.15,
-      );
-      return;
-    }
-
-    final labels =
-        ref.read(taskNotifierProvider).asData?.value.sortedLabels ??
-        const <TdfLabel>[];
-    final targetIndex = labels.indexWhere((label) => label.id == labelId);
-    final controller = _effectiveScrollController;
-    if (targetIndex < 0 || !controller.hasClients) {
-      _pendingRevealLabelId = null;
-      ref.read(shellProvider.notifier).clearRevealRequest();
-      return;
-    }
-
-    final estimatedOffset = (targetIndex * _estimatedCardExtent).clamp(
-      0.0,
-      controller.position.maxScrollExtent,
-    );
-    controller.jumpTo(estimatedOffset);
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _revealMaterializedCard(labelId),
-    );
-  }
-
-  /// Removes card [GlobalKey] entries for labels no longer present on the board.
-  void _pruneOwnedCardKeys(List<TdfLabel> labels) {
-    if (_ownedCardKeys.isEmpty) {
-      return;
-    }
-    final activeIds = <String>{for (final label in labels) label.id};
-    _ownedCardKeys.removeWhere((id, _) => !activeIds.contains(id));
-  }
-
-  /// Registers Riverpod listeners coordinating smooth card reveal and draft scroll-to-top behavior.
-  void _registerShellListeners() {
-    ref.listen<EntityRef?>(
-      shellProvider.select((shell) => shell.revealEntityRequest),
-      (previous, next) {
-        _scheduleReveal(next);
-      },
-    );
-    ref.listen<EntityDraftKind?>(
-      shellProvider.select((shell) => shell.activeDraft),
-      (previous, next) {
-        if (next == EntityDraftKind.label &&
-            previous != EntityDraftKind.label) {
-          _scrollToTop();
-        }
-      },
-    );
-  }
-
-  /// Completes smooth reveal after an offscreen card materializes in the sliver viewport.
-  void _revealMaterializedCard(String labelId) {
-    if (!mounted) {
-      return;
-    }
-    _pendingRevealLabelId = null;
-    ref.read(shellProvider.notifier).clearRevealRequest();
-    final materializedContext = _ownedCardKeys[labelId]?.currentContext;
-    if (materializedContext == null) {
-      return;
-    }
-    unawaited(
-      Scrollable.ensureVisible(
-        materializedContext,
-        duration: _revealScrollDuration,
-        curve: Curves.easeOut,
-        alignment: 0.15,
-      ),
-    );
-  }
-
-  /// Schedules a post-frame reveal scroll when [request] targets a label card.
-  void _scheduleReveal(EntityRef? request) {
-    if (request == null ||
-        request.kind != EntityKind.label ||
-        _pendingRevealLabelId == request.id) {
-      return;
-    }
-    _pendingRevealLabelId = request.id;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      unawaited(_performReveal(request.id));
-    });
-  }
-
-  /// Scrolls the view smoothly back to offset `0.0` when opening an uncommitted Draft Card (`U-CARD-006`).
-  void _scrollToTop() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) {
-        return;
-      }
-      final controller = _effectiveScrollController;
-      if (controller.hasClients && controller.offset > 0.0) {
-        unawaited(
-          controller.animateTo(
-            0.0,
-            duration: _revealScrollDuration,
-            curve: Curves.easeOut,
-          ),
-        );
-      }
-    });
   }
 }
 
@@ -772,4 +656,11 @@ String? _resolveBackLabel(
           : localizations.actionBackToTasks,
     null => null,
   };
+}
+
+/// Extracts value-compared sorted workspace labels from [boardAsync].
+_LabelsBoardSlice _selectLabelsBoardSlice(AsyncValue<TaskBoard> boardAsync) {
+  return _LabelsBoardSlice(
+    boardAsync.asData?.value.sortedLabels ?? const <TdfLabel>[],
+  );
 }

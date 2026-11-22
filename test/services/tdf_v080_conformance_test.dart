@@ -21,7 +21,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_board_sync.dart';
 import 'package:tiertask/models/task_item.dart';
-import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
@@ -377,7 +376,7 @@ int _countLfLines(Uint8List bytes) {
 }
 
 Set<String> _executeOperationalAndMetaRuleAssertions(TdfService tdfService) {
-  final nowUtc = DateTime.utc(2026, 11, 16, 12, 0, 0);
+  final nowUtc = DateTime.utc(2026, 11, 16, 12);
 
   // TDF-ID-001 & TDF-MUT-003: Entity creation generates collision-free Base62 IDs, revisions, and queue entries.
   var board = TaskBoard.empty()
@@ -412,7 +411,6 @@ Set<String> _executeOperationalAndMetaRuleAssertions(TdfService tdfService) {
   );
   board = board.addTask(
     'Scoped Ops Task',
-    targetTier: TaskTier.planned,
     isPriority: true,
     labelIds: <String>[createdLabel.id],
     conditions: <TaskCondition>[
@@ -489,7 +487,6 @@ Set<String> _executeOperationalAndMetaRuleAssertions(TdfService tdfService) {
     secondary: loadedBoard,
     baseline: loadedBoard,
     evaluationTime: nowUtc,
-    cleanupMode: TdfCleanupMode.finalStage,
   );
   expect(finalMerged.findTask('8jKaCdOkD2')?.suspendedAt, isNull);
   final publishedCanonical = tdfService.serialize(finalMerged);
@@ -749,7 +746,7 @@ void _runBoundsTemplateCase(TdfService tdfService, Map<String, Object?> entry) {
 }
 
 void _runFullCapacityTaskTemplate(TdfService tdfService, String caseId) {
-  final fixedUtc = DateTime.utc(2026, 11, 16, 8, 0, 0);
+  final fixedUtc = DateTime.utc(2026, 11, 16, 8);
   final fullTask = TaskItem(
     id: 'fullCap001',
     title: 'Full-capacity canonical task (534 statements <= 1024)',
@@ -763,7 +760,7 @@ void _runFullCapacityTaskTemplate(TdfService tdfService, String caseId) {
     repeatRule: const TaskRepeatRule(
       count: 1,
       unit: RepeatUnit.months,
-      clock: TdfRepeatClock(hour: 9, minute: 0),
+      clock: TdfRepeatClock(hour: 9),
       leadDays: 5,
     ),
     labelIds: const <String>['4x9p2mOkD2'],
@@ -773,7 +770,7 @@ void _runFullCapacityTaskTemplate(TdfService tdfService, String caseId) {
     suspendedAt: fixedUtc.add(const Duration(days: 2)),
     suspendedNote: 'Deferral note',
     dueAt: fixedUtc.add(const Duration(days: 5)),
-    dueAnchor: TdfLocalDateTime(2026, 11, 21, 9, 0, 0),
+    dueAnchor: TdfLocalDateTime(2026, 11, 21, 9),
     isDuePassive: true,
     dueNote: 'Deadline note',
     origin: const TaskOrigin(
@@ -947,7 +944,7 @@ void _runQueueEntriesBoundTemplate(
     rejectCount,
     (i) => '${i.toString().padLeft(6, '0')}OkD2',
   );
-  final fixedUtc = DateTime.utc(2026, 11, 16, 9, 0, 0);
+  final fixedUtc = DateTime.utc(2026, 11, 16, 9);
 
   // Serializer enforces exact 4096 accept vs 4097 LimitExceeded:
   expect(
@@ -1005,7 +1002,7 @@ void _runQueueEntriesBoundTemplate(
 }
 
 void _runSerializerByteOverflowTemplate(TdfService tdfService, String caseId) {
-  final fixedUtc = DateTime.utc(2026, 11, 16, 9, 0, 0);
+  final fixedUtc = DateTime.utc(2026, 11, 16, 9);
   final bigNote = 'n' * maxTdfNoteLength;
   final tasks = List<TaskItem>.generate(
     550,
@@ -1030,7 +1027,7 @@ void _runSerializerByteOverflowTemplate(TdfService tdfService, String caseId) {
 }
 
 void _runSerializerLineOverflowTemplate(TdfService tdfService, String caseId) {
-  final fixedUtc = DateTime.utc(2026, 11, 16, 9, 0, 0);
+  final fixedUtc = DateTime.utc(2026, 11, 16, 9);
   final tasks = List<TaskItem>.generate(
     3500,
     (i) => TaskItem(

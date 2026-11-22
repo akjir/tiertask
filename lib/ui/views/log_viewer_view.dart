@@ -16,7 +16,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show setEquals;
+import 'package:flutter/foundation.dart' show listEquals, setEquals;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -166,26 +166,18 @@ class _LogClearToolbarButton extends StatelessWidget {
 }
 
 /// Bidirectionally scrollable selectable flat monospace console rendering filtered diagnostic log rows.
-class _LogConsolePanel extends StatelessWidget {
+class _LogConsolePanel extends ConsumerWidget {
   /// Creates a [_LogConsolePanel].
   const _LogConsolePanel({
     super.key,
-    required this.emptyHint,
     required this.horizontalController,
-    required this.lines,
     required this.onVerticalMetricsChanged,
     required this.onVerticalScroll,
     required this.verticalController,
   });
 
-  /// Plain-text message rendered when [lines] is empty.
-  final String emptyHint;
-
   /// Horizontal scroll controller shared by the console viewport and scrollbar.
   final ScrollController horizontalController;
-
-  /// Filtered diagnostic log rows to display.
-  final List<DiagnosticLogLine> lines;
 
   /// Notification callback observing vertical scroll extent changes.
   final NotificationListenerCallback<ScrollMetricsNotification>
@@ -198,27 +190,42 @@ class _LogConsolePanel extends StatelessWidget {
   final ScrollController verticalController;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
+    final consoleSlice = ref.watch(
+      logViewerProvider.select(_selectLogConsoleSlice),
+    );
+    final emptyHint = consoleSlice.hasEntries
+        ? localizations.emptyFilteredLogHint
+        : localizations.emptyLogHint;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.panel,
-        borderRadius: BorderRadius.circular(tokens.radii.card),
-        border: Border.all(color: colors.line, width: tokens.radii.borderWidth),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(tokens.radii.card),
-        child: lines.isEmpty
-            ? UiBanner(variant: UiBannerVariant.emptyState, message: emptyHint)
-            : _LogConsoleScrollView(
-                horizontalController: horizontalController,
-                lines: lines,
-                onVerticalMetricsChanged: onVerticalMetricsChanged,
-                onVerticalScroll: onVerticalScroll,
-                verticalController: verticalController,
-              ),
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.panel,
+          borderRadius: BorderRadius.circular(tokens.radii.card),
+          border: Border.all(
+            color: colors.line,
+            width: tokens.radii.borderWidth,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(tokens.radii.card),
+          child: consoleSlice.filteredLines.isEmpty
+              ? UiBanner(
+                  variant: UiBannerVariant.emptyState,
+                  message: emptyHint,
+                )
+              : _LogConsoleScrollView(
+                  horizontalController: horizontalController,
+                  lines: consoleSlice.filteredLines,
+                  onVerticalMetricsChanged: onVerticalMetricsChanged,
+                  onVerticalScroll: onVerticalScroll,
+                  verticalController: verticalController,
+                ),
+        ),
       ),
     );
   }
@@ -255,10 +262,17 @@ class _LogConsoleScrollView extends StatefulWidget {
   State<_LogConsoleScrollView> createState() => _LogConsoleScrollViewState();
 }
 
-/// Owns the newline-preserving selection delegate for [_LogConsoleScrollView].
+/// Owns cached text metrics and the newline-preserving selection delegate for [_LogConsoleScrollView].
 class _LogConsoleScrollViewState extends State<_LogConsoleScrollView> {
   final _LogLineSelectionDelegate _selectionDelegate =
       _LogLineSelectionDelegate();
+
+  int _cachedLineCount = -1;
+  List<DiagnosticLogLine>? _cachedLines;
+  double _cachedMeasuredWidth = 0.0;
+  double _cachedRowExtent = 25.0;
+  TextStyle? _cachedStyle;
+  TextScaler? _cachedTextScaler;
 
   @override
   void dispose() {
@@ -272,15 +286,16 @@ class _LogConsoleScrollViewState extends State<_LogConsoleScrollView> {
     final baseStyle = UiTypographyTokens.mono(
       tokens.typography.meta.copyWith(height: 1.5),
     );
-    final textScaler = MediaQuery.textScalerOf(context);
+    final metrics = _resolveMetrics(
+      baseStyle,
+      MediaQuery.textScalerOf(context),
+    );
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final contentWidth = _computeLogContentWidth(
-          lines: widget.lines,
-          style: baseStyle,
-          textScaler: textScaler,
-          viewportWidth: constraints.maxWidth,
+        final contentWidth = math.max(
+          constraints.maxWidth,
+          metrics.measuredWidth,
         );
         return _DualAxisScrollRegion(
           contentWidth: contentWidth,
@@ -292,6 +307,7 @@ class _LogConsoleScrollViewState extends State<_LogConsoleScrollView> {
           child: ListView.builder(
             controller: widget.verticalController,
             padding: const EdgeInsets.all(10.0),
+            itemExtent: metrics.rowExtent,
             itemCount: widget.lines.length,
             itemBuilder: (context, index) => _LogLineRow(
               key: ValueKey<String>('log_line_$index'),
@@ -302,6 +318,62 @@ class _LogConsoleScrollViewState extends State<_LogConsoleScrollView> {
       },
     );
   }
+
+  /// Resolves cached horizontal width and fixed vertical row extent for [style] and [textScaler].
+  ({double measuredWidth, double rowExtent}) _resolveMetrics(
+    TextStyle style,
+    TextScaler textScaler,
+  ) {
+    final lines = widget.lines;
+    if (identical(_cachedLines, lines) &&
+        _cachedLineCount == lines.length &&
+        _cachedStyle == style &&
+        _cachedTextScaler == textScaler) {
+      return (measuredWidth: _cachedMeasuredWidth, rowExtent: _cachedRowExtent);
+    }
+    final measured = _measureLogLineMetrics(
+      lines: lines,
+      style: style,
+      textScaler: textScaler,
+    );
+    _cachedLines = lines;
+    _cachedLineCount = lines.length;
+    _cachedStyle = style;
+    _cachedTextScaler = textScaler;
+    _cachedMeasuredWidth = measured.measuredWidth;
+    _cachedRowExtent = measured.rowExtent;
+    return measured;
+  }
+}
+
+/// Immutable value-equality console slice watched by [_LogConsolePanel].
+@immutable
+class _LogConsoleSlice {
+  /// Creates a [_LogConsoleSlice].
+  const _LogConsoleSlice({
+    required this.hasEntries,
+    required this.filteredLines,
+  });
+
+  /// Filtered diagnostic log entries rendered in the console.
+  final List<DiagnosticLogLine> filteredLines;
+
+  /// Whether at least one entry exists in the unfiltered log buffer.
+  final bool hasEntries;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is _LogConsoleSlice &&
+        other.hasEntries == hasEntries &&
+        (identical(other.filteredLines, filteredLines) ||
+            listEquals(other.filteredLines, filteredLines));
+  }
+
+  @override
+  int get hashCode => Object.hash(hasEntries, Object.hashAll(filteredLines));
 }
 
 /// Unified flat `panel` control card combining session metadata and level/subsystem filters.
@@ -311,7 +383,6 @@ class _LogControlPanel extends StatelessWidget {
     required this.callbacks,
     required this.inlineFilters,
     required this.inlineMetadata,
-    required this.snapshot,
   });
 
   /// Level and subsystem filter callbacks.
@@ -323,9 +394,6 @@ class _LogControlPanel extends StatelessWidget {
   /// Whether metadata header and severity counters render on a single row.
   final bool inlineMetadata;
 
-  /// Live diagnostic log snapshot.
-  final DiagnosticLogSnapshot snapshot;
-
   @override
   Widget build(BuildContext context) {
     return UiCard.standard(
@@ -334,13 +402,8 @@ class _LogControlPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          _LogMetadataStrip(inlineMetadata: inlineMetadata, snapshot: snapshot),
-          _LogFilterRow(
-            callbacks: callbacks,
-            inlineFilters: inlineFilters,
-            minimumLevel: snapshot.minimumLevel,
-            selectedTags: snapshot.selectedTags,
-          ),
+          _LogMetadataStrip(inlineMetadata: inlineMetadata),
+          _LogFilterRow(callbacks: callbacks, inlineFilters: inlineFilters),
         ],
       ),
     );
@@ -395,12 +458,7 @@ class _LogFilterLabel extends StatelessWidget {
 /// Responsive filter grid combining minimum severity select and multi-select subsystem toggles.
 class _LogFilterRow extends StatelessWidget {
   /// Creates a [_LogFilterRow].
-  const _LogFilterRow({
-    required this.callbacks,
-    required this.inlineFilters,
-    required this.minimumLevel,
-    required this.selectedTags,
-  });
+  const _LogFilterRow({required this.callbacks, required this.inlineFilters});
 
   /// Level and subsystem filter callbacks.
   final _LogFilterCallbacks callbacks;
@@ -408,23 +466,13 @@ class _LogFilterRow extends StatelessWidget {
   /// Whether level and subsystem controls render side by side instead of stacked.
   final bool inlineFilters;
 
-  /// Active minimum [LogLevel] filter.
-  final LogLevel minimumLevel;
-
-  /// Active subsystem [LogTag] filter set.
-  final Set<LogTag> selectedTags;
-
   @override
   Widget build(BuildContext context) {
     final levelField = _LogLevelFilterField(
       inlineFilters: inlineFilters,
-      minimumLevel: minimumLevel,
       onLevelChanged: callbacks.onLevelChanged,
     );
-    final subsystemField = _LogSubsystemFilterField(
-      callbacks: callbacks,
-      selectedTags: selectedTags,
-    );
+    final subsystemField = _LogSubsystemFilterField(callbacks: callbacks);
 
     if (inlineFilters) {
       return _LogInlineFilterColumns(
@@ -488,11 +536,10 @@ class _LogInlineFilterColumns extends StatelessWidget {
 }
 
 /// Minimum severity dropdown control with aligned section header for [_LogFilterRow].
-class _LogLevelFilterField extends StatelessWidget {
+class _LogLevelFilterField extends ConsumerWidget {
   /// Creates a [_LogLevelFilterField].
   const _LogLevelFilterField({
     required this.inlineFilters,
-    required this.minimumLevel,
     required this.onLevelChanged,
   });
 
@@ -506,16 +553,16 @@ class _LogLevelFilterField extends StatelessWidget {
   /// Whether this control renders beside [_LogSubsystemFilterField] and matches its header height.
   final bool inlineFilters;
 
-  /// Currently selected minimum log level.
-  final LogLevel minimumLevel;
-
   /// Callback invoked on level selection change.
   final ValueChanged<LogLevel> onLevelChanged;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
+    final minimumLevel = ref.watch(
+      logViewerProvider.select((snapshot) => snapshot.minimumLevel),
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -614,6 +661,7 @@ class _LogLineRowState extends State<_LogLineRow> {
           child: Text(
             widget.line.text,
             softWrap: false,
+            maxLines: 1,
             style: UiTypographyTokens.mono(
               tokens.typography.meta.copyWith(
                 height: 1.5,
@@ -675,19 +723,62 @@ final class _LogLineSelectionDelegate extends StaticSelectionContainerDelegate {
   }
 }
 
+/// Narrow-scoped session metadata summary text inside [_LogMetadataStripContent].
+class _LogMetadataHeaderSummary extends ConsumerWidget {
+  /// Creates a [_LogMetadataHeaderSummary].
+  const _LogMetadataHeaderSummary();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tokens = UiThemeTokens.of(context);
+    final headerSummary = ref.watch(
+      logViewerProvider.select((snapshot) => snapshot.headerSummary),
+    );
+    return SelectableText(
+      headerSummary,
+      style: tokens.typography.monoSmall.copyWith(color: tokens.colors.ink),
+    );
+  }
+}
+
+/// Narrow-scoped severity counter badge text inside [_LogMetadataStripContent].
+class _LogMetadataStatsCounter extends ConsumerWidget {
+  /// Creates a [_LogMetadataStatsCounter].
+  const _LogMetadataStatsCounter();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final tokens = UiThemeTokens.of(context);
+    final counts = ref.watch(
+      logViewerProvider.select(
+        (snapshot) => (
+          totalEntries: snapshot.totalEntries,
+          warningCount: snapshot.warningCount,
+          errorCount: snapshot.errorCount,
+        ),
+      ),
+    );
+    return Text(
+      localizations.logMetadataStats(
+        counts.totalEntries.toString(),
+        counts.warningCount.toString(),
+        counts.errorCount.toString(),
+      ),
+      style: UiTypographyTokens.tabular(
+        tokens.typography.meta.copyWith(color: tokens.colors.muted),
+      ),
+    );
+  }
+}
+
 /// Top metadata band inside [_LogControlPanel] displaying session header and severity counters.
 class _LogMetadataStrip extends StatelessWidget {
   /// Creates a [_LogMetadataStrip].
-  const _LogMetadataStrip({
-    required this.inlineMetadata,
-    required this.snapshot,
-  });
+  const _LogMetadataStrip({required this.inlineMetadata});
 
   /// Whether session header and severity counters render side by side.
   final bool inlineMetadata;
-
-  /// Live diagnostic snapshot carrying [DiagnosticLogSnapshot.headerSummary] and counts.
-  final DiagnosticLogSnapshot snapshot;
 
   @override
   Widget build(BuildContext context) {
@@ -705,10 +796,7 @@ class _LogMetadataStrip extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
-        child: _LogMetadataStripContent(
-          inlineMetadata: inlineMetadata,
-          snapshot: snapshot,
-        ),
+        child: _LogMetadataStripContent(inlineMetadata: inlineMetadata),
       ),
     );
   }
@@ -717,41 +805,21 @@ class _LogMetadataStrip extends StatelessWidget {
 /// Responsive single-row or stacked layout for session summary text and severity counters.
 class _LogMetadataStripContent extends StatelessWidget {
   /// Creates a [_LogMetadataStripContent].
-  const _LogMetadataStripContent({
-    required this.inlineMetadata,
-    required this.snapshot,
-  });
+  const _LogMetadataStripContent({required this.inlineMetadata});
 
   /// Whether summary and counters render horizontally.
   final bool inlineMetadata;
 
-  /// Live diagnostic snapshot.
-  final DiagnosticLogSnapshot snapshot;
-
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final summaryText = SelectableText(
-      snapshot.headerSummary,
-      style: tokens.typography.monoSmall.copyWith(color: tokens.colors.ink),
-    );
-    final statsText = Text(
-      localizations.logMetadataStats(
-        snapshot.totalEntries.toString(),
-        snapshot.warningCount.toString(),
-        snapshot.errorCount.toString(),
-      ),
-      style: UiTypographyTokens.tabular(
-        tokens.typography.meta.copyWith(color: tokens.colors.muted),
-      ),
-    );
+    const summaryText = _LogMetadataHeaderSummary();
+    const statsText = _LogMetadataStatsCounter();
 
     if (inlineMetadata) {
       return Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
-          Expanded(child: summaryText),
+          const Expanded(child: summaryText),
           SizedBox(width: tokens.spacing.space3),
           statsText,
         ],
@@ -767,6 +835,27 @@ class _LogMetadataStripContent extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Immutable value-equality subsystem tag selection slice watched by [_LogSubsystemFilterField].
+@immutable
+class _LogSelectedTagsSlice {
+  /// Creates a [_LogSelectedTagsSlice].
+  const _LogSelectedTagsSlice(this.tags);
+
+  /// Currently selected subsystem tags.
+  final Set<LogTag> tags;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is _LogSelectedTagsSlice && setEquals(other.tags, tags);
+  }
+
+  @override
+  int get hashCode => Object.hashAllUnordered(tags);
 }
 
 /// Stacked narrow/compact filter layout separating level and subsystem cells by a `1px` horizontal hairline.
@@ -856,7 +945,6 @@ class _LogSubsystemBulkActions extends StatelessWidget {
         UiButton(
           key: const ValueKey<String>('log_viewer_subsystem_all'),
           label: localizations.logFilterAllTags,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.sidebarDesktop,
           onPressed: areAllSelected ? null : onSelectAllTags,
         ),
@@ -864,7 +952,6 @@ class _LogSubsystemBulkActions extends StatelessWidget {
         UiButton(
           key: const ValueKey<String>('log_viewer_subsystem_none'),
           label: localizations.logFilterNoTags,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.sidebarDesktop,
           onPressed: isNoneSelected ? null : onClearSelectedTags,
         ),
@@ -874,21 +961,19 @@ class _LogSubsystemBulkActions extends StatelessWidget {
 }
 
 /// Multi-select subsystem toggle group with header count pill and right-aligned `All`/`None` actions.
-class _LogSubsystemFilterField extends StatelessWidget {
+class _LogSubsystemFilterField extends ConsumerWidget {
   /// Creates a [_LogSubsystemFilterField].
-  const _LogSubsystemFilterField({
-    required this.callbacks,
-    required this.selectedTags,
-  });
+  const _LogSubsystemFilterField({required this.callbacks});
 
   /// Subsystem filter mutation callbacks.
   final _LogFilterCallbacks callbacks;
 
-  /// Currently active subsystem tags.
-  final Set<LogTag> selectedTags;
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selectedTags = ref
+        .watch(logViewerProvider.select(_selectLogSelectedTagsSlice))
+        .tags;
+
     return Column(
       key: const ValueKey<String>('log_viewer_subsystem_filter'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -930,7 +1015,6 @@ class _LogSubsystemHeaderRow extends StatelessWidget {
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: _filterHeaderRowMinHeight),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
           Expanded(
             child: Wrap(
@@ -994,20 +1078,14 @@ class _LogSubsystemToggleWrap extends StatelessWidget {
 }
 
 /// Toolbar action cluster (`Upload Log`, `Copy All`, `Copy Filtered`, `Scroll to Top`, `Clear`).
-class _LogToolbarActions extends StatelessWidget {
+class _LogToolbarActions extends ConsumerWidget {
   /// Creates a [_LogToolbarActions].
   const _LogToolbarActions({
-    required this.isUploading,
     required this.onClearLog,
     required this.onCopyAll,
     required this.onCopyFiltered,
     required this.onScrollToTop,
-    required this.onUploadLog,
-    required this.snapshot,
   });
-
-  /// Whether a manual WebDAV log upload is currently in flight.
-  final bool isUploading;
 
   /// Callback clearing buffered diagnostic entries.
   final VoidCallback onClearLog;
@@ -1021,46 +1099,44 @@ class _LogToolbarActions extends StatelessWidget {
   /// Callback jumping vertical console scroll to the topmost entry.
   final VoidCallback onScrollToTop;
 
-  /// Callback uploading the active diagnostic log to WebDAV.
-  final VoidCallback onUploadLog;
-
-  /// Live diagnostic snapshot providing buffer availability and WebDAV sync status.
-  final DiagnosticLogSnapshot snapshot;
-
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final hasFilteredLines = snapshot.filteredLines.isNotEmpty;
+    final availability = ref.watch(
+      logViewerProvider.select(
+        (snapshot) => (
+          canSyncWebDav: snapshot.canSyncWebDav,
+          hasEntries: snapshot.hasEntries,
+          hasFilteredLines: snapshot.filteredLines.isNotEmpty,
+        ),
+      ),
+    );
 
     return Wrap(
       spacing: 8.0,
       runSpacing: 8.0,
       children: <Widget>[
-        if (snapshot.canSyncWebDav)
-          _LogUploadToolbarButton(
-            isUploading: isUploading,
-            onUploadLog: onUploadLog,
-          ),
+        if (availability.canSyncWebDav) const _LogUploadToolbarButton(),
         UiButton(
           key: const ValueKey<String>('log_viewer_copy_button'),
           label: localizations.tooltipCopyLog,
           leadingIcon: Icons.copy_all_outlined,
           density: UiButtonDensity.compact,
-          onPressed: snapshot.hasEntries ? onCopyAll : null,
+          onPressed: availability.hasEntries ? onCopyAll : null,
         ),
         UiButton(
           key: const ValueKey<String>('log_viewer_copy_filtered_button'),
           label: localizations.tooltipCopyFilteredLog,
           leadingIcon: Icons.copy_outlined,
           density: UiButtonDensity.compact,
-          onPressed: hasFilteredLines ? onCopyFiltered : null,
+          onPressed: availability.hasFilteredLines ? onCopyFiltered : null,
         ),
         UiButton(
           key: const ValueKey<String>('log_viewer_scroll_top_button'),
           label: localizations.tooltipScrollToTop,
           leadingIcon: Icons.vertical_align_top_rounded,
           density: UiButtonDensity.compact,
-          onPressed: hasFilteredLines ? onScrollToTop : null,
+          onPressed: availability.hasFilteredLines ? onScrollToTop : null,
         ),
         _LogClearToolbarButton(onClearLog: onClearLog),
       ],
@@ -1068,19 +1144,20 @@ class _LogToolbarActions extends StatelessWidget {
   }
 }
 
-/// WebDAV upload trigger button rendered when remote diagnostic sync is enabled.
-class _LogUploadToolbarButton extends StatelessWidget {
+/// WebDAV upload trigger button managing its own in-flight loading state when remote diagnostic sync is enabled.
+class _LogUploadToolbarButton extends ConsumerStatefulWidget {
   /// Creates a [_LogUploadToolbarButton].
-  const _LogUploadToolbarButton({
-    required this.isUploading,
-    required this.onUploadLog,
-  });
+  const _LogUploadToolbarButton();
 
-  /// Whether a manual WebDAV log upload is currently in flight.
-  final bool isUploading;
+  @override
+  ConsumerState<_LogUploadToolbarButton> createState() =>
+      _LogUploadToolbarButtonState();
+}
 
-  /// Callback uploading the active diagnostic log to WebDAV.
-  final VoidCallback onUploadLog;
+/// Manages manual WebDAV diagnostic log upload progress and feedback toasts for [_LogUploadToolbarButton].
+class _LogUploadToolbarButtonState
+    extends ConsumerState<_LogUploadToolbarButton> {
+  bool _isUploading = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1090,9 +1167,45 @@ class _LogUploadToolbarButton extends StatelessWidget {
       label: localizations.logActionUpload,
       leadingIcon: Icons.cloud_upload_outlined,
       density: UiButtonDensity.compact,
-      isLoading: isUploading,
-      onPressed: isUploading ? null : onUploadLog,
+      isLoading: _isUploading,
+      onPressed: _isUploading ? null : _handleUploadTap,
     );
+  }
+
+  /// Dispatches [_uploadLog] from the synchronous button press handler.
+  void _handleUploadTap() {
+    unawaited(_uploadLog());
+  }
+
+  /// Uploads the active diagnostic log snapshot to WebDAV and announces the outcome.
+  Future<void> _uploadLog() async {
+    if (_isUploading) {
+      return;
+    }
+    final localizations = AppLocalizations.of(context);
+    setState(() => _isUploading = true);
+    try {
+      final result = await ref
+          .read(logViewerProvider.notifier)
+          .syncLogToWebDav();
+      if (!mounted) {
+        return;
+      }
+      final noticeNotifier = ref.read(floatingNoticeProvider.notifier);
+      switch (result) {
+        case LogSyncSucceeded():
+          noticeNotifier.showNotice(
+            localizations.logSyncedSnackBar,
+            tone: FloatingNoticeTone.success,
+          );
+        case LogSyncFailed(:final message):
+          noticeNotifier.showNotice(message, tone: FloatingNoticeTone.danger);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isUploading = false);
+      }
+    }
   }
 }
 
@@ -1104,7 +1217,6 @@ class _LogViewerHeaderSection extends StatelessWidget {
     required this.inlineFilters,
     required this.inlineMetadata,
     required this.inlineToolbar,
-    required this.snapshot,
     required this.toolbar,
     required this.onBack,
   });
@@ -1123,9 +1235,6 @@ class _LogViewerHeaderSection extends StatelessWidget {
 
   /// Back navigation callback returning to Tasks.
   final VoidCallback onBack;
-
-  /// Live diagnostic log snapshot.
-  final DiagnosticLogSnapshot snapshot;
 
   /// Toolbar action cluster widget.
   final Widget toolbar;
@@ -1155,7 +1264,6 @@ class _LogViewerHeaderSection extends StatelessWidget {
           callbacks: filterCallbacks,
           inlineFilters: inlineFilters,
           inlineMetadata: inlineMetadata,
-          snapshot: snapshot,
         ),
         SizedBox(height: tokens.spacing.space3),
       ],
@@ -1170,7 +1278,6 @@ class _LogViewerLayout extends StatelessWidget {
     required this.console,
     required this.filterCallbacks,
     required this.onBack,
-    required this.snapshot,
     required this.toolbar,
   });
 
@@ -1182,9 +1289,6 @@ class _LogViewerLayout extends StatelessWidget {
 
   /// Back navigation callback returning to Tasks.
   final VoidCallback onBack;
-
-  /// Live diagnostic log snapshot.
-  final DiagnosticLogSnapshot snapshot;
 
   /// Toolbar action cluster widget.
   final Widget toolbar;
@@ -1200,7 +1304,6 @@ class _LogViewerLayout extends StatelessWidget {
           inlineFilters: constraints.maxWidth >= _inlineFilterBreakpoint,
           inlineMetadata: constraints.maxWidth >= _inlineMetadataBreakpoint,
           inlineToolbar: constraints.maxWidth >= _inlineToolbarBreakpoint,
-          snapshot: snapshot,
           toolbar: toolbar,
           onBack: onBack,
         );
@@ -1233,18 +1336,20 @@ class _LogViewerLayout extends StatelessWidget {
   }
 }
 
-/// Manages console [ScrollController]s, auto-follow state, and upload busy state for [LogViewerView].
+/// Manages console [ScrollController]s and auto-follow state for [LogViewerView] without watching log appends.
 class _LogViewerViewState extends ConsumerState<LogViewerView> {
-  bool _followEnd = true;
+  late final _LogFilterCallbacks _filterCallbacks;
   final ScrollController _horizontalController = ScrollController();
-  bool _isProgrammaticVerticalScroll = false;
-  bool _isUploading = false;
-  bool _scrollToEndScheduled = false;
   final ScrollController _verticalController = ScrollController();
+
+  bool _followEnd = true;
+  bool _isProgrammaticVerticalScroll = false;
+  bool _scrollToEndScheduled = false;
 
   @override
   void initState() {
     super.initState();
+    _filterCallbacks = _createFilterCallbacks();
     _scheduleScrollToEnd();
   }
 
@@ -1261,33 +1366,23 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
       logViewerProvider,
       _handleSnapshotChanged,
     );
-    final localizations = AppLocalizations.of(context);
     final tokens = UiThemeTokens.of(context);
-    final snapshot = ref.watch(logViewerProvider);
     final viewport = UiBreakpoints.classify(MediaQuery.sizeOf(context).width);
 
     return Padding(
       padding: tokens.spacing.mainContentPadding(viewport),
       child: _LogViewerLayout(
-        snapshot: snapshot,
         onBack: _navigateBackToTasks,
-        filterCallbacks: _createFilterCallbacks(),
+        filterCallbacks: _filterCallbacks,
         toolbar: _LogToolbarActions(
-          isUploading: _isUploading,
           onClearLog: _clearLog,
           onCopyAll: _handleCopyAll,
           onCopyFiltered: _handleCopyFiltered,
           onScrollToTop: _scrollToTop,
-          onUploadLog: _handleUploadLog,
-          snapshot: snapshot,
         ),
         console: _LogConsolePanel(
           key: const ValueKey<String>('log_viewer_console'),
-          emptyHint: snapshot.hasEntries
-              ? localizations.emptyFilteredLogHint
-              : localizations.emptyLogHint,
           horizontalController: _horizontalController,
-          lines: snapshot.filteredLines,
           onVerticalMetricsChanged: _handleVerticalMetricsNotification,
           onVerticalScroll: _handleVerticalScrollNotification,
           verticalController: _verticalController,
@@ -1302,10 +1397,7 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
     ref.read(logViewerProvider.notifier).clearLog();
     ref
         .read(floatingNoticeProvider.notifier)
-        .showNotice(
-          localizations.logClearedSnackBar,
-          tone: FloatingNoticeTone.neutral,
-        );
+        .showNotice(localizations.logClearedSnackBar);
   }
 
   /// Copies the complete diagnostic log text to the system clipboard.
@@ -1389,11 +1481,6 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
     }
   }
 
-  /// Triggers [_uploadLog] safely from synchronous button tap callbacks.
-  void _handleUploadLog() {
-    unawaited(_uploadLog());
-  }
-
   /// Re-anchors the vertical viewport when content or viewport extent changes while following the end.
   bool _handleVerticalMetricsNotification(
     ScrollMetricsNotification notification,
@@ -1475,45 +1562,13 @@ class _LogViewerViewState extends ConsumerState<LogViewerView> {
     }
     _jumpVertical(0.0);
   }
-
-  /// Uploads the active diagnostic log snapshot to WebDAV and announces the outcome.
-  Future<void> _uploadLog() async {
-    if (_isUploading) {
-      return;
-    }
-    final localizations = AppLocalizations.of(context);
-    setState(() => _isUploading = true);
-    try {
-      final result = await ref
-          .read(logViewerProvider.notifier)
-          .syncLogToWebDav();
-      if (!mounted) {
-        return;
-      }
-      final noticeNotifier = ref.read(floatingNoticeProvider.notifier);
-      switch (result) {
-        case LogSyncSucceeded():
-          noticeNotifier.showNotice(
-            localizations.logSyncedSnackBar,
-            tone: FloatingNoticeTone.success,
-          );
-        case LogSyncFailed(:final message):
-          noticeNotifier.showNotice(message, tone: FloatingNoticeTone.danger);
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isUploading = false);
-      }
-    }
-  }
 }
 
-/// Computes pixel width for horizontal scrolling from the longest line in [lines].
-double _computeLogContentWidth({
+/// Computes horizontal scroll width and fixed single-line row extent from [lines].
+({double measuredWidth, double rowExtent}) _measureLogLineMetrics({
   required List<DiagnosticLogLine> lines,
   required TextStyle style,
   required TextScaler textScaler,
-  required double viewportWidth,
 }) {
   var longestLine = '';
   for (final entry in lines) {
@@ -1521,21 +1576,20 @@ double _computeLogContentWidth({
       longestLine = entry.text;
     }
   }
-  if (longestLine.isEmpty) {
-    return viewportWidth;
-  }
+  final sampleText = longestLine.isEmpty ? 'M' : longestLine;
   final painter = TextPainter(
     text: TextSpan(
-      text: longestLine,
+      text: sampleText,
       style: style.copyWith(fontWeight: FontWeight.w700),
     ),
     textDirection: TextDirection.ltr,
     textScaler: textScaler,
     maxLines: 1,
   )..layout();
-  final measuredWidth = painter.width + 44.0;
+  final measuredWidth = longestLine.isEmpty ? 0.0 : painter.width + 44.0;
+  final rowExtent = painter.height.ceilToDouble() + 7.0;
   painter.dispose();
-  return math.max(viewportWidth, measuredWidth);
+  return (measuredWidth: measuredWidth, rowExtent: rowExtent);
 }
 
 /// Returns the minimum body height needed for a flex-expanded console at [availableWidth].
@@ -1560,4 +1614,19 @@ LogLevel? _parseLogLevel(String rawValue) {
     }
   }
   return null;
+}
+
+/// Extracts value-compared console lines and buffer presence from [snapshot].
+_LogConsoleSlice _selectLogConsoleSlice(DiagnosticLogSnapshot snapshot) {
+  return _LogConsoleSlice(
+    hasEntries: snapshot.hasEntries,
+    filteredLines: snapshot.filteredLines,
+  );
+}
+
+/// Extracts value-compared selected subsystem tags from [snapshot].
+_LogSelectedTagsSlice _selectLogSelectedTagsSlice(
+  DiagnosticLogSnapshot snapshot,
+) {
+  return _LogSelectedTagsSlice(snapshot.selectedTags);
 }

@@ -37,13 +37,11 @@ import 'package:tiertask/ui/ui_domain_mappers.dart';
 void main() {
   final englishLocalizations = lookupAppLocalizations(const Locale('en'));
   final germanLocalizations = lookupAppLocalizations(const Locale('de'));
-  final fixedNowUtc = DateTime.utc(2026, 11, 10, 12, 0); // Tuesday
-  final fixedLocalNow = DateTime(2026, 11, 10, 12, 0); // Tuesday
+  final fixedNowUtc = DateTime.utc(2026, 11, 10, 12); // Tuesday
+  final fixedLocalNow = DateTime(2026, 11, 10, 12); // Tuesday
   const utcConfig = WebDavConfig(
     language: AppLanguage.english,
     timeZoneMode: AppTimeZoneMode.manual,
-    manualTimeZoneOffsetMinutes: 0,
-    dueLeadWindow: DueLeadWindow.hours24,
   );
 
   group('TaskCardBadge', () {
@@ -559,11 +557,7 @@ void main() {
         createdAt: fixedNowUtc,
       );
 
-      final normalResult = buildBadges(
-        task,
-        tier: TaskTier.focus,
-        isSearchMode: false,
-      );
+      final normalResult = buildBadges(task, tier: TaskTier.focus);
       expect(normalResult.primary, isEmpty);
       expect(normalResult.visibleSecondary, isEmpty);
       expect(normalResult.overflowCount, equals(0));
@@ -646,7 +640,6 @@ void main() {
           dueAt: withinLeadAt,
           createdAt: fixedNowUtc,
         ),
-        tier: TaskTier.ready,
       );
       expect(
         leadResult.primary,
@@ -825,7 +818,7 @@ void main() {
             dependencies: const <TdfTaskDependency>[
               TdfTaskDependency(taskId: 'prereq0001', requiredCompletion: 2),
               TdfTaskDependency(taskId: 'prereq0002', requiredCompletion: 2),
-              TdfTaskDependency(taskId: 'missing001', requiredCompletion: 1),
+              TdfTaskDependency(taskId: 'missing001'),
             ],
             createdAt: fixedNowUtc,
           ),
@@ -849,7 +842,7 @@ void main() {
             title: 'All prerequisites met',
             dependencies: const <TdfTaskDependency>[
               TdfTaskDependency(taskId: 'prereq0001', requiredCompletion: 2),
-              TdfTaskDependency(taskId: 'prereq0002', requiredCompletion: 1),
+              TdfTaskDependency(taskId: 'prereq0002'),
             ],
             createdAt: fixedNowUtc,
           ),
@@ -961,10 +954,9 @@ void main() {
         TaskItem(
           id: 'task000017',
           title: 'Steps and repeat',
-          subtasksAutoFinish: false,
           subtasks: const <SubtaskItem>[
             SubtaskItem(title: 'Step 1', isCompleted: true),
-            SubtaskItem(title: 'Step 2', isCompleted: false),
+            SubtaskItem(title: 'Step 2'),
           ],
           repeatRule: repeatRule,
           note: '   ',
@@ -996,9 +988,7 @@ void main() {
           id: 'task000018',
           title: 'Auto-finish steps',
           subtasksAutoFinish: true,
-          subtasks: const <SubtaskItem>[
-            SubtaskItem(title: 'Only step', isCompleted: false),
-          ],
+          subtasks: const <SubtaskItem>[SubtaskItem(title: 'Only step')],
           note: 'Important details',
           links: const <TaskLink>[
             TaskLink(title: 'Docs', uri: 'https://example.com'),
@@ -1074,14 +1064,12 @@ void main() {
         isSuspendedForever: true,
         dueAt: fixedNowUtc.subtract(const Duration(hours: 1)),
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'missing001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'missing001'),
         ],
         conditions: <TaskCondition>[
           DayTaskCondition.fromWeekdays(const <int>[DateTime.monday]),
         ],
-        subtasks: const <SubtaskItem>[
-          SubtaskItem(title: 'Step', isCompleted: false),
-        ],
+        subtasks: const <SubtaskItem>[SubtaskItem(title: 'Step')],
         repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
         note: 'Has note',
         links: const <TaskLink>[

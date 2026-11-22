@@ -519,35 +519,37 @@ class _UiSidebarContainer extends StatelessWidget {
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.panel,
-        border: Border(
-          right: BorderSide(
-            color: colors.line,
-            width: tokens.radii.borderWidth,
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.panel,
+          border: Border(
+            right: BorderSide(
+              color: colors.line,
+              width: tokens.radii.borderWidth,
+            ),
           ),
         ),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final minContentHeight = constraints.maxHeight.isFinite
-              ? math.max(0.0, constraints.maxHeight - 28.0)
-              : 0.0;
-          return SingleChildScrollView(
-            controller: scrollController,
-            padding: const EdgeInsets.symmetric(
-              horizontal: 10.0,
-              vertical: 14.0,
-            ),
-            child: _UiSidebarScrollContent(
-              header: header,
-              body: body,
-              footer: footer,
-              minContentHeight: minContentHeight,
-            ),
-          );
-        },
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final minContentHeight = constraints.maxHeight.isFinite
+                ? math.max(0.0, constraints.maxHeight - 28.0)
+                : 0.0;
+            return SingleChildScrollView(
+              controller: scrollController,
+              padding: const EdgeInsets.symmetric(
+                horizontal: 10.0,
+                vertical: 14.0,
+              ),
+              child: _UiSidebarScrollContent(
+                header: header,
+                body: body,
+                footer: footer,
+                minContentHeight: minContentHeight,
+              ),
+            );
+          },
+        ),
       ),
     );
   }
@@ -683,6 +685,7 @@ class _UiMainColumn extends StatelessWidget {
                   bottom: noticeBottom,
                   child: Align(
                     alignment: Alignment.bottomCenter,
+                    heightFactor: 1.0,
                     child: notice,
                   ),
                 ),

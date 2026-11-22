@@ -134,11 +134,7 @@ void main() {
         }
 
         // Desktop: collapsed shows count + dot, header buttons are 26px.
-        await pumpUiWidget(
-          tester,
-          buildHarness(),
-          surfaceSize: const Size(1280, 800),
-        );
+        await pumpUiWidget(tester, buildHarness());
         expect(find.text('2'), findsOneWidget);
         expect(find.text('Work'), findsNothing);
         expect(

@@ -321,7 +321,7 @@ class TdfScanner {
     return cursor + 2;
   }
 
-  /// Scans a double-quoted string token (`"..."`) starting at [start].
+  /// Scans a double-quoted string token (`"..."`) starting at [start], using a zero-buffer substring fast path when no escape occurs.
   static int _scanDoubleQuotedToken(
     String source,
     int start,
@@ -329,8 +329,50 @@ class TdfScanner {
     int line,
     List<TdfScannedToken> tokens,
   ) {
+    final contentStart = start + 1;
+    var cursor = contentStart;
+    while (cursor < lineEnd) {
+      final unit = source.codeUnitAt(cursor);
+      if (unit == 0x22) {
+        final nextCursor = cursor + 1;
+        _validatePostQuoteDelimiter(source, nextCursor, lineEnd, line);
+        tokens.add(
+          TdfScannedToken(
+            value: source.substring(contentStart, cursor),
+            kind: TdfTokenKind.quotedString,
+          ),
+        );
+        return nextCursor;
+      }
+      if (unit == 0x5C) {
+        return _scanEscapedDoubleQuotedToken(
+          source,
+          contentStart,
+          cursor,
+          lineEnd,
+          line,
+          tokens,
+        );
+      }
+      cursor++;
+    }
+    fail(TdfErrorKind.unterminatedString, line, 'Unterminated string.');
+  }
+
+  /// Continues scanning a double-quoted string token from [escapeCursor] after seeding [contentStart]..[escapeCursor] into a [StringBuffer].
+  static int _scanEscapedDoubleQuotedToken(
+    String source,
+    int contentStart,
+    int escapeCursor,
+    int lineEnd,
+    int line,
+    List<TdfScannedToken> tokens,
+  ) {
     final buffer = StringBuffer();
-    var cursor = start + 1;
+    if (escapeCursor > contentStart) {
+      buffer.write(source.substring(contentStart, escapeCursor));
+    }
+    var cursor = escapeCursor;
     while (cursor < lineEnd) {
       if (source.codeUnitAt(cursor) == 0x22) {
         final nextCursor = cursor + 1;

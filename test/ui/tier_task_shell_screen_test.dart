@@ -25,9 +25,14 @@ import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/providers/board_providers.dart';
+import 'package:tiertask/providers/floating_notice_providers.dart';
 import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/sync_providers.dart';
+import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/window_control_repository.dart';
+import 'package:tiertask/ui/layout/ui_adaptive_app_shell.dart';
+import 'package:tiertask/ui/layout/ui_sidebar_section.dart';
 import 'package:tiertask/ui/primitives/ui_app_logo.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/tier_task_shell_screen.dart';
@@ -36,7 +41,7 @@ import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
 import 'test_helpers.dart';
 
 void main() {
-  final fixedNow = DateTime.utc(2026, 11, 10, 12, 0);
+  final fixedNow = DateTime.utc(2026, 11, 10, 12);
 
   TaskBoard createSampleBoard() {
     return TaskBoard.evaluate(
@@ -106,7 +111,6 @@ void main() {
             source: LocationSource.gps,
             placeName: 'Riverdale',
           ),
-          surfaceSize: const Size(1280, 860),
         );
 
         expect(find.byType(UiAppLogo), findsOneWidget);
@@ -160,7 +164,6 @@ void main() {
           tester,
           const TierTaskShellScreen(),
           board: createSampleBoard(),
-          buildProfile: AppBuildProfile.release,
           surfaceSize: const Size(390, 844),
         );
 
@@ -197,7 +200,6 @@ void main() {
           board: createSampleBoard(),
           presetId: 'plum_umber',
           themeMode: ThemeMode.dark,
-          surfaceSize: const Size(1280, 860),
         );
 
         // ArrowRight steps from Focus -> Ready; ArrowLeft steps back to Focus.
@@ -315,7 +317,6 @@ void main() {
             source: LocationSource.gps,
             placeName: 'Riverdale',
           ),
-          surfaceSize: const Size(1280, 860),
         );
 
         final tokens = UiThemePresets.calm.dark;
@@ -490,7 +491,6 @@ void main() {
               username: 'alice',
               password: 'secret',
             ),
-            supportsDesktopWindowControls: true,
             windowControlRepository: fakeWindowControls,
             surfaceSize: size,
           );
@@ -528,9 +528,7 @@ void main() {
           board: createSampleBoard(),
           config: const WebDavConfig(language: AppLanguage.german),
           locale: const Locale('de'),
-          supportsDesktopWindowControls: true,
           windowControlRepository: fakeWindowControls,
-          surfaceSize: const Size(1280, 860),
         );
         expect(
           find.byTooltip('TierTask schließen'),
@@ -593,11 +591,7 @@ void main() {
                 modifiedAt: fixedNow,
               ),
           ],
-          locations: const <TdfLocation>[],
-          queueBlock: TdfQueueBlock(
-            modifiedAt: fixedNow,
-            taskIds: const <String>[],
-          ),
+          queueBlock: TdfQueueBlock(modifiedAt: fixedNow),
           evaluationTime: fixedNow,
           localEvaluationTime: fixedNow,
         );
@@ -681,6 +675,291 @@ void main() {
             );
           }
         }
+      },
+    );
+
+    testWidgets(
+      'isolates root shell from boundary timer and floating notices, scopes sync status rebuilds, and skips collapsed sidebar items',
+      (tester) async {
+        final scopedLabel = TdfLabel(
+          id: 'scoped0001',
+          name: 'Scoped Project',
+          color: '#E91E63',
+          isScoped: true,
+          modifiedAt: fixedNow,
+        );
+        final workLabel = TdfLabel(
+          id: 'work000001',
+          name: 'Work',
+          color: '#2196F3',
+          modifiedAt: fixedNow,
+        );
+        final board = TaskBoard.evaluate(
+          tasks: <TaskItem>[
+            TaskItem(
+              id: 'taskA00001',
+              title: 'Open Focus Task',
+              labelIds: const <String>['work000001'],
+              createdAt: fixedNow,
+              modifiedAt: fixedNow,
+            ),
+            TaskItem(
+              id: 'taskS00002',
+              title: 'Scoped Open Task',
+              labelIds: const <String>['scoped0001'],
+              createdAt: fixedNow,
+              modifiedAt: fixedNow,
+            ),
+            TaskItem(
+              id: 'taskDone03',
+              title: 'Finished Task',
+              isCompleted: true,
+              completedAt: fixedNow,
+              createdAt: fixedNow,
+              modifiedAt: fixedNow,
+            ),
+          ],
+          labels: <TdfLabel>[workLabel, scopedLabel],
+          locations: <TdfLocation>[
+            TdfLocation(
+              id: 'locA000001',
+              name: 'Office',
+              latitude: 47.1204,
+              longitude: 8.5173,
+              radius: 250.0,
+              modifiedAt: fixedNow,
+            ),
+          ],
+          queueBlock: TdfQueueBlock(
+            modifiedAt: fixedNow,
+            taskIds: const <String>['taskA00001', 'taskS00002'],
+          ),
+          evaluationTime: fixedNow,
+          localEvaluationTime: fixedNow,
+        );
+
+        final container = await pumpLeafWidget(
+          tester,
+          const TierTaskShellScreen(),
+          board: board,
+          config: const WebDavConfig(
+            language: AppLanguage.english,
+            storageMode: StorageMode.both,
+            serverUrl: 'https://cloud.example.com',
+            username: 'alice',
+            password: 'secret',
+          ),
+          nowUtc: fixedNow,
+        );
+
+        final boundaryNotifierBefore = container.read(
+          boardBoundaryTimerProvider.notifier,
+        );
+        await tester.pump();
+        expect(
+          identical(
+            container.read(boardBoundaryTimerProvider.notifier),
+            boundaryNotifierBefore,
+          ),
+          isTrue,
+          reason: 'Root shell must keep autoDispose boardBoundaryTimerProvider alive across frames',
+        );
+
+        // 1. Floating notice show/hide must not rebuild UiAdaptiveAppShell.
+        final adaptiveShellBefore = tester.widget<UiAdaptiveAppShell>(
+          find.byType(UiAdaptiveAppShell),
+        );
+        container
+            .read(floatingNoticeProvider.notifier)
+            .showNotice('Task archived.');
+        await tester.pump();
+        expect(find.text('Task archived.'), findsOneWidget);
+        final adaptiveShellAfterShow = tester.widget<UiAdaptiveAppShell>(
+          find.byType(UiAdaptiveAppShell),
+        );
+        expect(
+          identical(adaptiveShellAfterShow, adaptiveShellBefore),
+          isTrue,
+          reason:
+              'Showing a floating notice must not rebuild UiAdaptiveAppShell',
+        );
+
+        container.read(floatingNoticeProvider.notifier).dismiss();
+        await tester.pump();
+        expect(find.text('Task archived.'), findsNothing);
+        final adaptiveShellAfterDismiss = tester.widget<UiAdaptiveAppShell>(
+          find.byType(UiAdaptiveAppShell),
+        );
+        expect(
+          identical(adaptiveShellAfterDismiss, adaptiveShellBefore),
+          isTrue,
+          reason: 'Dismissing a floating notice must not rebuild UiAdaptiveAppShell',
+        );
+
+        // 2. Boundary timer state changes must not rebuild TierTaskShellScreen root.
+        final popScopeBefore = tester.widget<PopScope<void>>(
+          find.byType(PopScope<void>),
+        );
+        await container
+            .read(taskNotifierProvider.notifier)
+            .addTask(
+              'Scheduled deadline task',
+              dueAt: fixedNow.add(const Duration(hours: 2)),
+            );
+        await tester.pump();
+        final popScopeAfter = tester.widget<PopScope<void>>(
+          find.byType(PopScope<void>),
+        );
+        expect(
+          identical(popScopeAfter, popScopeBefore),
+          isTrue,
+          reason:
+              'Updating boardBoundaryTimerProvider must not rebuild root shell',
+        );
+
+        // 3. Unchanged sync status with a new lastSyncedAt must not rebuild _ChromeSyncButton.
+        final syncButtonBefore = tester.widget<UiButton>(
+          find.byKey(const ValueKey<String>('chrome_sync_button')),
+        );
+        container
+            .read(syncStateProvider.notifier)
+            .setSuccess(fixedNow.add(const Duration(minutes: 5)));
+        await tester.pump();
+        final syncButtonAfter = tester.widget<UiButton>(
+          find.byKey(const ValueKey<String>('chrome_sync_button')),
+        );
+        expect(
+          identical(syncButtonAfter, syncButtonBefore),
+          isTrue,
+          reason: 'Updating lastSyncedAt without changing SyncStatusKind must not rebuild chrome sync button',
+        );
+
+        // 4. All Tasks count matches global open tasks in O(1) (Focus..Someday: 2 open tasks, excluding scoped and completed).
+        final allTasksRow = find.byKey(
+          const ValueKey<String>('label_all_tasks'),
+        );
+        expect(
+          find.descendant(of: allTasksRow, matching: find.text('2')),
+          findsOneWidget,
+          reason: 'All Tasks sidebar count must equal global open tasks across Focus..Someday',
+        );
+
+        // 5. Collapsing Labels and Locations skips allocating sidebar nav items while preserving collapsed summaries.
+        final shellNotifier = container.read(shellProvider.notifier);
+        shellNotifier.selectLabelFilter('work000001');
+        shellNotifier.toggleSidebarLabelsCollapsed();
+        shellNotifier.toggleSidebarLocationsCollapsed();
+        await tester.pump();
+
+        final sidebarSections = tester
+            .widgetList<UiSidebarSection>(find.byType(UiSidebarSection))
+            .toList(growable: false);
+        final labelsSection = sidebarSections.firstWhere(
+          (section) => section.title == 'Labels',
+        );
+        final locationsSection = sidebarSections.firstWhere(
+          (section) => section.title == 'Locations',
+        );
+        expect(
+          labelsSection.items,
+          isEmpty,
+          reason:
+              'Collapsed Labels sidebar section must not allocate nav items',
+        );
+        expect(
+          labelsSection.collapsedCountLabel,
+          equals('2'),
+          reason: 'Collapsed Labels section must preserve label count summary',
+        );
+        expect(
+          labelsSection.collapsedActiveColorDot,
+          equals(const Color(0xFF2196F3)),
+          reason:
+              'Collapsed Labels section must preserve active label color dot',
+        );
+        expect(
+          locationsSection.items,
+          isEmpty,
+          reason:
+              'Collapsed Locations sidebar section must not allocate nav items',
+        );
+        expect(
+          locationsSection.collapsedCountLabel,
+          equals('1'),
+          reason: 'Collapsed Locations section must preserve location count summary',
+        );
+      },
+    );
+
+    testWidgets(
+      'brand button and compact active-filter button avoid raw Material InkWell and support hover, keyboard focus ring, and tap',
+      (tester) async {
+        final previousStrategy = FocusManager.instance.highlightStrategy;
+        FocusManager.instance.highlightStrategy =
+            FocusHighlightStrategy.alwaysTraditional;
+        addTearDown(() {
+          FocusManager.instance.highlightStrategy = previousStrategy;
+        });
+
+        final board = TaskBoard.evaluate(
+          tasks: const <TaskItem>[],
+          labels: const <TdfLabel>[
+            TdfLabel(id: 'work000001', name: 'Work', color: '#2196F3'),
+          ],
+        );
+
+        final container = await pumpLeafWidget(
+          tester,
+          const TierTaskShellScreen(),
+          board: board,
+        );
+
+        final brandFinder = find.byKey(
+          const ValueKey<String>('chrome_brand_button'),
+        );
+        expect(brandFinder, findsOneWidget);
+        expect(
+          find.descendant(of: brandFinder, matching: find.byType(InkWell)),
+          findsNothing,
+          reason: 'Shell brand button must not use raw Material InkWell',
+        );
+
+        // Navigate away and verify brand button returns to Tasks view on tap.
+        container.read(shellProvider.notifier).openView(ShellView.settings);
+        await tester.pumpAndSettle();
+        await tester.tap(brandFinder);
+        await tester.pumpAndSettle();
+        expect(container.read(shellProvider).view, equals(ShellView.tasks));
+
+        // Switch to compact viewport with active label filter and inspect mobile_active_filter_button.
+        await tester.binding.setSurfaceSize(const Size(390, 844));
+        container.read(shellProvider.notifier).selectLabelFilter('work000001');
+        await tester.pumpAndSettle();
+
+        final mobileFilterFinder = find.byKey(
+          const ValueKey<String>('mobile_active_filter_button'),
+        );
+        expect(mobileFilterFinder, findsOneWidget);
+        expect(
+          find.descendant(
+            of: mobileFilterFinder,
+            matching: find.byType(InkWell),
+          ),
+          findsNothing,
+          reason:
+              'Mobile active-filter button must not use raw Material InkWell',
+        );
+        expect(
+          find.descendant(
+            of: mobileFilterFinder,
+            matching: find.byType(FocusableActionDetector),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.tap(mobileFilterFinder);
+        await tester.pumpAndSettle();
+        expect(container.read(shellProvider).activeLabelId, isNull);
       },
     );
   });

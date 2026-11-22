@@ -32,18 +32,52 @@ final localFileWatchDebounceProvider = Provider<Duration>(
 
 /// Resolves the scoped [LocalFileWatchTarget] for the active workspace and storage configuration.
 final localFileWatchTargetProvider = Provider<LocalFileWatchTarget>((ref) {
-  final workspace = ref.watch(activeWorkspaceProvider).asData?.value;
-  final config =
-      ref.watch(webDavConfigProvider).asData?.value ?? workspace?.config;
+  final workspaceSlice = ref.watch(
+    activeWorkspaceProvider.select((asyncWorkspace) {
+      final workspace = asyncWorkspace.asData?.value;
+      if (workspace == null) {
+        return null;
+      }
+      final config = workspace.config;
+      return (
+        id: workspace.id,
+        storageMode: config.storageMode,
+        localFilePath: config.localFilePath,
+        localWatchEnabled: config.localWatchEnabled,
+        isLocalConfigured: config.isLocalConfigured,
+      );
+    }),
+  );
+  final configSlice = ref.watch(
+    webDavConfigProvider.select((asyncConfig) {
+      final config = asyncConfig.asData?.value;
+      if (config == null) {
+        return null;
+      }
+      return (
+        storageMode: config.storageMode,
+        localFilePath: config.localFilePath,
+        localWatchEnabled: config.localWatchEnabled,
+        isLocalConfigured: config.isLocalConfigured,
+      );
+    }),
+  );
   final localRepo = ref.watch(localFileRepositoryProvider);
-  final resolvedLocalWatchEnabled = workspace != null && config != null
-      ? config.localWatchEnabled
+  final effectiveStorageMode =
+      configSlice?.storageMode ?? workspaceSlice?.storageMode;
+  final effectiveLocalWatchEnabled =
+      configSlice?.localWatchEnabled ?? workspaceSlice?.localWatchEnabled;
+  final effectiveIsLocalConfigured =
+      configSlice?.isLocalConfigured ?? workspaceSlice?.isLocalConfigured;
+  final hasLoadedConfig = configSlice != null || workspaceSlice != null;
+  final resolvedLocalWatchEnabled = workspaceSlice != null && hasLoadedConfig
+      ? effectiveLocalWatchEnabled
       : null;
   final usesConfiguredLocal =
       resolvedLocalWatchEnabled == true &&
-      config != null &&
-      config.storageMode.usesLocal &&
-      config.isLocalConfigured &&
+      effectiveStorageMode != null &&
+      effectiveStorageMode.usesLocal &&
+      effectiveIsLocalConfigured == true &&
       localRepo.canWatchDirectory;
   final filePath = usesConfiguredLocal ? localRepo.tryResolveFilePath() : null;
   final directoryPath = usesConfiguredLocal
@@ -55,7 +89,7 @@ final localFileWatchTargetProvider = Provider<LocalFileWatchTarget>((ref) {
   final enabled =
       usesConfiguredLocal && directoryPath != null && fileName != null;
   return LocalFileWatchTarget(
-    workspaceId: workspace?.id ?? AppWorkspace.defaultId,
+    workspaceId: workspaceSlice?.id ?? AppWorkspace.defaultId,
     directoryPath: directoryPath,
     fileName: fileName,
     enabled: enabled,
@@ -164,9 +198,15 @@ class LocalFileWatcherNotifier extends Notifier<void> {
         .listen(
           (_) => _scheduleReconcile(generation, debounce),
           onError: (_) {
+            if (generation != _watchGeneration) {
+              return;
+            }
             _streamClosed = true;
           },
           onDone: () {
+            if (generation != _watchGeneration) {
+              return;
+            }
             _streamClosed = true;
           },
         );
@@ -174,6 +214,7 @@ class LocalFileWatcherNotifier extends Notifier<void> {
 
   /// Cancels active timers, lifecycle listeners, and filesystem watch subscriptions.
   void _disposeResources() {
+    _watchGeneration++;
     _debounceTimer?.cancel();
     _debounceTimer = null;
     _lifecycleListener?.dispose();

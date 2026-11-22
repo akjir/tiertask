@@ -43,6 +43,23 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
+  if(MSVC)
+    target_compile_options(${TARGET} PRIVATE
+      /GS
+      "$<$<NOT:$<CONFIG:Debug>>:/guard:cf>"
+    )
+    get_target_property(_target_type ${TARGET} TYPE)
+    if(_target_type STREQUAL "EXECUTABLE" OR _target_type STREQUAL "SHARED_LIBRARY")
+      target_link_options(${TARGET} PRIVATE
+        /DYNAMICBASE
+        /NXCOMPAT
+        "$<$<NOT:$<CONFIG:Debug>>:/GUARD:CF>"
+      )
+      if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        target_link_options(${TARGET} PRIVATE /HIGHENTROPYVA)
+      endif()
+    endif()
+  endif()
 endfunction()
 
 # Flutter library and tool build rules.

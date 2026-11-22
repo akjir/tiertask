@@ -44,16 +44,6 @@ enum AppBuildProfile {
   /// Whether this profile is the isolated development profile.
   bool get isDev => this == AppBuildProfile.dev;
 
-  /// Legacy encrypted storage key for pre-0.4.0 `TTW\x02` settings migration (`t2_settings_v1` or `t2_dev_settings_v1`).
-  @Deprecated(
-    'Legacy TTW\\x02 secure-storage settings key for pre-0.4.0 migration. '
-    'Scheduled for removal in 0.5.0.',
-  )
-  String get legacySettingsStorageKey => switch (this) {
-    AppBuildProfile.release => 't2_settings_v1',
-    AppBuildProfile.dev => 't2_dev_settings_v1',
-  };
-
   /// Encrypted storage key prefix for per-workspace sync baselines (`t2_sync_v1_` or `t2_dev_sync_v1_`).
   String get syncStorageKeyPrefix => switch (this) {
     AppBuildProfile.release => 't2_sync_v1_',

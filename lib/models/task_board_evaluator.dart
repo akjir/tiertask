@@ -256,7 +256,6 @@ class TaskBoardEvaluator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-      pruneExpiredCompleted: false,
     );
   }
 
@@ -348,6 +347,64 @@ class TaskBoardEvaluator {
     return visited;
   }
 
+  /// Counts total canonical blocks (`task`, `label`, `location`, `deleted`, `queue`, `subtasks`, `condition`) for `MAX_BLOCKS_PER_DOC`.
+  static int computeCanonicalBlockCount({
+    required List<TaskItem> tasks,
+    required List<TdfLabel> labels,
+    required List<TdfLocation> locations,
+    required TdfDeletedBlock? deletedBlock,
+    required TdfQueueBlock? queueBlock,
+  }) {
+    var total = tasks.length + labels.length + locations.length;
+    if (deletedBlock != null && !deletedBlock.isDefaultEmpty) {
+      total++;
+    }
+    if (queueBlock != null && !queueBlock.isDefaultEmpty) {
+      total++;
+    }
+    for (final label in labels) {
+      total += computeConditionRuleAndBlockCounts(label.conditions).subBlocks;
+    }
+    for (final task in tasks) {
+      if (task.subtasks.isNotEmpty) {
+        total++;
+      }
+      total += computeConditionRuleAndBlockCounts(task.conditions).subBlocks;
+    }
+    return total;
+  }
+
+  /// Computes canonical condition statement count and emitted `condition { ... }` sub-block count (`0` or `1`).
+  static ({int ruleStatements, int subBlocks})
+  computeConditionRuleAndBlockCounts(List<TaskCondition> conditions) {
+    if (conditions.isEmpty) {
+      return (ruleStatements: 0, subBlocks: 0);
+    }
+    var state = (
+      globalAny: false,
+      dayReset: false,
+      timeReset: false,
+      locReset: false,
+      dayCount: 0,
+      timeCount: 0,
+      hasLocIds: false,
+    );
+    for (final rule in conditions) {
+      state = _accumulateConditionRuleCounts(rule, state);
+    }
+    if (state.globalAny) {
+      return (ruleStatements: 1, subBlocks: 0);
+    }
+    final canonicalRuleCount =
+        (state.dayReset ? 1 : state.dayCount) +
+        (state.timeReset ? 1 : state.timeCount) +
+        (state.locReset ? 1 : (state.hasLocIds ? 1 : 0));
+    return (
+      ruleStatements: canonicalRuleCount,
+      subBlocks: canonicalRuleCount >= 2 ? 1 : 0,
+    );
+  }
+
   /// Derives the 6 operational tiers from [tasks] in a single $O(N)$ pass per `TDF_SPEC.md` Section 5.
   static NormalizedTierSlices evaluate({
     required Iterable<TaskItem> tasks,
@@ -404,13 +461,17 @@ class TaskBoardEvaluator {
       } else if (isRestrictedFromGlobalView(task, labelMap)) {
         scopedHiddenList.add(
           isDone
-              ? task.copyWith(isCompleted: true)
-              : task.copyWith(isCompleted: false, clearCompletedAt: true),
+              ? (task.isCompleted ? task : task.copyWith(isCompleted: true))
+              : ((task.isCompleted || task.completedAt != null)
+                    ? task.copyWith(isCompleted: false, clearCompletedAt: true)
+                    : task),
         );
         continue;
       }
       if (isDone) {
-        completedList.add(task.copyWith(isCompleted: true));
+        completedList.add(
+          task.isCompleted ? task : task.copyWith(isCompleted: true),
+        );
         continue;
       }
       if (!queuedTaskIds.contains(task.id)) {
@@ -436,9 +497,9 @@ class TaskBoardEvaluator {
       }
     }
 
-    final resolvedDeletedBlock = pruned.prunedRecords.fold(
+    final resolvedDeletedBlock = recordTaskDeletions(
       deletedBlock ?? TdfDeletedBlock.empty,
-      recordTaskDeletion,
+      pruned.prunedRecords,
     );
     final orderedEligible = _orderEligibleByQueue(
       eligibleById,
@@ -466,6 +527,7 @@ class TaskBoardEvaluator {
         normalized,
         nowUtc: now,
         taskMap: taskMap,
+        locationMap: locationMap,
         activeLabelId: activeLabelId,
         currentLatitude: currentLatitude,
         currentLongitude: currentLongitude,
@@ -474,7 +536,33 @@ class TaskBoardEvaluator {
     return normalized;
   }
 
-  /// Formats a raw domain [action] into a canonical `<event> | <key=value ...>` message.
+  /// Finds the first directed dependency cycle edge in [taskMap], or returns `null` when the graph is acyclic.
+  ///
+  /// Traverses nodes in [traversalOrder] (or `taskMap.keys` when omitted) using 3-color DFS (`0 = unvisited`, `1 = visiting`, `2 = visited`).
+  static ({String startTaskId, String taskId, String dependencyTaskId})?
+  findDependencyCycle(
+    Map<String, TaskItem> taskMap, {
+    Iterable<String>? traversalOrder,
+  }) {
+    final visitState = <String, int>{};
+    for (final startId in traversalOrder ?? taskMap.keys) {
+      if ((visitState[startId] ?? 0) != 0) {
+        continue;
+      }
+      final cycle = _visitDependencyCycleDfs(
+        startId,
+        startId,
+        taskMap,
+        visitState,
+      );
+      if (cycle != null) {
+        return cycle;
+      }
+    }
+    return null;
+  }
+
+  /// Formats a canonical domain [action] into a `<event> | <key=value ...>` message.
   static String formatDomainMutationMessage(
     String action, {
     required int focus,
@@ -486,13 +574,12 @@ class TaskBoardEvaluator {
   }) {
     final trimmed = action.trim();
     final spaceIndex = trimmed.indexOf(' ');
-    final rawVerb = spaceIndex >= 0
+    final eventName = spaceIndex >= 0
         ? trimmed.substring(0, spaceIndex)
         : trimmed;
     final details = spaceIndex >= 0
         ? trimmed.substring(spaceIndex + 1).trim()
         : '';
-    final eventName = _mapDomainVerb(rawVerb);
     final tiersSuffix =
         'focus=$focus ready=$ready planned=$planned '
         'blocked=$blocked someday=$someday completed=$completed';
@@ -501,6 +588,10 @@ class TaskBoardEvaluator {
     }
     return '$eventName | $details $tiersSuffix';
   }
+
+  /// Returns whether [taskMap] contains any directed dependency cycle (including self-dependencies).
+  static bool hasDependencyCycle(Map<String, TaskItem> taskMap) =>
+      findDependencyCycle(taskMap) != null;
 
   /// Returns whether [targetTaskId] is reachable from [startTaskId] via `blockedByTaskIds` edges in [taskMap].
   static bool isReachableInDependencyGraph({
@@ -592,31 +683,30 @@ class TaskBoardEvaluator {
     final nextFocus = _normalizeOpenSlice(focus);
     final nextReady = _normalizeOpenSlice(ready);
     final nextPlanned = _normalizeOpenSlice(planned);
-    final labelIdsWithConditions = <String>{
-      for (final label in labels)
-        if (label.conditions.isNotEmpty) label.id,
-    };
+    final labelIdsWithConditions = explicitQueueBlock == null
+        ? <String>{
+            for (final label in labels)
+              if (label.conditions.isNotEmpty) label.id,
+          }
+        : const <String>{};
     final nextBlocked = <TaskItem>[
       for (final task in blocked)
-        task.copyWith(
-          isCompleted: false,
-          clearCompletedAt: true,
-          isSuspendedForever:
-              task.isSuspendedForever ||
-              (explicitQueueBlock == null &&
-                  task.blockedByTaskIds.isEmpty &&
-                  task.conditions.isEmpty &&
-                  !task.labelIds.any(labelIdsWithConditions.contains) &&
-                  task.suspendedAt == null),
+        _normalizeBlockedTask(
+          task,
+          hasExplicitQueue: explicitQueueBlock != null,
+          labelIdsWithConditions: labelIdsWithConditions,
         ),
     ];
     final nextSomeday = <TaskItem>[
       for (final task in someday)
-        task.copyWith(
-          isCompleted: false,
-          clearCompletedAt: true,
-          isPriority: explicitQueueBlock != null ? task.isPriority : false,
+        _normalizeSomedayTask(
+          task,
+          hasExplicitQueue: explicitQueueBlock != null,
         ),
+    ];
+    final nextCompleted = <TaskItem>[
+      for (final task in completed)
+        task.isCompleted ? task : task.copyWith(isCompleted: true),
     ];
     final openTasks = <TaskItem>[
       ...nextFocus,
@@ -633,9 +723,7 @@ class TaskBoardEvaluator {
       planned: nextPlanned,
       blocked: nextBlocked,
       someday: nextSomeday,
-      completed: completed
-          .map((task) => task.copyWith(isCompleted: true))
-          .toList(),
+      completed: nextCompleted,
       scopedHidden: scopedHidden,
       labels: labels,
       locations: locations,
@@ -692,10 +780,7 @@ class TaskBoardEvaluator {
         'pruned': prunedRecords.length,
       },
     );
-    final nextDeleted = prunedRecords.fold(
-      board.deletedBlock,
-      recordTaskDeletion,
-    );
+    final nextDeleted = recordTaskDeletions(board.deletedBlock, prunedRecords);
     final nextScopedHidden = <TaskItem>[
       for (final task in retainedScopedHidden)
         (task.isCompleted || task.completedAt != null)
@@ -783,6 +868,48 @@ class TaskBoardEvaluator {
       );
     }
     return current.copyWith(tasks: [...current.tasks, record]);
+  }
+
+  /// Records a batch of task deletion [records] into [current] in a single sort pass while enforcing [maxTdfDeletedRecords].
+  static TdfDeletedBlock recordTaskDeletions(
+    TdfDeletedBlock current,
+    Iterable<TdfDeletedTaskRecord> records,
+  ) {
+    final incoming = records is List<TdfDeletedTaskRecord>
+        ? records
+        : records.toList();
+    if (incoming.isEmpty) {
+      return current;
+    }
+    if (current.totalRecords >= maxTdfDeletedRecords) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Deleted block exceeds maximum of $maxTdfDeletedRecords records.',
+      );
+    }
+    if (current.totalRecords + incoming.length > maxTdfDeletedRecords) {
+      final remainingTaskBudget =
+          maxTdfDeletedRecords -
+          current.labels.length -
+          current.locations.length;
+      if (_exceedsProjectedDeletedTaskLimit(
+        current,
+        incoming,
+        remainingTaskBudget,
+      )) {
+        throw const TdfException(
+          kind: TdfErrorKind.limitExceeded,
+          line: 1,
+          message:
+              'Deleted block exceeds maximum of $maxTdfDeletedRecords records.',
+        );
+      }
+    }
+    return current.copyWith(
+      tasks: <TdfDeletedTaskRecord>[...current.tasks, ...incoming],
+    );
   }
 
   /// Re-evaluates [board] with optional [tasks], [labels], [locations], [deletedBlock], and [queueBlock] overrides.
@@ -876,6 +1003,98 @@ class TaskBoardEvaluator {
           targetTaskId: targetId,
           taskMap: {for (final task in board.allTasks) task.id: task},
         );
+  }
+
+  /// Accumulates a single [rule] into canonical condition group counters for [computeConditionRuleAndBlockCounts].
+  static ({
+    bool globalAny,
+    bool dayReset,
+    bool timeReset,
+    bool locReset,
+    int dayCount,
+    int timeCount,
+    bool hasLocIds,
+  })
+  _accumulateConditionRuleCounts(
+    TaskCondition rule,
+    ({
+      bool globalAny,
+      bool dayReset,
+      bool timeReset,
+      bool locReset,
+      int dayCount,
+      int timeCount,
+      bool hasLocIds,
+    })
+    state,
+  ) {
+    return switch (rule) {
+      GlobalResetTaskCondition() => (
+        globalAny: true,
+        dayReset: state.dayReset,
+        timeReset: state.timeReset,
+        locReset: state.locReset,
+        dayCount: state.dayCount,
+        timeCount: state.timeCount,
+        hasLocIds: state.hasLocIds,
+      ),
+      GroupResetTaskCondition(:final targetGroup) => switch (targetGroup) {
+        ConditionGroup.day => (
+          globalAny: state.globalAny,
+          dayReset: true,
+          timeReset: state.timeReset,
+          locReset: state.locReset,
+          dayCount: state.dayCount,
+          timeCount: state.timeCount,
+          hasLocIds: state.hasLocIds,
+        ),
+        ConditionGroup.time => (
+          globalAny: state.globalAny,
+          dayReset: state.dayReset,
+          timeReset: true,
+          locReset: state.locReset,
+          dayCount: state.dayCount,
+          timeCount: state.timeCount,
+          hasLocIds: state.hasLocIds,
+        ),
+        ConditionGroup.location => (
+          globalAny: state.globalAny,
+          dayReset: state.dayReset,
+          timeReset: state.timeReset,
+          locReset: true,
+          dayCount: state.dayCount,
+          timeCount: state.timeCount,
+          hasLocIds: state.hasLocIds,
+        ),
+      },
+      DayTaskCondition() => (
+        globalAny: state.globalAny,
+        dayReset: state.dayReset,
+        timeReset: state.timeReset,
+        locReset: state.locReset,
+        dayCount: state.dayCount + 1,
+        timeCount: state.timeCount,
+        hasLocIds: state.hasLocIds,
+      ),
+      TimeWindowTaskCondition() => (
+        globalAny: state.globalAny,
+        dayReset: state.dayReset,
+        timeReset: state.timeReset,
+        locReset: state.locReset,
+        dayCount: state.dayCount,
+        timeCount: state.timeCount + 1,
+        hasLocIds: state.hasLocIds,
+      ),
+      LocationTaskCondition() => (
+        globalAny: state.globalAny,
+        dayReset: state.dayReset,
+        timeReset: state.timeReset,
+        locReset: state.locReset,
+        dayCount: state.dayCount,
+        timeCount: state.timeCount,
+        hasLocIds: state.hasLocIds || rule.locationIds.isNotEmpty,
+      ),
+    };
   }
 
   /// Cleans expired finite `suspended` and resolved `blocked` directives on a single [task] at [normalizedNow].
@@ -1104,6 +1323,28 @@ class TaskBoardEvaluator {
     );
   }
 
+  /// Returns whether merging [incoming] into [current] would exceed [maxTasks] unique task tombstones.
+  static bool _exceedsProjectedDeletedTaskLimit(
+    TdfDeletedBlock current,
+    List<TdfDeletedTaskRecord> incoming,
+    int maxTasks,
+  ) {
+    var totalUnique = current.tasks.length;
+    final seenIncoming = <String>{};
+    for (final record in incoming) {
+      if (current.findTaskRecord(record.taskId) != null) {
+        continue;
+      }
+      if (seenIncoming.add(record.taskId)) {
+        totalUnique++;
+        if (totalUnique > maxTasks) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   /// Filters out resolved or tombstoned dependencies from [task], returning `null` if no entry was removed.
   static List<TdfTaskDependency>? _filterUnresolvedDependencies(
     TaskItem task,
@@ -1208,6 +1449,7 @@ class TaskBoardEvaluator {
     NormalizedTierSlices slices, {
     required DateTime nowUtc,
     required Map<String, TaskItem> taskMap,
+    required Map<String, TdfLocation> locationMap,
     required String? activeLabelId,
     required double? currentLatitude,
     required double? currentLongitude,
@@ -1227,6 +1469,7 @@ class TaskBoardEvaluator {
           task,
           nowUtc: nowUtc,
           taskMap: taskMap,
+          locationMap: locationMap,
           currentLatitude: currentLatitude,
           currentLongitude: currentLongitude,
         ),
@@ -1252,6 +1495,7 @@ class TaskBoardEvaluator {
     TaskItem task, {
     required DateTime nowUtc,
     required Map<String, TaskItem> taskMap,
+    required Map<String, TdfLocation> locationMap,
     required double? currentLatitude,
     required double? currentLongitude,
   }) {
@@ -1260,59 +1504,26 @@ class TaskBoardEvaluator {
     final reason = hasDeferral
         ? 'deferral'
         : (!depsOk ? 'dependency' : 'condition');
-    int? distanceMeters;
-    int? radiusMeters;
-    if (reason == 'condition' &&
-        currentLatitude != null &&
-        currentLongitude != null) {
-      for (final rule in task.conditions) {
-        if (rule is LocationTaskCondition) {
-          distanceMeters = LocationTaskCondition.haversineDistanceMeters(
-            currentLatitude,
-            currentLongitude,
-            rule.latitude,
-            rule.longitude,
-          ).round();
-          radiusMeters = rule.radiusMeters.round();
-          break;
-        }
-      }
-    }
+    final locationMetrics =
+        reason == 'condition' &&
+            currentLatitude != null &&
+            currentLongitude != null
+        ? _resolveNearestBlockedLocationMetrics(
+            task.conditions,
+            locationMap: locationMap,
+            currentLatitude: currentLatitude,
+            currentLongitude: currentLongitude,
+          )
+        : (distanceMeters: null, radiusMeters: null);
     return (
       event: 'eval.blocked',
       fields: <String, Object?>{
         'id': task.id,
         'reason': reason,
-        'distance_m': distanceMeters,
-        'radius_m': radiusMeters,
+        'distance_m': locationMetrics.distanceMeters,
+        'radius_m': locationMetrics.radiusMeters,
       },
     );
-  }
-
-  /// Maps a legacy domain mutation verb to its canonical `<domain>.<verb>` event name.
-  static String _mapDomainVerb(String rawVerb) {
-    if (rawVerb.startsWith('completeTask')) return 'task.complete';
-    return switch (rawVerb) {
-      'addTask' => 'task.add',
-      'updateTask' => 'task.update',
-      'restoreTask' => 'task.restore',
-      'deleteTask' => 'task.delete',
-      'downgradeTask' => 'task.downgrade',
-      'scheduleTask' => 'task.schedule',
-      'blockTask' => 'task.block',
-      'moveTaskInQueue' => 'task.move_queue',
-      'toggleSubtask' => 'task.toggle_subtask',
-      'addTaskHistoryEntry' => 'task.history_add',
-      'updateTaskHistoryEntry' => 'task.history_update',
-      'removeTaskHistoryEntry' => 'task.history_remove',
-      'addLabel' => 'label.add',
-      'updateLabel' => 'label.update',
-      'deleteLabel' => 'label.delete',
-      'addLocation' => 'location.add',
-      'updateLocation' => 'location.update',
-      'deleteLocation' => 'location.delete',
-      _ => rawVerb,
-    };
   }
 
   /// Advances `modifiedAt` once for block cleanup at [normalizedNow], throwing [TdfException] on `9999` overflow.
@@ -1324,6 +1535,31 @@ class TaskBoardEvaluator {
     previousEffectiveModifiedAt,
   );
 
+  /// Normalizes a blocked-tier [task] without copying when its fields already match Tier 4 invariants.
+  static TaskItem _normalizeBlockedTask(
+    TaskItem task, {
+    required bool hasExplicitQueue,
+    required Set<String> labelIdsWithConditions,
+  }) {
+    final shouldForceSuspended =
+        !hasExplicitQueue &&
+        !task.isSuspendedForever &&
+        task.blockedByTaskIds.isEmpty &&
+        task.conditions.isEmpty &&
+        !task.labelIds.any(labelIdsWithConditions.contains) &&
+        task.suspendedAt == null;
+    if (!task.isCompleted &&
+        task.completedAt == null &&
+        !shouldForceSuspended) {
+      return task;
+    }
+    return task.copyWith(
+      isCompleted: false,
+      clearCompletedAt: true,
+      isSuspendedForever: task.isSuspendedForever || shouldForceSuspended,
+    );
+  }
+
   /// Normalizes open tasks in [slice] so `isCompleted` and `completedAt` are cleared.
   static List<TaskItem> _normalizeOpenSlice(List<TaskItem> slice) => [
     for (final task in slice)
@@ -1331,6 +1567,22 @@ class TaskBoardEvaluator {
           ? task.copyWith(isCompleted: false, clearCompletedAt: true)
           : task,
   ];
+
+  /// Normalizes a someday-tier [task] without copying when its fields already match Tier 5 invariants.
+  static TaskItem _normalizeSomedayTask(
+    TaskItem task, {
+    required bool hasExplicitQueue,
+  }) {
+    final clearPriority = !hasExplicitQueue && task.isPriority;
+    if (!task.isCompleted && task.completedAt == null && !clearPriority) {
+      return task;
+    }
+    return task.copyWith(
+      isCompleted: false,
+      clearCompletedAt: true,
+      isPriority: hasExplicitQueue && task.isPriority,
+    );
+  }
 
   /// Orders eligible tasks by traversing [queueTaskIds] in saved order and grouping effective priority (`priority` or non-passive `due` within [dueLeadWindow]) before regular tasks per `TDF_SPEC.md` Section 5.6.
   static List<TaskItem> _orderEligibleByQueue(
@@ -1421,6 +1673,37 @@ class TaskBoardEvaluator {
     );
   }
 
+  /// Resolves the nearest distance and radius in meters across [conditions]' referenced locations in [locationMap].
+  static ({int? distanceMeters, int? radiusMeters})
+  _resolveNearestBlockedLocationMetrics(
+    List<TaskCondition> conditions, {
+    required Map<String, TdfLocation> locationMap,
+    required double currentLatitude,
+    required double currentLongitude,
+  }) {
+    final locationIds = <String>{};
+    _collectLocationIdsFromRules(conditions, locationIds);
+    double? bestDistance;
+    int? radiusMeters;
+    for (final locationId in locationIds) {
+      final location = locationMap[locationId];
+      if (location == null) {
+        continue;
+      }
+      final distance = LocationTaskCondition.haversineDistanceMeters(
+        currentLatitude,
+        currentLongitude,
+        location.latitude,
+        location.longitude,
+      );
+      if (bestDistance == null || distance < bestDistance) {
+        bestDistance = distance;
+        radiusMeters = location.radius.round();
+      }
+    }
+    return (distanceMeters: bestDistance?.round(), radiusMeters: radiusMeters);
+  }
+
   /// Returns whether [dependency] on open [task] should be stripped during Section 5.4 block cleanup.
   static bool _shouldStripDependencyOnCleanup({
     required TaskItem task,
@@ -1485,4 +1768,41 @@ class TaskBoardEvaluator {
         deletedAt: _nextBlockCleanupModifiedAt(now, task.effectiveModifiedAt),
         completionsCheckpoint: task.completions,
       );
+
+  /// Recursive 3-color DFS helper for [findDependencyCycle] (`0 = unvisited`, `1 = visiting`, `2 = visited`).
+  static ({String startTaskId, String taskId, String dependencyTaskId})?
+  _visitDependencyCycleDfs(
+    String currentId,
+    String startTaskId,
+    Map<String, TaskItem> taskMap,
+    Map<String, int> visitState,
+  ) {
+    visitState[currentId] = 1;
+    final dependencies =
+        taskMap[currentId]?.dependencies ?? const <TdfTaskDependency>[];
+    for (final dependency in dependencies) {
+      final targetId = dependency.taskId;
+      final targetState = visitState[targetId] ?? 0;
+      if (targetState == 1) {
+        return (
+          startTaskId: startTaskId,
+          taskId: currentId,
+          dependencyTaskId: targetId,
+        );
+      }
+      if (targetState == 0 && taskMap.containsKey(targetId)) {
+        final nestedCycle = _visitDependencyCycleDfs(
+          targetId,
+          startTaskId,
+          taskMap,
+          visitState,
+        );
+        if (nestedCycle != null) {
+          return nestedCycle;
+        }
+      }
+    }
+    visitState[currentId] = 2;
+    return null;
+  }
 }

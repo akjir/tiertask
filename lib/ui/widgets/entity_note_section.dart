@@ -319,23 +319,22 @@ class _EntityNoteSectionState extends ConsumerState<EntityNoteSection> {
       _isSubmitting = true;
       _errorText = null;
     });
-    final result = await widget.onSave(_controller.text);
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await widget.onSave(_controller.text);
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message):
+        case ActionPersistFailed(:final message):
+          setState(() => _errorText = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
+      }
     }
   }
 }

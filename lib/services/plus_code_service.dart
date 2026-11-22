@@ -352,10 +352,7 @@ final class PlusCodeService {
     if (rawInput.length > maxInputLength) {
       return const InvalidPlusCodeInput();
     }
-    final normalized = normalizeSingleLineText(
-      rawInput,
-      maxScalarValues: maxInputLength,
-    );
+    final normalized = normalizeSingleLineText(rawInput);
     if (normalized.isEmpty || !normalized.contains('+')) {
       return const InvalidPlusCodeInput();
     }
@@ -459,7 +456,7 @@ final class PlusCodeService {
 
   /// Normalizes and truncates [text] to a single-line string of at most [maxTdfTextLength] (`500`) Unicode scalar values.
   static String truncateToMaxTextLength(String text) =>
-      normalizeSingleLineText(text, maxScalarValues: maxTdfTextLength);
+      normalizeSingleLineText(text);
 
   /// Strips commas adjacent to the Plus Code token at `tokenBeforeIndex + 1`.
   static String _cleanAdjacentLocalityToken(

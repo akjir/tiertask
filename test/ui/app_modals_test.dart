@@ -33,6 +33,7 @@ import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
 import 'package:tiertask/services/tdf_service.dart';
+import 'package:tiertask/ui/components/ui_searchable_picker.dart';
 import 'package:tiertask/ui/dialogs/compact_label_picker_sheet.dart';
 import 'package:tiertask/ui/dialogs/geocoding_candidates_modal.dart';
 import 'package:tiertask/ui/dialogs/local_file_modals.dart';
@@ -42,6 +43,7 @@ import 'package:tiertask/ui/dialogs/workspaces_modal.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/primitives/ui_field.dart';
 import 'package:tiertask/ui/primitives/ui_toggle_row.dart';
+import 'package:tiertask/ui/widgets/entity_label_picker.dart';
 
 import 'test_helpers.dart';
 
@@ -231,10 +233,7 @@ void main() {
         final settingsRepository = InMemorySettingsRepository(
           const WebDavConfig(language: AppLanguage.english),
         );
-        final created = await settingsRepository.createWorkspace(
-          'Work',
-          activate: false,
-        );
+        final created = await settingsRepository.createWorkspace('Work');
 
         final container = await pumpLeafWidget(
           tester,
@@ -246,6 +245,15 @@ void main() {
           find.byKey(const ValueKey<String>('open_modal_trigger')),
         );
         await tester.pumpAndSettle();
+
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('workspaces_modal')),
+            matching: find.byType(Divider),
+          ),
+          findsNothing,
+          reason: 'Workspaces modal must use a 1px line DecoratedBox instead of Material Divider',
+        );
 
         // Duplicate creation shows inline error banner and keeps modal open.
         await tester.enterText(
@@ -488,10 +496,7 @@ void main() {
       'selects existing file, submits new filename, validates invalid input, and closes on two-step Escape',
       (tester) async {
         final spyNotifier = _SpyTaskNotifier();
-        const config = WebDavConfig(
-          language: AppLanguage.english,
-          localFilePath: 'tasks.tdf',
-        );
+        const config = WebDavConfig(language: AppLanguage.english);
         final listingRepository = _ListingLocalFileRepository(
           config: config,
           existingFileNames: const <String>[
@@ -504,7 +509,6 @@ void main() {
         await pumpLeafWidget(
           tester,
           const _ModalHost(onTrigger: showSelectLocalFileModal),
-          config: config,
           localFileRepository: listingRepository,
           taskNotifierFactory: () => spyNotifier,
         );
@@ -702,10 +706,6 @@ void main() {
       'enforces U-UX-005 typed-filename guard and default-checked backup toggle for local wipe',
       (tester) async {
         final spyNotifier = _SpyTaskNotifier();
-        const config = WebDavConfig(
-          language: AppLanguage.english,
-          localFilePath: 'tasks.tdf',
-        );
 
         await pumpLeafWidget(
           tester,
@@ -717,7 +717,6 @@ void main() {
               baseName: 'tasks',
             ),
           ),
-          config: config,
           taskNotifierFactory: () => spyNotifier,
         );
 
@@ -849,10 +848,6 @@ void main() {
               baseName: 'tasks',
             ),
           ),
-          config: const WebDavConfig(
-            language: AppLanguage.english,
-            storageMode: StorageMode.local,
-          ),
         );
 
         await tester.tap(
@@ -952,12 +947,7 @@ void main() {
         final created = <String>[];
         final openedInfo = <String>[];
         const labels = <TdfLabel>[
-          TdfLabel(
-            id: 'errands001',
-            name: 'Errands',
-            color: '#2196F3',
-            isScoped: false,
-          ),
+          TdfLabel(id: 'errands001', name: 'Errands', color: '#2196F3'),
           TdfLabel(
             id: 'work000001',
             name: 'Work',
@@ -1124,12 +1114,7 @@ void main() {
       tester,
     ) async {
       const labels = <TdfLabel>[
-        TdfLabel(
-          id: 'home000001',
-          name: 'Home',
-          color: '#2196F3',
-          isScoped: false,
-        ),
+        TdfLabel(id: 'home000001', name: 'Home', color: '#2196F3'),
       ];
       final board = TaskBoard.evaluate(tasks: const [], labels: labels);
 
@@ -1139,7 +1124,6 @@ void main() {
           onTrigger: (context) => showCompactLabelPickerSheet(
             context,
             title: localizations.taskLabelsSectionTitle,
-            initialSelectedLabelIds: const <String>{},
             onToggleLabel: (_) {},
             onCreateLabel: (_) async => const ActionSucceeded(),
             onOpenLabelInfo: (_) {},
@@ -1167,5 +1151,111 @@ void main() {
         findsNothing,
       );
     });
+
+    testWidgets('renders workspace labels in alphabetical sortedLabels order', (
+      tester,
+    ) async {
+      const labels = <TdfLabel>[
+        TdfLabel(id: 'z000000001', name: 'Zebra', color: '#2196F3'),
+        TdfLabel(id: 'a000000001', name: 'Alpha', color: '#4CAF50'),
+        TdfLabel(id: 'm000000001', name: 'Middle', color: '#FF9100'),
+      ];
+      final board = TaskBoard.evaluate(tasks: const [], labels: labels);
+
+      await pumpLeafWidget(
+        tester,
+        _ModalHost(
+          onTrigger: (context) => showCompactLabelPickerSheet(
+            context,
+            title: localizations.taskLabelsSectionTitle,
+            onToggleLabel: (_) {},
+            onCreateLabel: (_) async => const ActionSucceeded(),
+            onOpenLabelInfo: (_) {},
+          ),
+        ),
+        board: board,
+        surfaceSize: const Size(390, 844),
+      );
+
+      await tester.tap(
+        find.byKey(const ValueKey<String>('open_modal_trigger')),
+      );
+      await tester.pumpAndSettle();
+
+      final alphaTop = tester
+          .getTopLeft(
+            find.byKey(const ValueKey<String>('picker_opt_a000000001')),
+          )
+          .dy;
+      final middleTop = tester
+          .getTopLeft(
+            find.byKey(const ValueKey<String>('picker_opt_m000000001')),
+          )
+          .dy;
+      final zebraTop = tester
+          .getTopLeft(
+            find.byKey(const ValueKey<String>('picker_opt_z000000001')),
+          )
+          .dy;
+      expect(alphaTop, lessThan(middleTop));
+      expect(middleTop, lessThan(zebraTop));
+    });
+
+    testWidgets(
+      'delegates to EntitySearchableLabelPicker with consistent uncolored label dot handling',
+      (tester) async {
+        const labels = <TdfLabel>[
+          TdfLabel(id: 'plain00001', name: 'Plain'),
+          TdfLabel(id: 'colored001', name: 'Colored', color: '#2196F3'),
+        ];
+        final board = TaskBoard.evaluate(tasks: const [], labels: labels);
+
+        await pumpLeafWidget(
+          tester,
+          _ModalHost(
+            onTrigger: (context) => showCompactLabelPickerSheet(
+              context,
+              title: localizations.taskLabelsSectionTitle,
+              onToggleLabel: (_) {},
+              onCreateLabel: (_) async => const ActionSucceeded(),
+              onOpenLabelInfo: (_) {},
+            ),
+          ),
+          board: board,
+          surfaceSize: const Size(390, 844),
+        );
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('open_modal_trigger')),
+        );
+        await tester.pumpAndSettle();
+
+        final labelPickerFinder = find.byType(EntitySearchableLabelPicker);
+        expect(labelPickerFinder, findsOneWidget);
+        final labelPicker = tester.widget<EntitySearchableLabelPicker>(
+          labelPickerFinder,
+        );
+        expect(labelPicker.isCompactSheet, isTrue);
+
+        final innerPicker = tester.widget<UiSearchablePicker<String>>(
+          find.descendant(
+            of: labelPickerFinder,
+            matching: find.byType(UiSearchablePicker<String>),
+          ),
+        );
+        final plainOption = innerPicker.options.firstWhere(
+          (option) => option.id == 'plain00001',
+        );
+        final coloredOption = innerPicker.options.firstWhere(
+          (option) => option.id == 'colored001',
+        );
+        expect(
+          plainOption.colorDot,
+          isNull,
+          reason: 'Uncolored labels must omit synthetic accent color dots consistently with EntitySearchableLabelPicker',
+        );
+        expect(coloredOption.colorDot, equals(const Color(0xFF2196F3)));
+      },
+    );
   });
 }

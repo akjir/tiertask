@@ -395,11 +395,13 @@ class ReturnContext {
 class ShellNotifier extends Notifier<ShellState> {
   String? _activeWorkspaceId;
   TaskBoard? _lastSeenBoard;
-  final Set<EntityRef> _suppressedLocalMutations = <EntityRef>{};
+  final Map<EntityRef, int> _suppressedLocalMutations = <EntityRef, int>{};
+  int _workspaceGeneration = 0;
 
   @override
   ShellState build() {
     _suppressedLocalMutations.clear();
+    _workspaceGeneration = 0;
     _activeWorkspaceId = ref.read(activeWorkspaceProvider).asData?.value.id;
     _lastSeenBoard = ref.read(taskNotifierProvider).asData?.value;
 
@@ -746,16 +748,25 @@ class ShellNotifier extends Notifier<ShellState> {
     );
   }
 
-  /// Wraps a local entity mutation on [target] so the board listener suppresses external-change notices.
+  /// Wraps a local entity mutation on [target] so the board listener suppresses external-change notices with ref-counted overlap safety.
   Future<T> runLocalEntityMutation<T>(
     EntityRef target,
     Future<T> Function() action,
   ) async {
-    _suppressedLocalMutations.add(target);
+    final generation = _workspaceGeneration;
+    _suppressedLocalMutations[target] =
+        (_suppressedLocalMutations[target] ?? 0) + 1;
     try {
       return await action();
     } finally {
-      _suppressedLocalMutations.remove(target);
+      if (_workspaceGeneration == generation) {
+        final remaining = (_suppressedLocalMutations[target] ?? 1) - 1;
+        if (remaining <= 0) {
+          _suppressedLocalMutations.remove(target);
+        } else {
+          _suppressedLocalMutations[target] = remaining;
+        }
+      }
     }
   }
 
@@ -878,9 +889,7 @@ class ShellNotifier extends Notifier<ShellState> {
     }
     state = state.copyWith(
       sidebarLabelsCollapsed: nextCollapsed,
-      sidebarLabelsFilterOpen: nextCollapsed
-          ? false
-          : state.sidebarLabelsFilterOpen,
+      sidebarLabelsFilterOpen: !nextCollapsed && state.sidebarLabelsFilterOpen,
     );
   }
 
@@ -891,7 +900,7 @@ class ShellNotifier extends Notifier<ShellState> {
       ref.read(sidebarLabelsFilterQueryProvider.notifier).clear();
     }
     state = state.copyWith(
-      sidebarLabelsCollapsed: nextOpen ? false : state.sidebarLabelsCollapsed,
+      sidebarLabelsCollapsed: !nextOpen && state.sidebarLabelsCollapsed,
       sidebarLabelsFilterOpen: nextOpen,
     );
   }
@@ -904,9 +913,8 @@ class ShellNotifier extends Notifier<ShellState> {
     }
     state = state.copyWith(
       sidebarLocationsCollapsed: nextCollapsed,
-      sidebarLocationsFilterOpen: nextCollapsed
-          ? false
-          : state.sidebarLocationsFilterOpen,
+      sidebarLocationsFilterOpen:
+          !nextCollapsed && state.sidebarLocationsFilterOpen,
     );
   }
 
@@ -917,9 +925,7 @@ class ShellNotifier extends Notifier<ShellState> {
       ref.read(sidebarLocationsFilterQueryProvider.notifier).clear();
     }
     state = state.copyWith(
-      sidebarLocationsCollapsed: nextOpen
-          ? false
-          : state.sidebarLocationsCollapsed,
+      sidebarLocationsCollapsed: !nextOpen && state.sidebarLocationsCollapsed,
       sidebarLocationsFilterOpen: nextOpen,
     );
   }
@@ -947,6 +953,7 @@ class ShellNotifier extends Notifier<ShellState> {
     if (!switchedWorkspace) {
       return;
     }
+    _workspaceGeneration++;
     _suppressedLocalMutations.clear();
     _lastSeenBoard = null;
     ref.read(searchQueryProvider.notifier).clear();
@@ -976,7 +983,7 @@ class ShellNotifier extends Notifier<ShellState> {
     final trackedEntity =
         state.activeInlineEdit?.entity ?? state.expandedEntity;
     if (trackedEntity == null ||
-        _suppressedLocalMutations.contains(trackedEntity)) {
+        (_suppressedLocalMutations[trackedEntity] ?? 0) > 0) {
       return;
     }
 

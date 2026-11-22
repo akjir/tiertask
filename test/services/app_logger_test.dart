@@ -84,10 +84,7 @@ void main() {
           osVersion: 'Linux 6.12',
           locale: 'en_US',
           timeZone: 'UTC (+00:00)',
-          workspaceId: 'default',
-          workspaceName: 'Default',
           storageMode: 'both',
-          logStorageMode: 'local',
         );
         AppLogger.setEnabled(
           true,
@@ -343,11 +340,7 @@ void main() {
         reason: 'DEBUG line must be excluded when minimumLevel is INFO',
       );
       expect(
-        AppLogger.matchesFilter(
-          metaLine,
-          minimumLevel: LogLevel.debug,
-          tags: null,
-        ),
+        AppLogger.matchesFilter(metaLine, minimumLevel: LogLevel.debug),
         isTrue,
         reason: '@meta header must match when unfiltered at DEBUG level',
       );
@@ -586,7 +579,7 @@ void main() {
         reason: 'Clean exit must record session.exit with crashed=false',
       );
 
-      final nextBootUtc = DateTime.utc(2026, 11, 3, 22, 15, 0, 0);
+      final nextBootUtc = DateTime.utc(2026, 11, 3, 22, 15);
       AppLogger.resetForTesting(
         clock: () => nextBootUtc,
         sink: const LocalFileLogSink(),
@@ -638,7 +631,7 @@ void main() {
         reason: 'Detached after crash must record crashed=true',
       );
 
-      final nextBootUtc = DateTime.utc(2026, 11, 3, 22, 10, 0, 0);
+      final nextBootUtc = DateTime.utc(2026, 11, 3, 22, 10);
       AppLogger.resetForTesting(
         clock: () => nextBootUtc,
         sink: const LocalFileLogSink(),
@@ -854,12 +847,8 @@ void main() {
           appVersion: '0.2.3+1',
           platform: 'linux',
           osVersion: 'Linux 6.12',
-          locale: 'en',
           timeZone: 'UTC',
-          workspaceId: 'default',
-          workspaceName: 'Default',
           storageMode: 'both',
-          logStorageMode: 'local',
         ),
       );
       spySink.writes.clear();
@@ -945,12 +934,8 @@ void main() {
           appVersion: '0.2.3+1',
           platform: 'linux',
           osVersion: 'Linux 6.12',
-          locale: 'en',
           timeZone: 'UTC',
-          workspaceId: 'default',
-          workspaceName: 'Default',
           storageMode: 'both',
-          logStorageMode: 'local',
         ),
       );
 
@@ -994,6 +979,191 @@ void main() {
         lessThanOrEqualTo(3),
         reason: '20 identical tasks must not cause 20 separate disk writes',
       );
+    });
+
+    test('registerSecret redacts multiple secrets concurrently, orders longest-first, caps at maxRegisteredSecrets, and supports clearSecrets', () {
+      AppLogger.registerSecret('WorkspaceOneSecret#1');
+      AppLogger.setSecretToRedact('WorkspaceTwoSecret#2');
+      AppLogger.registerSecret('short');
+      AppLogger.registerSecret('short-longer-secret');
+      AppLogger.registerSecret(null);
+      AppLogger.registerSecret('');
+
+      // Calling setEnabled with empty secretToRedact must NOT wipe previously registered secrets.
+      AppLogger.setEnabled(
+        true,
+        logFilePath: logFilePath,
+        secretToRedact: '',
+        persistToDisk: false,
+      );
+
+      final redacted = AppLogger.sanitize(
+        'first=WorkspaceOneSecret#1 second=WorkspaceTwoSecret#2 nested=short-longer-secret',
+      );
+      expect(
+        redacted,
+        isNot(contains('WorkspaceOneSecret#1')),
+        reason: 'First workspace secret must remain redacted after registering a second',
+      );
+      expect(
+        redacted,
+        isNot(contains('WorkspaceTwoSecret#2')),
+        reason: 'Second workspace secret registered via setSecretToRedact must be redacted',
+      );
+      expect(
+        redacted,
+        isNot(contains('-longer-secret')),
+        reason: 'Longer secrets must be redacted before shorter prefixes to avoid partial leakage',
+      );
+
+      AppLogger.clearSecrets();
+      expect(
+        AppLogger.sanitize(
+          'check WorkspaceOneSecret#1 and WorkspaceTwoSecret#2',
+        ),
+        contains('WorkspaceOneSecret#1'),
+        reason: 'clearSecrets must remove previously registered secrets',
+      );
+
+      for (var i = 0; i < AppLogger.maxRegisteredSecrets + 6; i++) {
+        AppLogger.registerSecret('BoundedSecretValue_$i!');
+      }
+      expect(
+        AppLogger.sanitize('BoundedSecretValue_0!'),
+        equals('BoundedSecretValue_0!'),
+        reason: 'Oldest secret beyond maxRegisteredSecrets cap must be evicted',
+      );
+      expect(
+        AppLogger.sanitize(
+          'BoundedSecretValue_${AppLogger.maxRegisteredSecrets + 5}!',
+        ),
+        equals('[REDACTED]'),
+        reason: 'Most recently registered secret within cap must be redacted',
+      );
+    });
+
+    test('sanitize uses a zero-allocation fast path on clean input and redacts secret field keys in AppLogger.event in a single pass', () {
+      const cleanToken = 'workspace_tasks_000001OkD2_ready';
+      expect(
+        identical(AppLogger.sanitize(cleanToken), cleanToken),
+        isTrue,
+        reason: 'Clean strings without secrets or markers must return the exact input reference',
+      );
+
+      AppLogger.setEnabled(
+        true,
+        logFilePath: logFilePath,
+        minimumLevel: LogLevel.debug,
+        persistToDisk: false,
+      );
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'auth.probe',
+        fields: const <String, Object?>{
+          'password': 'PlainFieldPassword123',
+          'token': 'OpaqueToken999',
+          'status': 200,
+          'note': 'line1\nline2\r\tclean',
+        },
+      );
+      final output = AppLogger.fullLogText;
+      expect(output, isNot(contains('PlainFieldPassword123')));
+      expect(output, isNot(contains('OpaqueToken999')));
+      expect(output, contains('password=[REDACTED]'));
+      expect(output, contains('token=[REDACTED]'));
+      expect(output, contains('note="line1 line2  clean"'));
+    });
+
+    test('enforces maxFileBytes (2 MiB) dynamically on writes while preserving @meta header and [CRASH] lines', () {
+      AppLogger.setEnabled(
+        true,
+        logFilePath: logFilePath,
+        minimumLevel: LogLevel.info,
+      );
+      AppLogger.crash(StateError('KeepCrashLine'), StackTrace.empty);
+
+      final chunkPayload = 'X' * 16384;
+      for (var i = 0; i < 160; i++) {
+        AppLogger.info(LogTag.domain, 'bulk_$i $chunkPayload');
+      }
+
+      final diskBytes = File(logFilePath).lengthSync();
+      expect(
+        diskBytes,
+        lessThanOrEqualTo(AppLogger.maxFileBytes),
+        reason: 'On-disk log file must never grow past maxFileBytes (2 MiB) on active writes',
+      );
+      final retained = AppLogger.lines;
+      expect(
+        retained.first,
+        equals(AppLogger.headerStartBanner),
+        reason: 'Byte-cap pruning must preserve @meta header block',
+      );
+      expect(
+        retained.any((line) => line.contains('KeepCrashLine')),
+        isTrue,
+        reason: 'Byte-cap pruning must preserve [CRASH] lines',
+      );
+      expect(
+        retained.last,
+        contains('bulk_159'),
+        reason: 'Byte-cap pruning must retain the newest log entries',
+      );
+    });
+
+    test('rolls dated log filenames cleanly across UTC midnight without overwriting the previous day file', () {
+      var currentUtc = DateTime.utc(2026, 11, 3, 23, 59, 58);
+      AppLogger.resetForTesting(
+        clock: () => currentUtc,
+        sink: const LocalFileLogSink(),
+      );
+      const metadata = LogMetadata(
+        appVersion: '0.5.0',
+        platform: 'linux',
+        osVersion: 'Linux 6.12',
+        timeZone: 'UTC',
+      );
+      final dayOnePath =
+          '${tempDir.path}${Platform.pathSeparator}tiertask_2026-11-03_linux_default.log';
+      final dayTwoPath =
+          '${tempDir.path}${Platform.pathSeparator}tiertask_2026-11-04_linux_default.log';
+
+      AppLogger.setEnabled(
+        true,
+        logFilePath: dayOnePath,
+        baseDirectoryPath: tempDir.path,
+        metadata: metadata,
+      );
+      AppLogger.info(LogTag.domain, 'entry_before_midnight');
+      expect(
+        AppLogger.activeLogFileName,
+        equals('tiertask_2026-11-03_linux_default.log'),
+      );
+
+      currentUtc = DateTime.utc(2026, 11, 4, 0, 0, 2);
+      AppLogger.info(LogTag.domain, 'entry_after_midnight');
+
+      expect(
+        AppLogger.activeLogFileName,
+        equals('tiertask_2026-11-04_linux_default.log'),
+        reason: 'Crossing UTC midnight must roll activeLogFileName to the new UTC date',
+      );
+      expect(AppLogger.logFilePath, equals(dayTwoPath));
+      expect(File(dayOnePath).existsSync(), isTrue);
+      expect(File(dayTwoPath).existsSync(), isTrue);
+
+      final dayOneContent = File(dayOnePath).readAsStringSync();
+      final dayTwoContent = File(dayTwoPath).readAsStringSync();
+      expect(dayOneContent, contains('entry_before_midnight'));
+      expect(
+        dayOneContent,
+        isNot(contains('entry_after_midnight')),
+        reason: 'Previous day log file must remain untouched after UTC midnight rollover',
+      );
+      expect(dayTwoContent, contains(AppLogger.headerStartBanner));
+      expect(dayTwoContent, contains('entry_after_midnight'));
+      expect(dayTwoContent, isNot(contains('entry_before_midnight')));
     });
   });
 }

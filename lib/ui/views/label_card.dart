@@ -31,7 +31,6 @@ import '../../providers/task_schedule_helper.dart';
 import '../../providers/ui_telemetry.dart';
 import '../components/ui_color_wheel.dart';
 import '../components/ui_ordered_item_list.dart';
-import '../layout/ui_responsive_grid.dart';
 import '../primitives/ui_button.dart';
 import '../primitives/ui_card.dart';
 import '../primitives/ui_field.dart';
@@ -41,7 +40,7 @@ import '../tokens/ui_theme_tokens.dart';
 import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
 import '../widgets/entity_conditions_section.dart';
-import '../widgets/entity_date_time_fields.dart';
+import '../widgets/entity_inline_name_editor.dart';
 import '../widgets/entity_links_section.dart';
 import '../widgets/entity_note_section.dart';
 
@@ -497,24 +496,17 @@ class _LabelColorSectionState extends State<_LabelColorSection> {
     );
   }
 
-  /// Applies [result] from save or clear to inline busy/error state.
+  /// Applies [result] from save or clear to inline error state.
   void _applyActionResult(ActionResult result) {
     if (!mounted) {
       return;
     }
     switch (result) {
       case ActionSucceeded():
-        setState(() => _isSubmitting = false);
+        break;
       case ActionValidationFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
       case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
+        setState(() => _errorText = message);
     }
   }
 
@@ -527,8 +519,14 @@ class _LabelColorSectionState extends State<_LabelColorSection> {
       _isSubmitting = true;
       _errorText = null;
     });
-    final result = await widget.onClear();
-    _applyActionResult(result);
+    try {
+      final result = await widget.onClear();
+      _applyActionResult(result);
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
   }
 
   /// Updates the active draft color selected from [UiColorWheel].
@@ -548,8 +546,16 @@ class _LabelColorSectionState extends State<_LabelColorSection> {
       _isSubmitting = true;
       _errorText = null;
     });
-    final result = await widget.onSave(UiColorWheel.formatHex(_selectedColor));
-    _applyActionResult(result);
+    try {
+      final result = await widget.onSave(
+        UiColorWheel.formatHex(_selectedColor),
+      );
+      _applyActionResult(result);
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
   }
 
   /// Parses [colorHex] or falls back to the first canonical preset when color is unset.
@@ -1042,17 +1048,16 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
     );
   }
 
-  /// Applies [result] from `createLabelDraft` to busy and error state.
+  /// Applies [result] from `createLabelDraft` to inline error state.
   void _applySubmitResult(ActionResult result) {
     if (!mounted) {
       return;
     }
     switch (result) {
       case ActionSucceeded():
-        setState(() => _isSubmitting = false);
+        break;
       case ActionValidationFailed(:final message, :final fieldErrors):
         setState(() {
-          _isSubmitting = false;
           _fieldErrors = fieldErrors;
           _generalError = _resolveDraftBannerError(
             message,
@@ -1061,10 +1066,7 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
           );
         });
       case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _generalError = message;
-        });
+        setState(() => _generalError = message);
     }
   }
 
@@ -1304,10 +1306,16 @@ class _LabelDraftCardState extends ConsumerState<LabelDraftCard> {
       _fieldErrors = const <String, String>{};
       _generalError = null;
     });
-    final result = await ref
-        .read(entityActionsProvider.notifier)
-        .createLabelDraft(input, locale: Localizations.localeOf(context));
-    _applySubmitResult(result);
+    try {
+      final result = await ref
+          .read(entityActionsProvider.notifier)
+          .createLabelDraft(input, locale: Localizations.localeOf(context));
+      _applySubmitResult(result);
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
   }
 
   /// Toggles [locationId] inside draft GPS location conditions.
@@ -1365,98 +1373,6 @@ class _LabelDraftColorSection extends StatelessWidget {
         enabled: enabled,
         onChanged: onColorChanged,
       ),
-    );
-  }
-}
-
-/// Titled condition dimension group inside [_LabelDraftConditionsSection].
-class _LabelDraftConditionGroup extends StatelessWidget {
-  /// Creates a [_LabelDraftConditionGroup].
-  const _LabelDraftConditionGroup({required this.title, required this.child});
-
-  /// Dimension picker widget rendered beneath [title].
-  final Widget child;
-
-  /// Localized condition dimension heading (`Days`, `Time`, `Locations`).
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    return Padding(
-      padding: EdgeInsets.only(top: tokens.spacing.space3),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Text(
-            title,
-            style: tokens.typography.meta.copyWith(
-              color: tokens.colors.muted,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          SizedBox(height: tokens.spacing.space2),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-/// Vertical description and condition picker groups rendered inside [_LabelDraftConditionsSection].
-class _LabelDraftConditionsBody extends StatelessWidget {
-  /// Creates a [_LabelDraftConditionsBody].
-  const _LabelDraftConditionsBody({
-    required this.data,
-    required this.allLocations,
-    required this.enabled,
-  });
-
-  /// Saved workspace locations selectable in draft GPS conditions.
-  final List<TdfLocation> allLocations;
-
-  /// Bundled draft conditions state and callbacks.
-  final _LabelDraftConditionsData data;
-
-  /// Whether condition pickers accept input.
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        Text(
-          localizations.labelConditionsSectionDescription,
-          style: tokens.typography.meta.copyWith(color: tokens.colors.muted),
-        ),
-        _LabelDraftConditionGroup(
-          title: localizations.conditionDayGroupTitle,
-          child: _LabelDraftWeekdaysWrap(
-            selectedWeekdays: data.draft.weekdays,
-            enabled: enabled,
-            onToggleWeekday: data.onToggleWeekday,
-          ),
-        ),
-        _LabelDraftConditionGroup(
-          title: localizations.conditionTimeGroupTitle,
-          child: _LabelDraftTimeWindowsList(data: data, enabled: enabled),
-        ),
-        _LabelDraftConditionGroup(
-          title: localizations.conditionLocationGroupTitle,
-          child: _LabelDraftLocationsWrap(
-            allLocations: allLocations,
-            selectedLocationIds: data.draft.locationIds,
-            enabled: enabled,
-            onToggleLocation: data.onToggleLocation,
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1528,10 +1444,18 @@ class _LabelDraftConditionsSection extends ConsumerWidget {
     return UiCard.inset(
       headerIcon: Icons.tune_rounded,
       headerTitle: localizations.taskConditionsSectionTitle,
-      child: _LabelDraftConditionsBody(
-        data: data,
+      child: EntityConditionsEditorBody(
+        isTask: false,
+        draft: data.draft,
         allLocations: allLocations,
+        timeStartController: data.timeStartController,
+        timeEndController: data.timeEndController,
+        timeInputError: data.timeInputError,
         enabled: enabled,
+        onToggleWeekday: data.onToggleWeekday,
+        onAddTimeWindow: data.onAddTimeWindow,
+        onRemoveTimeWindow: data.onRemoveTimeWindow,
+        onToggleLocation: data.onToggleLocation,
       ),
     );
   }
@@ -1578,7 +1502,6 @@ class _LabelDraftFooter extends StatelessWidget {
           children: <Widget>[
             UiButton(
               label: localizations.actionCancel,
-              variant: UiButtonVariant.secondary,
               density: UiButtonDensity.compact,
               onPressed: isBusy ? null : onCancel,
             ),
@@ -1593,179 +1516,6 @@ class _LabelDraftFooter extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// Add/Update link button and optional row-edit Cancel trigger for [_LabelDraftLinkAddBar].
-class _LabelDraftLinkAddActions extends StatelessWidget {
-  /// Creates a [_LabelDraftLinkAddActions].
-  const _LabelDraftLinkAddActions({
-    required this.isEditingExisting,
-    required this.enabled,
-    required this.onSubmitLink,
-    required this.onCancelRowEdit,
-  });
-
-  /// Whether buttons accept interaction.
-  final bool enabled;
-
-  /// Whether an existing link row is being edited.
-  final bool isEditingExisting;
-
-  /// Callback cancelling an active row edit.
-  final VoidCallback onCancelRowEdit;
-
-  /// Callback committing the typed link row.
-  final VoidCallback onSubmitLink;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Wrap(
-      spacing: 6.0,
-      runSpacing: 6.0,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: <Widget>[
-        UiButton(
-          label: isEditingExisting
-              ? localizations.tooltipSaveLink
-              : localizations.tooltipAddLink,
-          leadingIcon: isEditingExisting ? null : Icons.add_rounded,
-          variant: UiButtonVariant.secondary,
-          density: UiButtonDensity.compact,
-          onPressed: enabled ? onSubmitLink : null,
-        ),
-        if (isEditingExisting)
-          UiButton(
-            label: localizations.actionCancel,
-            variant: UiButtonVariant.text,
-            density: UiButtonDensity.compact,
-            tooltip: localizations.tooltipCancelEditLink,
-            onPressed: enabled ? onCancelRowEdit : null,
-          ),
-      ],
-    );
-  }
-}
-
-/// Inline title/URI inputs and Add/Update action bar for draft label links.
-class _LabelDraftLinkAddBar extends StatelessWidget {
-  /// Creates a [_LabelDraftLinkAddBar].
-  const _LabelDraftLinkAddBar({required this.data, required this.enabled});
-
-  /// Bundled draft links state and callbacks.
-  final _LabelDraftLinksData data;
-
-  /// Whether fields and buttons are enabled.
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final error = data.inputError;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _LabelDraftLinkInputsGrid(data: data, enabled: enabled),
-        if (error != null && error.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 6.0),
-          EntityInlineErrorText(message: error),
-        ],
-        SizedBox(height: tokens.spacing.space2),
-        _LabelDraftLinkAddActions(
-          isEditingExisting: data.editingIndex != null,
-          enabled: enabled,
-          onSubmitLink: data.onCommitLink,
-          onCancelRowEdit: data.onCancelRowEdit,
-        ),
-      ],
-    );
-  }
-}
-
-/// Two-column responsive title and URI inputs inside [_LabelDraftLinkAddBar].
-class _LabelDraftLinkInputsGrid extends StatelessWidget {
-  /// Creates a [_LabelDraftLinkInputsGrid].
-  const _LabelDraftLinkInputsGrid({required this.data, required this.enabled});
-
-  /// Bundled draft links state and callbacks.
-  final _LabelDraftLinksData data;
-
-  /// Whether link inputs accept typing.
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    return UiResponsiveGrid(
-      preset: UiGridPreset.twoColumnCompactCollapse,
-      spacing: tokens.spacing.space2,
-      runSpacing: tokens.spacing.space2,
-      children: <Widget>[
-        UiField(
-          key: const ValueKey<String>('label_draft_link_title'),
-          kind: UiFieldKind.text,
-          controller: data.titleController,
-          hintText: localizations.linkTitleHint,
-          maxLength: maxTdfTextLength,
-          enabled: enabled,
-          onChanged: data.onInputChanged,
-          onSubmitted: (_) => data.onCommitLink(),
-        ),
-        UiField(
-          key: const ValueKey<String>('label_draft_link_uri'),
-          kind: UiFieldKind.text,
-          controller: data.uriController,
-          hintText: localizations.linkUriHint,
-          isMonospace: true,
-          enabled: enabled,
-          onChanged: data.onInputChanged,
-          onSubmitted: (_) => data.onCommitLink(),
-        ),
-      ],
-    );
-  }
-}
-
-/// Renders one link title and monospace URI stack inside [_LabelDraftLinksSection].
-class _LabelDraftLinkRowContent extends StatelessWidget {
-  /// Creates a [_LabelDraftLinkRowContent].
-  const _LabelDraftLinkRowContent({required this.link});
-
-  /// Draft reference link to display.
-  final TaskLink link;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Text(
-          link.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: tokens.typography.control.copyWith(
-            color: colors.ink,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 2.0),
-        Text(
-          link.uri,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: UiTypographyTokens.mono(
-            tokens.typography.monoSmall.copyWith(color: colors.muted),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1843,73 +1593,21 @@ class _LabelDraftLinksSection extends StatelessWidget {
         label: '${data.links.length} / $maxTdfLinksPerLabel',
         variant: UiPillVariant.count,
       ),
-      child: UiOrderedItemList<TaskLink>(
-        items: data.links,
-        itemKey: (link, index) =>
-            ValueKey<String>('label_draft_link_${index}_${link.uri}'),
+      child: EntityLinksEditorBody(
+        links: data.links,
         editingIndex: data.editingIndex,
-        onReorder: enabled ? data.onReorder : null,
-        moveUpTooltip: localizations.tooltipMoveLinkUp,
-        moveDownTooltip: localizations.tooltipMoveLinkDown,
-        onEdit: enabled ? data.onEdit : null,
-        editTooltip: localizations.tooltipEditLink,
-        onDelete: enabled ? data.onDelete : null,
-        deleteTooltip: localizations.tooltipRemoveLink,
-        itemBuilder: (context, link, index, isEditing) =>
-            _LabelDraftLinkRowContent(link: link),
-        addBar: _LabelDraftLinkAddBar(data: data, enabled: enabled),
+        titleController: data.titleController,
+        uriController: data.uriController,
+        inputErrorText: data.inputError,
+        enabled: enabled,
+        itemKeyPrefix: 'label_draft_link',
+        onReorder: data.onReorder,
+        onStartRowEdit: data.onEdit,
+        onDeleteRow: data.onDelete,
+        onInputChanged: data.onInputChanged,
+        onCommitLink: data.onCommitLink,
+        onCancelRowEdit: data.onCancelRowEdit,
       ),
-    );
-  }
-}
-
-/// Selectable saved location pills for draft label GPS conditions.
-class _LabelDraftLocationsWrap extends StatelessWidget {
-  /// Creates a [_LabelDraftLocationsWrap].
-  const _LabelDraftLocationsWrap({
-    required this.allLocations,
-    required this.selectedLocationIds,
-    required this.enabled,
-    required this.onToggleLocation,
-  });
-
-  /// Available saved locations.
-  final List<TdfLocation> allLocations;
-
-  /// Whether location chips accept input.
-  final bool enabled;
-
-  /// Callback toggling a location identifier.
-  final ValueChanged<String> onToggleLocation;
-
-  /// Selected location identifiers.
-  final List<String> selectedLocationIds;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    if (allLocations.isEmpty) {
-      return Text(
-        localizations.emptyLocationsHint,
-        style: tokens.typography.meta.copyWith(color: tokens.colors.muted),
-      );
-    }
-    return Wrap(
-      spacing: 6.0,
-      runSpacing: 6.0,
-      children: <Widget>[
-        for (final location in allLocations)
-          UiPill(
-            key: ValueKey<String>('label_draft_cond_loc_${location.id}'),
-            label: location.name,
-            icon: Icons.place_outlined,
-            variant: UiPillVariant.selectable,
-            isSelected: selectedLocationIds.contains(location.id),
-            enabled: enabled,
-            onPressed: enabled ? () => onToggleLocation(location.id) : null,
-          ),
-      ],
     );
   }
 }
@@ -2093,7 +1791,6 @@ class _LabelDraftPrimaryFields extends StatelessWidget {
       children: <Widget>[
         UiField(
           key: const ValueKey<String>('label_draft_name_field'),
-          kind: UiFieldKind.text,
           controller: data.nameController,
           label: localizations.labelNameLabel,
           hintText: localizations.labelNameHint,
@@ -2117,163 +1814,6 @@ class _LabelDraftPrimaryFields extends StatelessWidget {
           enabled: !isBusy,
           onChanged: data.onScopeChanged,
         ),
-      ],
-    );
-  }
-}
-
-/// Two-column responsive start and end `HH:MM` inputs inside [_LabelDraftTimeWindowAddBar].
-class _LabelDraftTimeInputsGrid extends StatelessWidget {
-  /// Creates a [_LabelDraftTimeInputsGrid].
-  const _LabelDraftTimeInputsGrid({required this.data, required this.enabled});
-
-  /// Bundled draft conditions state and callbacks.
-  final _LabelDraftConditionsData data;
-
-  /// Whether time inputs accept typing.
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    return UiResponsiveGrid(
-      preset: UiGridPreset.twoColumnCompactCollapse,
-      spacing: tokens.spacing.space2,
-      runSpacing: tokens.spacing.space2,
-      children: <Widget>[
-        EntityHybridTimeField(
-          key: const ValueKey<String>('label_draft_cond_time_start'),
-          controller: data.timeStartController,
-          hintText: localizations.conditionTimeStartHint,
-          enabled: enabled,
-          onSubmitted: (_) => data.onAddTimeWindow(),
-        ),
-        EntityHybridTimeField(
-          key: const ValueKey<String>('label_draft_cond_time_end'),
-          controller: data.timeEndController,
-          hintText: localizations.conditionTimeEndHint,
-          enabled: enabled,
-          onSubmitted: (_) => data.onAddTimeWindow(),
-        ),
-      ],
-    );
-  }
-}
-
-/// Start/end hybrid `HH:MM` inputs and Add time window trigger inside [_LabelDraftTimeWindowsList].
-class _LabelDraftTimeWindowAddBar extends StatelessWidget {
-  /// Creates a [_LabelDraftTimeWindowAddBar].
-  const _LabelDraftTimeWindowAddBar({
-    required this.data,
-    required this.enabled,
-  });
-
-  /// Bundled draft conditions state and callbacks.
-  final _LabelDraftConditionsData data;
-
-  /// Whether fields and button are enabled.
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final error = data.timeInputError;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _LabelDraftTimeInputsGrid(data: data, enabled: enabled),
-        if (error != null && error.isNotEmpty) ...<Widget>[
-          const SizedBox(height: 6.0),
-          EntityInlineErrorText(message: error),
-        ],
-        SizedBox(height: tokens.spacing.space2),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: UiButton(
-            label: localizations.tooltipAddTimeCondition,
-            leadingIcon: Icons.add_rounded,
-            variant: UiButtonVariant.secondary,
-            density: UiButtonDensity.compact,
-            onPressed: enabled ? data.onAddTimeWindow : null,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Ordered list of draft daily time windows paired with hybrid `HH:MM` start/end inputs.
-class _LabelDraftTimeWindowsList extends StatelessWidget {
-  /// Creates a [_LabelDraftTimeWindowsList].
-  const _LabelDraftTimeWindowsList({required this.data, required this.enabled});
-
-  /// Bundled draft conditions state and callbacks.
-  final _LabelDraftConditionsData data;
-
-  /// Whether adding and removing time windows is enabled.
-  final bool enabled;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-
-    return UiOrderedItemList<TimeWindowDraft>(
-      items: data.draft.timeWindows,
-      itemKey: (window, index) => ValueKey<String>(
-        'label_draft_time_${index}_${window.start}_${window.end}',
-      ),
-      onDelete: enabled ? data.onRemoveTimeWindow : null,
-      deleteTooltip: localizations.tooltipRemoveTimeCondition,
-      itemBuilder: (context, window, index, isEditing) => Text(
-        '${window.start} - ${window.end}',
-        style: UiTypographyTokens.mono(
-          tokens.typography.monoSmall.copyWith(color: tokens.colors.ink),
-        ),
-      ),
-      addBar: _LabelDraftTimeWindowAddBar(data: data, enabled: enabled),
-    );
-  }
-}
-
-/// Selectable Monday..Sunday pills for draft label weekday conditions.
-class _LabelDraftWeekdaysWrap extends StatelessWidget {
-  /// Creates a [_LabelDraftWeekdaysWrap].
-  const _LabelDraftWeekdaysWrap({
-    required this.selectedWeekdays,
-    required this.enabled,
-    required this.onToggleWeekday,
-  });
-
-  /// Whether weekday pills are interactive.
-  final bool enabled;
-
-  /// Callback toggling an ISO weekday (`1..7`).
-  final ValueChanged<int> onToggleWeekday;
-
-  /// Selected ISO weekdays (`1..7`).
-  final List<int> selectedWeekdays;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Wrap(
-      spacing: 6.0,
-      runSpacing: 6.0,
-      children: <Widget>[
-        for (var isoDay = DateTime.monday; isoDay <= DateTime.sunday; isoDay++)
-          UiPill(
-            key: ValueKey<String>('label_draft_cond_day_$isoDay'),
-            label: _weekdayLabel(isoDay, localizations),
-            variant: UiPillVariant.selectable,
-            isSelected: selectedWeekdays.contains(isoDay),
-            enabled: enabled,
-            onPressed: enabled ? () => onToggleWeekday(isoDay) : null,
-          ),
       ],
     );
   }
@@ -2505,53 +2045,8 @@ class _LabelExpandedSectionsStack extends StatelessWidget {
   }
 }
 
-/// Right-aligned `Cancel` and `Save` buttons rendered beneath the inline name field.
-class _LabelInlineNameActions extends StatelessWidget {
-  /// Creates a [_LabelInlineNameActions].
-  const _LabelInlineNameActions({
-    required this.isBusy,
-    required this.onCancel,
-    required this.onSave,
-  });
-
-  /// Disables actions and spins Save indicator while busy.
-  final bool isBusy;
-
-  /// Callback closing inline name editing.
-  final VoidCallback onCancel;
-
-  /// Callback saving the edited name.
-  final VoidCallback onSave;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Wrap(
-      alignment: WrapAlignment.end,
-      spacing: 6.0,
-      runSpacing: 6.0,
-      children: <Widget>[
-        UiButton(
-          label: localizations.actionCancel,
-          variant: UiButtonVariant.secondary,
-          density: UiButtonDensity.compact,
-          onPressed: isBusy ? null : onCancel,
-        ),
-        UiButton(
-          label: localizations.actionSave,
-          leadingIcon: isBusy ? Icons.sync_rounded : null,
-          variant: UiButtonVariant.primary,
-          density: UiButtonDensity.compact,
-          isLoading: isBusy,
-          onPressed: isBusy ? null : onSave,
-        ),
-      ],
-    );
-  }
-}
-
 /// Inline label name editor swapped into the expanded card header (`U-CARD-001`).
-class _LabelInlineNameEditor extends ConsumerStatefulWidget {
+class _LabelInlineNameEditor extends ConsumerWidget {
   /// Creates a [_LabelInlineNameEditor].
   const _LabelInlineNameEditor({required this.label, required this.isBusy});
 
@@ -2562,101 +2057,19 @@ class _LabelInlineNameEditor extends ConsumerStatefulWidget {
   final TdfLabel label;
 
   @override
-  ConsumerState<_LabelInlineNameEditor> createState() =>
-      _LabelInlineNameEditorState();
-}
-
-/// Manages text controller and inline error feedback for [_LabelInlineNameEditor].
-class _LabelInlineNameEditorState
-    extends ConsumerState<_LabelInlineNameEditor> {
-  late final TextEditingController _controller;
-
-  String? _errorText;
-  bool _isSubmitting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.label.name);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    final busy = widget.isBusy || _isSubmitting;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        UiField(
-          key: ValueKey<String>('label_name_input_${widget.label.id}'),
-          kind: UiFieldKind.text,
-          controller: _controller,
-          hintText: localizations.labelNameHint,
-          maxLength: maxTdfTextLength,
-          autofocus: true,
-          enabled: !busy,
-          errorText: _errorText,
-          onChanged: _handleChanged,
-          onSubmitted: (_) => unawaited(_handleSave()),
-        ),
-        const SizedBox(height: 6.0),
-        _LabelInlineNameActions(
-          isBusy: busy,
-          onCancel: ref.read(shellProvider.notifier).closeInlineEdit,
-          onSave: () => unawaited(_handleSave()),
-        ),
-      ],
+    final locale = Localizations.localeOf(context);
+    return EntityInlineNameEditor(
+      initialValue: label.name,
+      hintText: localizations.labelNameHint,
+      inputKey: ValueKey<String>('label_name_input_${label.id}'),
+      isBusy: isBusy,
+      onCancel: ref.read(shellProvider.notifier).closeInlineEdit,
+      onSave: (value) => ref
+          .read(entityActionsProvider.notifier)
+          .saveLabelName(label.id, value, locale: locale),
     );
-  }
-
-  /// Clears transient validation error text once the user resumes typing.
-  void _handleChanged(String value) {
-    if (_errorText != null) {
-      setState(() => _errorText = null);
-    }
-  }
-
-  /// Submits the edited label name and renders any returned validation or persistence error inline.
-  Future<void> _handleSave() async {
-    if (widget.isBusy || _isSubmitting) {
-      return;
-    }
-    setState(() {
-      _isSubmitting = true;
-      _errorText = null;
-    });
-    final result = await ref
-        .read(entityActionsProvider.notifier)
-        .saveLabelName(
-          widget.label.id,
-          _controller.text,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
-        setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
-    }
   }
 }
 
@@ -3187,18 +2600,4 @@ Future<void> _updateLabelScope(
     return;
   }
   _reportActionFailure(ref, result);
-}
-
-/// Maps an ISO weekday (`1..7`) to its localized short weekday copy.
-String _weekdayLabel(int isoWeekday, AppLocalizations localizations) {
-  return switch (isoWeekday) {
-    DateTime.monday => localizations.weekdayMon,
-    DateTime.tuesday => localizations.weekdayTue,
-    DateTime.wednesday => localizations.weekdayWed,
-    DateTime.thursday => localizations.weekdayThu,
-    DateTime.friday => localizations.weekdayFri,
-    DateTime.saturday => localizations.weekdaySat,
-    DateTime.sunday => localizations.weekdaySun,
-    _ => '',
-  };
 }

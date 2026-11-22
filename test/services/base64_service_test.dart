@@ -85,12 +85,9 @@ void main() {
             config: WebDavConfig(
               serverUrl: 'https://cloud.example.com',
               username: 'stefan',
-              filePath: 'tasks.tdf',
-              localFilePath: 'tasks.tdf',
               storageMode: StorageMode.both,
               language: AppLanguage.german,
               themeMode: AppThemeMode.dark,
-              themePalette: AppThemePalette.calm,
             ),
           ),
         ],

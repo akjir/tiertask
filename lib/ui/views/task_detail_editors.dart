@@ -85,6 +85,98 @@ class TaskHistorySection extends ConsumerStatefulWidget {
   ConsumerState<TaskHistorySection> createState() => _TaskHistorySectionState();
 }
 
+/// Pure searchable prerequisite candidate picker body shared by live task cards and [TaskDraftCard].
+class TaskPrerequisitesPickerBody extends StatelessWidget {
+  /// Creates a [TaskPrerequisitesPickerBody].
+  const TaskPrerequisitesPickerBody({
+    super.key,
+    required this.candidates,
+    required this.selectedIds,
+    required this.isBusy,
+    required this.onToggleOption,
+    this.showDescription = true,
+    this.autoFocusSearch = true,
+    this.onCancel,
+  });
+
+  /// Whether the search box automatically requests focus when mounted.
+  final bool autoFocusSearch;
+
+  /// Candidate open tasks including cycle-blocked markers.
+  final List<PrerequisiteCandidate> candidates;
+
+  /// Whether a save mutation is in flight.
+  final bool isBusy;
+
+  /// Optional callback closing the prerequisite picker on Escape.
+  final VoidCallback? onCancel;
+
+  /// Callback toggling selection of a candidate task identifier.
+  final ValueChanged<String> onToggleOption;
+
+  /// Currently selected prerequisite task identifiers.
+  final Set<String> selectedIds;
+
+  /// Whether the explanatory description line renders above the picker.
+  final bool showDescription;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final tokens = UiThemeTokens.of(context);
+    final picker = UiSearchablePicker<String>(
+      options: _pickerOptions(localizations),
+      selectedIds: selectedIds,
+      autoFocusSearch: autoFocusSearch,
+      searchMaxLength: maxTdfTextLength,
+      searchPlaceholder: localizations.blockedBySearchHint,
+      searchClearTooltip: localizations.tooltipClearSearch,
+      emptyText: localizations.blockedBySearchNoResults,
+      onToggleOption: _handleToggleOption,
+      onRequestClose: onCancel,
+    );
+    if (!showDescription) {
+      return picker;
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(
+          localizations.taskBlockedBySectionDescription,
+          style: tokens.typography.meta.copyWith(color: tokens.colors.muted),
+        ),
+        SizedBox(height: tokens.spacing.space2),
+        picker,
+      ],
+    );
+  }
+
+  /// Forwards picker option toggles when no mutation is in flight.
+  void _handleToggleOption(UiPickerOption<String> option) {
+    if (!isBusy) {
+      onToggleOption(option.value);
+    }
+  }
+
+  /// Maps prerequisite candidates into [UiPickerOption] entries.
+  List<UiPickerOption<String>> _pickerOptions(AppLocalizations localizations) {
+    return <UiPickerOption<String>>[
+      for (final candidate in candidates)
+        UiPickerOption<String>(
+          id: candidate.id,
+          value: candidate.id,
+          label: candidate.title,
+          enabled: !candidate.wouldCreateCycle,
+          disabledHint: candidate.wouldCreateCycle
+              ? localizations.prerequisiteCyclePreventedHint
+              : null,
+        ),
+    ];
+  }
+}
+
 /// Read-only and inline-editable Prerequisites section with cycle prevention (`U-COMP-005`).
 class TaskPrerequisitesSection extends ConsumerStatefulWidget {
   /// Creates a [TaskPrerequisitesSection].
@@ -143,6 +235,111 @@ class TaskSubtaskCheckBoxButton extends StatefulWidget {
   @override
   State<TaskSubtaskCheckBoxButton> createState() =>
       _TaskSubtaskCheckBoxButtonState();
+}
+
+/// Pure ordered subtasks list, inline add bar, and auto-finish toggle shared by live and draft task editors.
+class TaskSubtasksEditorBody extends StatelessWidget {
+  /// Creates a [TaskSubtasksEditorBody].
+  const TaskSubtasksEditorBody({
+    super.key,
+    required this.rows,
+    required this.newStepController,
+    required this.newStepFocusNode,
+    required this.autoFinish,
+    required this.isBusy,
+    required this.onReorder,
+    required this.onToggleRowDone,
+    required this.onDeleteRow,
+    required this.onAddRow,
+    required this.onAutoFinishChanged,
+    required this.itemKeyPrefix,
+    required this.addInputKey,
+    this.addButtonKey,
+    this.autoFinishKey,
+    this.autofocusAddInput = false,
+  });
+
+  /// Optional stable key placed on the Add button.
+  final Key? addButtonKey;
+
+  /// Stable key placed on the new-subtask input field.
+  final Key addInputKey;
+
+  /// Auto-finish toggle state.
+  final bool autoFinish;
+
+  /// Optional stable key placed on the auto-finish toggle row.
+  final Key? autoFinishKey;
+
+  /// Whether the new-subtask input requests focus automatically when mounted.
+  final bool autofocusAddInput;
+
+  /// Whether a save or commit mutation is in flight.
+  final bool isBusy;
+
+  /// Deterministic prefix applied to each ordered subtask row [ValueKey].
+  final String itemKeyPrefix;
+
+  /// Controller for the bottom new-subtask input.
+  final TextEditingController newStepController;
+
+  /// Focus node for the bottom new-subtask input.
+  final FocusNode newStepFocusNode;
+
+  /// Callback adding the typed subtask and refocusing the input.
+  final VoidCallback onAddRow;
+
+  /// Callback updating [autoFinish].
+  final ValueChanged<bool> onAutoFinishChanged;
+
+  /// Callback deleting a subtask row.
+  final UiOrderedItemActionCallback<EditableSubtaskRow> onDeleteRow;
+
+  /// Callback reordering subtask rows.
+  final UiOrderedItemReorderCallback onReorder;
+
+  /// Callback toggling completion of a subtask row.
+  final ValueChanged<int> onToggleRowDone;
+
+  /// Editable subtask rows.
+  final List<EditableSubtaskRow> rows;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+
+    return UiOrderedItemList<EditableSubtaskRow>(
+      items: rows,
+      itemKey: (row, index) =>
+          ValueKey<String>('${itemKeyPrefix}_${row.rowId}'),
+      onReorder: isBusy ? null : onReorder,
+      onDelete: isBusy ? null : onDeleteRow,
+      deleteTooltip: localizations.tooltipRemoveSubtask,
+      itemBuilder: (context, row, index, isEditing) => _SubtaskEditRow(
+        row: row,
+        isBusy: isBusy,
+        onToggleDone: () => onToggleRowDone(index),
+      ),
+      addBar: _SubtaskAddBar(
+        inputKey: addInputKey,
+        buttonKey: addButtonKey,
+        controller: newStepController,
+        focusNode: newStepFocusNode,
+        autofocus: autofocusAddInput,
+        isBusy: isBusy,
+        onAddRow: onAddRow,
+      ),
+      footer: UiToggleRow(
+        key: autoFinishKey,
+        label: localizations.subtasksAutoFinishLabel,
+        description: localizations.tooltipTaskEditorAutoFinish,
+        value: autoFinish,
+        isDense: true,
+        enabled: !isBusy,
+        onChanged: onAutoFinishChanged,
+      ),
+    );
+  }
 }
 
 /// Read-only live-checkbox and inline-editable Subtasks section (`U-CARD-002`..`004`, `U-COMP-006`).
@@ -321,7 +518,6 @@ class _HistoryAddInputRow extends StatelessWidget {
         UiButton(
           key: ValueKey<String>('history_add_button_$taskId'),
           label: localizations.actionAdd,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           tooltip: localizations.tooltipAddHistoryEntry,
           onPressed: isBusy ? null : onAdd,
@@ -363,7 +559,6 @@ class _HistoryAddTextField extends StatelessWidget {
 
     return UiField(
       key: ValueKey<String>('history_add_text_$taskId'),
-      kind: UiFieldKind.text,
       controller: controller,
       hintText: localizations.historyEntryTextHint,
       maxLength: maxTdfTextLength,
@@ -420,7 +615,6 @@ class _HistoryEditActions extends StatelessWidget {
         UiButton(
           key: ValueKey<String>('history_edit_cancel_${taskId}_$index'),
           label: localizations.actionCancel,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           tooltip: localizations.tooltipCancelEditHistoryEntry,
           onPressed: isBusy ? null : onCancel,
@@ -548,7 +742,6 @@ class _HistoryEditTextField extends StatelessWidget {
 
     return UiField(
       key: ValueKey<String>('history_edit_text_${taskId}_$index'),
-      kind: UiFieldKind.text,
       controller: controller,
       maxLength: maxTdfTextLength,
       autofocus: true,
@@ -648,11 +841,12 @@ class _PrerequisiteReadRow extends StatelessWidget {
   }
 }
 
-/// Bottom new-step input and add button row inside [_TaskSubtasksEditList].
+/// Bottom new-step input and add button row inside [TaskSubtasksEditorBody].
 class _SubtaskAddBar extends StatelessWidget {
   /// Creates a [_SubtaskAddBar].
   const _SubtaskAddBar({
-    required this.taskId,
+    required this.inputKey,
+    required this.buttonKey,
     required this.controller,
     required this.focusNode,
     required this.autofocus,
@@ -663,20 +857,23 @@ class _SubtaskAddBar extends StatelessWidget {
   /// Whether the add input requests focus automatically.
   final bool autofocus;
 
+  /// Optional deterministic key for the Add button.
+  final Key? buttonKey;
+
   /// Controller for the new-subtask text input.
   final TextEditingController controller;
 
   /// Focus node for the new-subtask text input.
   final FocusNode focusNode;
 
+  /// Deterministic key for the new-subtask text input.
+  final Key inputKey;
+
   /// Whether a subtask save mutation is in flight.
   final bool isBusy;
 
   /// Callback appending the typed subtask row.
   final VoidCallback onAddRow;
-
-  /// Owning task identifier for deterministic keys.
-  final String taskId;
 
   @override
   Widget build(BuildContext context) {
@@ -686,8 +883,7 @@ class _SubtaskAddBar extends StatelessWidget {
       children: <Widget>[
         Expanded(
           child: UiField(
-            key: ValueKey<String>('subtask_add_input_$taskId'),
-            kind: UiFieldKind.text,
+            key: inputKey,
             controller: controller,
             focusNode: focusNode,
             hintText: localizations.subtaskInputHint,
@@ -700,9 +896,8 @@ class _SubtaskAddBar extends StatelessWidget {
         ),
         const SizedBox(width: 8.0),
         UiButton(
-          key: ValueKey<String>('subtask_add_button_$taskId'),
+          key: buttonKey,
           label: localizations.actionAdd,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           tooltip: localizations.tooltipAddSubtask,
           onPressed: isBusy ? null : onAddRow,
@@ -800,7 +995,6 @@ class _SubtaskEditRow extends StatelessWidget {
         const SizedBox(width: 6.0),
         Expanded(
           child: UiField(
-            kind: UiFieldKind.text,
             controller: row.controller,
             maxLength: maxTdfTextLength,
             enabled: !isBusy,
@@ -1054,6 +1248,55 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
     );
   }
 
+  /// Applies [result] from appending a history entry to inline form state.
+  void _applyAddResult(ActionResult result) {
+    switch (result) {
+      case ActionSucceeded():
+        setState(() {
+          _errorText = null;
+          _showAddTimestamp = false;
+          _addTextController.clear();
+          _addTimestampController.clear();
+        });
+      case ActionValidationFailed(:final message):
+      case ActionPersistFailed(:final message):
+        setState(() => _errorText = message);
+    }
+  }
+
+  /// Applies [result] from deleting history entry at [index] to inline edit state.
+  void _applyDeleteResult(ActionResult result, int index) {
+    switch (result) {
+      case ActionSucceeded():
+        if (_editingIndex == index) {
+          setState(() {
+            _editingIndex = null;
+            _editingOldText = null;
+            _editingOldTimestampUtcIso = null;
+          });
+        }
+      case ActionValidationFailed(:final message):
+      case ActionPersistFailed(:final message):
+        setState(() => _errorText = message);
+    }
+  }
+
+  /// Applies [result] from updating an existing history entry to inline edit state.
+  void _applySaveEditResult(ActionResult result) {
+    switch (result) {
+      case ActionSucceeded():
+        setState(() {
+          _editingIndex = null;
+          _editingOldText = null;
+          _editingOldTimestampUtcIso = null;
+          _errorText = null;
+        });
+      case ActionValidationFailed(:final message):
+      case ActionPersistFailed(:final message):
+        setState(() => _errorText = message);
+    }
+  }
+
   /// Appends a new history entry via [BoardActionsNotifier.addHistoryEntry].
   Future<void> _handleAddEntry() async {
     if (_isSubmitting) {
@@ -1063,34 +1306,25 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
       _isSubmitting = true;
       _errorText = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .addHistoryEntry(
-          widget.task.id,
-          rawText: _addTextController.text,
-          rawTimestampOverride: _showAddTimestamp
-              ? _addTimestampController.text
-              : null,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
-        setState(() {
-          _isSubmitting = false;
-          _errorText = null;
-          _showAddTimestamp = false;
-          _addTextController.clear();
-          _addTimestampController.clear();
-        });
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .addHistoryEntry(
+            widget.task.id,
+            rawText: _addTextController.text,
+            rawTimestampOverride: _showAddTimestamp
+                ? _addTimestampController.text
+                : null,
+            locale: Localizations.localeOf(context),
+          );
+      if (!mounted) {
+        return;
+      }
+      _applyAddResult(result);
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -1113,33 +1347,23 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
       _isSubmitting = true;
       _errorText = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .deleteHistoryEntry(
-          widget.task.id,
-          timestampUtcIso: entry.timestampUtc.toIso8601String(),
-          text: entry.text,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
-        setState(() {
-          _isSubmitting = false;
-          if (_editingIndex == index) {
-            _editingIndex = null;
-            _editingOldText = null;
-            _editingOldTimestampUtcIso = null;
-          }
-        });
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .deleteHistoryEntry(
+            widget.task.id,
+            timestampUtcIso: entry.timestampUtc.toIso8601String(),
+            text: entry.text,
+            locale: Localizations.localeOf(context),
+          );
+      if (!mounted) {
+        return;
+      }
+      _applyDeleteResult(result, index);
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -1161,34 +1385,25 @@ class _TaskHistorySectionState extends ConsumerState<TaskHistorySection> {
       _isSubmitting = true;
       _errorText = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .updateHistoryEntry(
-          widget.task.id,
-          oldTimestampUtcIso: oldTimestampUtcIso,
-          oldText: oldText,
-          rawNewText: _editTextController.text,
-          rawNewTimestamp: _editTimestampController.text,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
-        setState(() {
-          _isSubmitting = false;
-          _editingIndex = null;
-          _editingOldText = null;
-          _editingOldTimestampUtcIso = null;
-          _errorText = null;
-        });
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .updateHistoryEntry(
+            widget.task.id,
+            oldTimestampUtcIso: oldTimestampUtcIso,
+            oldText: oldText,
+            rawNewText: _editTextController.text,
+            rawNewTimestamp: _editTimestampController.text,
+            locale: Localizations.localeOf(context),
+          );
+      if (!mounted) {
+        return;
+      }
+      _applySaveEditResult(result);
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -1299,7 +1514,7 @@ class _TaskPrerequisitesEditCard extends StatelessWidget {
         onSave: onSave,
         isBusy: isBusy,
       ),
-      child: _TaskPrerequisitesPickerBody(
+      child: TaskPrerequisitesPickerBody(
         candidates: candidates,
         selectedIds: selectedIds,
         isBusy: isBusy,
@@ -1307,85 +1522,6 @@ class _TaskPrerequisitesEditCard extends StatelessWidget {
         onCancel: onCancel,
       ),
     );
-  }
-}
-
-/// Description copy and searchable prerequisite picker body for [_TaskPrerequisitesEditCard].
-class _TaskPrerequisitesPickerBody extends StatelessWidget {
-  /// Creates a [_TaskPrerequisitesPickerBody].
-  const _TaskPrerequisitesPickerBody({
-    required this.candidates,
-    required this.selectedIds,
-    required this.isBusy,
-    required this.onToggleOption,
-    required this.onCancel,
-  });
-
-  /// Candidate open tasks including cycle-blocked markers.
-  final List<PrerequisiteCandidate> candidates;
-
-  /// Whether a save mutation is in flight.
-  final bool isBusy;
-
-  /// Callback closing the prerequisite picker on Escape.
-  final VoidCallback onCancel;
-
-  /// Callback toggling selection of a candidate task identifier.
-  final ValueChanged<String> onToggleOption;
-
-  /// Currently selected prerequisite task identifiers.
-  final Set<String> selectedIds;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Text(
-          localizations.taskBlockedBySectionDescription,
-          style: tokens.typography.meta.copyWith(color: tokens.colors.muted),
-        ),
-        SizedBox(height: tokens.spacing.space2),
-        UiSearchablePicker<String>(
-          options: _pickerOptions(localizations),
-          selectedIds: selectedIds,
-          autoFocusSearch: true,
-          searchMaxLength: maxTdfTextLength,
-          searchPlaceholder: localizations.blockedBySearchHint,
-          searchClearTooltip: localizations.tooltipClearSearch,
-          emptyText: localizations.blockedBySearchNoResults,
-          onToggleOption: _handleToggleOption,
-          onRequestClose: onCancel,
-        ),
-      ],
-    );
-  }
-
-  /// Forwards picker option toggles when no mutation is in flight.
-  void _handleToggleOption(UiPickerOption<String> option) {
-    if (!isBusy) {
-      onToggleOption(option.value);
-    }
-  }
-
-  /// Maps prerequisite candidates into [UiPickerOption] entries.
-  List<UiPickerOption<String>> _pickerOptions(AppLocalizations localizations) {
-    return <UiPickerOption<String>>[
-      for (final candidate in candidates)
-        UiPickerOption<String>(
-          id: candidate.id,
-          value: candidate.id,
-          label: candidate.title,
-          enabled: !candidate.wouldCreateCycle,
-          disabledHint: candidate.wouldCreateCycle
-              ? localizations.prerequisiteCyclePreventedHint
-              : null,
-        ),
-    ];
   }
 }
 
@@ -1568,25 +1704,28 @@ class _TaskPrerequisitesSectionState
       _isSubmitting = true;
       _errorText = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .savePrerequisites(
-          widget.task.id,
-          prerequisiteIds,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .savePrerequisites(
+            widget.task.id,
+            prerequisiteIds,
+            locale: Localizations.localeOf(context),
+          );
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message):
+        case ActionPersistFailed(:final message):
+          setState(() => _errorText = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
+      }
     }
   }
 
@@ -1775,105 +1914,22 @@ class _TaskSubtasksEditCard extends StatelessWidget {
         onSave: onSave,
         isBusy: isBusy,
       ),
-      child: _TaskSubtasksEditList(
-        taskId: taskId,
+      child: TaskSubtasksEditorBody(
         rows: rows,
         newStepController: newStepController,
         newStepFocusNode: newStepFocusNode,
         autoFinish: autoFinish,
         isBusy: isBusy,
+        itemKeyPrefix: 'subtask_edit_row_$taskId',
+        addInputKey: ValueKey<String>('subtask_add_input_$taskId'),
+        addButtonKey: ValueKey<String>('subtask_add_button_$taskId'),
+        autoFinishKey: ValueKey<String>('subtask_auto_finish_toggle_$taskId'),
+        autofocusAddInput: rows.isEmpty,
         onReorder: onReorder,
         onToggleRowDone: onToggleRowDone,
         onDeleteRow: onDeleteRow,
         onAddRow: onAddRow,
         onAutoFinishChanged: onAutoFinishChanged,
-      ),
-    );
-  }
-}
-
-/// Ordered editable subtask list, add bar, and auto-finish toggle inside [_TaskSubtasksEditCard].
-class _TaskSubtasksEditList extends StatelessWidget {
-  /// Creates a [_TaskSubtasksEditList].
-  const _TaskSubtasksEditList({
-    required this.taskId,
-    required this.rows,
-    required this.newStepController,
-    required this.newStepFocusNode,
-    required this.autoFinish,
-    required this.isBusy,
-    required this.onReorder,
-    required this.onToggleRowDone,
-    required this.onDeleteRow,
-    required this.onAddRow,
-    required this.onAutoFinishChanged,
-  });
-
-  /// Auto-finish toggle state.
-  final bool autoFinish;
-
-  /// Whether a save mutation is in flight.
-  final bool isBusy;
-
-  /// Controller for the bottom new-subtask input.
-  final TextEditingController newStepController;
-
-  /// Focus node for the bottom new-subtask input.
-  final FocusNode newStepFocusNode;
-
-  /// Callback adding the typed subtask and refocusing the input.
-  final VoidCallback onAddRow;
-
-  /// Callback updating [autoFinish].
-  final ValueChanged<bool> onAutoFinishChanged;
-
-  /// Callback deleting a subtask row.
-  final UiOrderedItemActionCallback<EditableSubtaskRow> onDeleteRow;
-
-  /// Callback reordering subtask rows.
-  final UiOrderedItemReorderCallback onReorder;
-
-  /// Callback toggling completion of a subtask row.
-  final ValueChanged<int> onToggleRowDone;
-
-  /// Editable subtask rows.
-  final List<EditableSubtaskRow> rows;
-
-  /// Owning task identifier for deterministic keys.
-  final String taskId;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-
-    return UiOrderedItemList<EditableSubtaskRow>(
-      items: rows,
-      itemKey: (row, index) =>
-          ValueKey<String>('subtask_edit_row_${taskId}_${row.rowId}'),
-      onReorder: isBusy ? null : onReorder,
-      onDelete: isBusy ? null : onDeleteRow,
-      deleteTooltip: localizations.tooltipRemoveSubtask,
-      itemBuilder: (context, row, index, isEditing) => _SubtaskEditRow(
-        row: row,
-        isBusy: isBusy,
-        onToggleDone: () => onToggleRowDone(index),
-      ),
-      addBar: _SubtaskAddBar(
-        taskId: taskId,
-        controller: newStepController,
-        focusNode: newStepFocusNode,
-        autofocus: rows.isEmpty,
-        isBusy: isBusy,
-        onAddRow: onAddRow,
-      ),
-      footer: UiToggleRow(
-        key: ValueKey<String>('subtask_auto_finish_toggle_$taskId'),
-        label: localizations.subtasksAutoFinishLabel,
-        description: localizations.tooltipTaskEditorAutoFinish,
-        value: autoFinish,
-        isDense: true,
-        enabled: !isBusy,
-        onChanged: onAutoFinishChanged,
       ),
     );
   }
@@ -2045,12 +2101,14 @@ class _TaskSubtasksReadCard extends StatelessWidget {
 class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
   late final TextEditingController _newStepController;
   late final FocusNode _newStepFocusNode;
+  final List<EditableSubtaskRow> _pendingDisposals = <EditableSubtaskRow>[];
+  final List<EditableSubtaskRow> _rows = <EditableSubtaskRow>[];
 
   bool _autoFinish = false;
   String? _errorText;
+  bool _isDisposalScheduled = false;
   bool _isSubmitting = false;
   int _nextRowId = 1;
-  final List<EditableSubtaskRow> _rows = <EditableSubtaskRow>[];
 
   @override
   void initState() {
@@ -2071,7 +2129,7 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
       _errorText = null;
       _isSubmitting = false;
     } else if (oldWidget.isEditing && !widget.isEditing) {
-      _disposeRows();
+      _deferDisposeRows();
       _errorText = null;
       _isSubmitting = false;
     }
@@ -2079,7 +2137,11 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
 
   @override
   void dispose() {
-    _disposeRows();
+    _flushPendingDisposals();
+    for (final row in _rows) {
+      row.dispose();
+    }
+    _rows.clear();
     _newStepController.dispose();
     _newStepFocusNode.dispose();
     super.dispose();
@@ -2123,12 +2185,40 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
     );
   }
 
-  /// Disposes and clears all active [EditableSubtaskRow] controllers.
-  void _disposeRows() {
+  /// Queues all active [EditableSubtaskRow] controllers for post-frame disposal and clears [_rows].
+  void _deferDisposeRows() {
+    if (_rows.isEmpty) {
+      return;
+    }
     for (final row in _rows) {
-      row.dispose();
+      _enqueueDisposal(row);
     }
     _rows.clear();
+  }
+
+  /// Queues a removed [row] for post-frame disposal after its child field detaches.
+  void _enqueueDisposal(EditableSubtaskRow row) {
+    _pendingDisposals.add(row);
+    if (_isDisposalScheduled) {
+      return;
+    }
+    _isDisposalScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _flushPendingDisposals();
+    });
+  }
+
+  /// Disposes all queued subtask row controllers after the frame or during unmount.
+  void _flushPendingDisposals() {
+    _isDisposalScheduled = false;
+    if (_pendingDisposals.isEmpty) {
+      return;
+    }
+    final rows = List<EditableSubtaskRow>.of(_pendingDisposals);
+    _pendingDisposals.clear();
+    for (final row in rows) {
+      row.dispose();
+    }
   }
 
   /// Appends a new step from [_newStepController] and refocuses the add input.
@@ -2151,13 +2241,13 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
     _newStepFocusNode.requestFocus();
   }
 
-  /// Removes and disposes the editable subtask row at [index].
+  /// Removes the editable subtask row at [index] and defers disposing its controller.
   void _handleDeleteRow(EditableSubtaskRow row, int index) {
     if (index < 0 || index >= _rows.length) {
       return;
     }
     final removed = _rows.removeAt(index);
-    removed.dispose();
+    _enqueueDisposal(removed);
     setState(() => _errorText = null);
   }
 
@@ -2211,7 +2301,7 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
 
   /// Rebuilds [_rows] and [_autoFinish] from `widget.task`.
   void _seedRowsFromTask() {
-    _disposeRows();
+    _deferDisposeRows();
     for (final step in widget.task.subtasks) {
       _rows.add(
         EditableSubtaskRow(
@@ -2236,26 +2326,29 @@ class _TaskSubtasksSectionState extends ConsumerState<TaskSubtasksSection> {
       _isSubmitting = true;
       _errorText = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .saveSubtasks(
-          widget.task.id,
-          subtasks,
-          autoFinish: autoFinish,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .saveSubtasks(
+            widget.task.id,
+            subtasks,
+            autoFinish: autoFinish,
+            locale: Localizations.localeOf(context),
+          );
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message):
+        case ActionPersistFailed(:final message):
+          setState(() => _errorText = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
+      }
     }
   }
 

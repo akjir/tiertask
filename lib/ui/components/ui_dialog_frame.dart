@@ -409,10 +409,7 @@ class _UiBottomSheetShell extends StatelessWidget {
       key: const ValueKey<String>('ui_bottom_sheet'),
       type: MaterialType.transparency,
       child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: double.infinity,
-          maxHeight: viewportHeight * 0.78,
-        ),
+        constraints: BoxConstraints(maxHeight: viewportHeight * 0.78),
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: colors.panel,
@@ -489,7 +486,6 @@ class _UiBottomSheetShell extends StatelessWidget {
                       if (doneLabel case final done?)
                         UiButton(
                           label: done,
-                          variant: UiButtonVariant.secondary,
                           density: UiButtonDensity.compact,
                           onPressed: onDone,
                         ),

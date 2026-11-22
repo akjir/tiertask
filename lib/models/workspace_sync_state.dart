@@ -24,17 +24,6 @@ import 'tdf_error.dart';
 /// generations, raw source digests, and HTTP conditional request validators.
 @immutable
 class WorkspaceSyncState {
-  const WorkspaceSyncState._({
-    this.lastSyncedLocalTdf,
-    this.lastSyncedRemoteTdf,
-    this.acknowledgedLocalGeneration,
-    this.acknowledgedRemoteGeneration,
-    this.localSourceDigest,
-    this.remoteSourceDigest,
-    this.remoteEtag,
-    this.remoteLastModified,
-  });
-
   /// Creates a validated [WorkspaceSyncState], atomically clearing any target
   /// whose canonical `tdf 0.8.0\n` baseline, acknowledged generation, or
   /// 64-character lowercase SHA-256 source digest is missing or invalid.
@@ -58,9 +47,14 @@ class WorkspaceSyncState {
       acknowledgedGeneration: acknowledgedRemoteGeneration,
       sourceDigest: remoteSourceDigest,
     );
+    final resolvedLocal = validLocal ? lastSyncedLocalTdf : null;
+    final rawRemote = validRemote ? lastSyncedRemoteTdf : null;
+    final resolvedRemote = resolvedLocal != null && rawRemote == resolvedLocal
+        ? resolvedLocal
+        : rawRemote;
     return WorkspaceSyncState._(
-      lastSyncedLocalTdf: validLocal ? lastSyncedLocalTdf : null,
-      lastSyncedRemoteTdf: validRemote ? lastSyncedRemoteTdf : null,
+      lastSyncedLocalTdf: resolvedLocal,
+      lastSyncedRemoteTdf: resolvedRemote,
       acknowledgedLocalGeneration: validLocal
           ? acknowledgedLocalGeneration
           : null,
@@ -74,44 +68,97 @@ class WorkspaceSyncState {
     );
   }
 
+  const WorkspaceSyncState._({
+    this.lastSyncedLocalTdf,
+    this.lastSyncedRemoteTdf,
+    this.acknowledgedLocalGeneration,
+    this.acknowledgedRemoteGeneration,
+    this.localSourceDigest,
+    this.remoteSourceDigest,
+    this.remoteEtag,
+    this.remoteLastModified,
+  });
+
   /// Reconstructs a [WorkspaceSyncState] from its compact `TTS\x04` binary
   /// payload, returning [empty] if [bytes] is truncated, malformed, or uses any
   /// wire format version other than `4` (`TDF-MERGE-001`).
   factory WorkspaceSyncState.fromBytes(List<int> bytes) {
-    if (!_hasValidHeader(bytes)) {
+    if (bytes.length > maxSerializedBytes || !_hasValidHeader(bytes)) {
       return empty;
     }
+    final typedBytes = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
     var offset = 4;
-    final (localTdf, next1, ok1) = _readNullableString(bytes, offset);
+    final (localSlice, next1, ok1) = _readNullableBytes(
+      typedBytes,
+      offset,
+      maxBytes: maxTdfFileBytes,
+    );
     if (!ok1) return empty;
+    final localTdf = _decodeOptionalUtf8(localSlice);
+    if (localSlice != null && localTdf == null) return empty;
     offset = next1;
 
-    final (remoteTdf, next2, ok2) = _readNullableString(bytes, offset);
+    final (remoteSlice, next2, ok2) = _readNullableBytes(
+      typedBytes,
+      offset,
+      maxBytes: maxTdfFileBytes,
+    );
     if (!ok2) return empty;
+    final String? remoteTdf;
+    if (remoteSlice == null) {
+      remoteTdf = null;
+    } else if (localSlice != null && _bytesEqual(localSlice, remoteSlice)) {
+      remoteTdf = localTdf;
+    } else {
+      remoteTdf = _decodeOptionalUtf8(remoteSlice);
+      if (remoteTdf == null) return empty;
+    }
     offset = next2;
 
-    final (localGeneration, next3, ok3) = _readNullableInt64(bytes, offset);
+    final (localGeneration, next3, ok3) = _readNullableInt64(
+      typedBytes,
+      offset,
+    );
     if (!ok3) return empty;
     offset = next3;
 
-    final (remoteGeneration, next4, ok4) = _readNullableInt64(bytes, offset);
+    final (remoteGeneration, next4, ok4) = _readNullableInt64(
+      typedBytes,
+      offset,
+    );
     if (!ok4) return empty;
     offset = next4;
 
-    final (localDigest, next5, ok5) = _readNullableString(bytes, offset);
+    final (localDigest, next5, ok5) = _readNullableString(
+      typedBytes,
+      offset,
+      maxBytes: _maxMetadataStringBytes,
+    );
     if (!ok5) return empty;
     offset = next5;
 
-    final (remoteDigest, next6, ok6) = _readNullableString(bytes, offset);
+    final (remoteDigest, next6, ok6) = _readNullableString(
+      typedBytes,
+      offset,
+      maxBytes: _maxMetadataStringBytes,
+    );
     if (!ok6) return empty;
     offset = next6;
 
-    final (etag, next7, ok7) = _readNullableString(bytes, offset);
+    final (etag, next7, ok7) = _readNullableString(
+      typedBytes,
+      offset,
+      maxBytes: _maxMetadataStringBytes,
+    );
     if (!ok7) return empty;
     offset = next7;
 
-    final (lastModified, next8, ok8) = _readNullableString(bytes, offset);
-    if (!ok8 || next8 != bytes.length) {
+    final (lastModified, next8, ok8) = _readNullableString(
+      typedBytes,
+      offset,
+      maxBytes: _maxMetadataStringBytes,
+    );
+    if (!ok8 || next8 != typedBytes.length) {
       return empty;
     }
 
@@ -138,7 +185,7 @@ class WorkspaceSyncState {
   static const int _magicByte0 = 0x54;
   static const int _magicByte1 = 0x54;
   static const int _magicByte2 = 0x53;
-  static const int _maxStringByteLength = 16777216;
+  static const int _maxMetadataStringBytes = 4096;
   static const int _sha256HexLength = 64;
   static const Utf8Codec _utf8Codec = Utf8Codec();
 
@@ -230,6 +277,31 @@ class WorkspaceSyncState {
     return builder.toBytes();
   }
 
+  /// Returns `true` when [first] and [second] contain identical byte sequences.
+  static bool _bytesEqual(Uint8List first, Uint8List second) {
+    if (first.length != second.length) {
+      return false;
+    }
+    for (var i = 0; i < first.length; i++) {
+      if (first[i] != second[i]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Decodes optional UTF-8 [slice], returning `null` when [slice] is `null` or malformed.
+  static String? _decodeOptionalUtf8(Uint8List? slice) {
+    if (slice == null) {
+      return null;
+    }
+    try {
+      return _utf8Codec.decode(slice);
+    } on FormatException {
+      return null;
+    }
+  }
+
   /// Returns `true` when [bytes] starts with the 4-byte `TTS\x04` header.
   static bool _hasValidHeader(List<int> bytes) =>
       bytes.length >= 4 &&
@@ -274,25 +346,12 @@ class WorkspaceSyncState {
     return _isValidSha256Hex(sourceDigest);
   }
 
-  /// Reads a 1-byte presence flag and optional big-endian signed 64-bit integer from [bytes] at [offset].
-  static (int?, int, bool) _readNullableInt64(List<int> bytes, int offset) {
-    if (offset >= bytes.length) {
-      return (null, offset, false);
-    }
-    final presence = bytes[offset];
-    if (presence == 0) {
-      return (null, offset + 1, true);
-    }
-    if (presence != 1 || offset + 9 > bytes.length) {
-      return (null, offset, false);
-    }
-    final slice = Uint8List.fromList(bytes.sublist(offset + 1, offset + 9));
-    final value = ByteData.sublistView(slice).getInt64(0);
-    return (value, offset + 9, true);
-  }
-
-  /// Reads a 1-byte presence flag and optional length-prefixed UTF-8 string from [bytes] at [offset].
-  static (String?, int, bool) _readNullableString(List<int> bytes, int offset) {
+  /// Reads a 1-byte presence flag and optional length-prefixed zero-copy byte view bounded by [maxBytes] from [bytes] at [offset].
+  static (Uint8List?, int, bool) _readNullableBytes(
+    Uint8List bytes,
+    int offset, {
+    required int maxBytes,
+  }) {
     if (offset >= bytes.length) {
       return (null, offset, false);
     }
@@ -303,20 +362,64 @@ class WorkspaceSyncState {
     if (presence != 1 || offset + 5 > bytes.length) {
       return (null, offset, false);
     }
-    final lengthSlice = Uint8List.fromList(
-      bytes.sublist(offset + 1, offset + 5),
-    );
-    final byteLength = ByteData.sublistView(lengthSlice).getUint32(0);
+    final byteLength = ByteData.sublistView(
+      bytes,
+      offset + 1,
+      offset + 5,
+    ).getUint32(0);
+    if (byteLength > maxBytes || byteLength > bytes.length - (offset + 5)) {
+      return (null, offset, false);
+    }
     final endOffset = offset + 5 + byteLength;
-    if (byteLength > _maxStringByteLength || endOffset > bytes.length) {
+    return (
+      Uint8List.sublistView(bytes, offset + 5, endOffset),
+      endOffset,
+      true,
+    );
+  }
+
+  /// Reads a 1-byte presence flag and optional big-endian signed 64-bit integer from [bytes] at [offset].
+  static (int?, int, bool) _readNullableInt64(Uint8List bytes, int offset) {
+    if (offset >= bytes.length) {
       return (null, offset, false);
     }
-    try {
-      final decoded = _utf8Codec.decode(bytes.sublist(offset + 5, endOffset));
-      return (decoded, endOffset, true);
-    } on FormatException {
+    final presence = bytes[offset];
+    if (presence == 0) {
+      return (null, offset + 1, true);
+    }
+    if (presence != 1 || offset + 9 > bytes.length) {
       return (null, offset, false);
     }
+    final value = ByteData.sublistView(
+      bytes,
+      offset + 1,
+      offset + 9,
+    ).getInt64(0);
+    return (value, offset + 9, true);
+  }
+
+  /// Reads a 1-byte presence flag and optional length-prefixed UTF-8 string bounded by [maxBytes] from [bytes] at [offset].
+  static (String?, int, bool) _readNullableString(
+    Uint8List bytes,
+    int offset, {
+    required int maxBytes,
+  }) {
+    final (slice, endOffset, ok) = _readNullableBytes(
+      bytes,
+      offset,
+      maxBytes: maxBytes,
+    );
+    if (!ok) {
+      return (null, offset, false);
+    }
+    if (slice == null) {
+      return (null, endOffset, true);
+    }
+    final decoded = _decodeOptionalUtf8(slice);
+    if (decoded == null) {
+      return (null, offset, false);
+    }
+    return (decoded, endOffset, true);
   }
 
   /// Appends a nullable big-endian signed 64-bit integer [value] to [builder].

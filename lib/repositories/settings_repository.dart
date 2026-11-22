@@ -15,15 +15,17 @@
 
 import 'dart:convert' show Utf8Codec;
 import 'dart:io';
-import 'dart:typed_data' show BytesBuilder;
+import 'dart:isolate';
+import 'dart:typed_data' show BytesBuilder, Uint8List;
 
+import 'package:flutter/foundation.dart' show immutable, visibleForTesting;
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../models/app_build_profile.dart';
 import '../models/app_workspace.dart';
-import '../models/legacy_ttw_v2_converter.dart';
 import '../models/settings_codec.dart';
+import '../models/tdf_file_path.dart';
 import '../models/webdav_config.dart';
 import '../models/workspace_sync_state.dart';
 import '../services/app_logger.dart';
@@ -148,6 +150,15 @@ class InMemorySettingsRepository implements SettingsRepository {
   }
 
   @override
+  Future<void> saveConfigForWorkspace(
+    String workspaceId,
+    WebDavConfig config,
+  ) async {
+    final target = _findWorkspace(_workspaces, workspaceId);
+    _workspaces = _updateWorkspaceConfigEntry(_workspaces, target.id, config);
+  }
+
+  @override
   Future<void> saveWorkspaceSyncState(
     String workspaceId,
     WorkspaceSyncState state,
@@ -198,39 +209,62 @@ class SecureSettingsRepository implements SettingsRepository {
   static const Base64Service _base64Service = Base64Service(
     maxInputBytes: WorkspaceSyncState.maxSerializedBytes,
   );
-  static const int _gzipChunkBytes = 4096;
   static const int _gzipMagicByte0 = 0x1F;
   static const int _gzipMagicByte1 = 0x8B;
-  static const Base64Service _legacyBase64Service = Base64Service(
-    maxInputBytes: LegacyTtwV2Converter.maxBinaryBytes,
-  );
+  static const int _isolateOffloadThresholdBytes = 32768;
   static const int _maxQuarantineCollisionSlots = 100;
-  static const Utf8Codec _utf8Codec = Utf8Codec(allowMalformed: false);
+  static const Utf8Codec _utf8Codec = Utf8Codec();
 
   /// Active build storage profile determining directory and secure storage key namespaces.
   final AppBuildProfile buildProfile;
 
   final Future<String?> Function()? _androidFilesDirectoryResolver;
   final Map<String, String> _cachedPasswordsByWorkspaceId = <String, String>{};
+  String? _cachedSettingsDirectoryPath;
   String? _cachedSettingsFilePath;
+  ({
+    String filePath,
+    DateTime modified,
+    DateTime changed,
+    int size,
+    PersistedSettingsDocument document,
+    List<int> rawBytes,
+  })?
+  _cachedSettingsSnapshot;
+  final Map<String, WorkspaceSyncState> _cachedSyncStatesByWorkspaceId =
+      <String, WorkspaceSyncState>{};
   final DateTime Function() _clock;
   SettingsRecoveryNotice? _lastRecoveryNotice;
   final HostFileLockManager<WorkspaceException> _lockManager;
+  final Set<String> _migratedOrAbsentLegacySyncIds = <String>{};
+  int _settingsDiskReadCount = 0;
   final String? _settingsDirectoryOverride;
   final FlutterSecureStorage _storage;
+  int _syncStateDiskReadCount = 0;
   final Set<String> _unreadableSecretWorkspaceIds = <String>{};
+
+  /// Number of primary `settings.json` disk reads executed by this repository instance.
+  @visibleForTesting
+  int get settingsDiskReadCountForTesting => _settingsDiskReadCount;
+
+  /// Number of `.tts` sync state disk reads executed by this repository instance.
+  @visibleForTesting
+  int get syncStateDiskReadCountForTesting => _syncStateDiskReadCount;
 
   @override
   Future<AppWorkspace> activateWorkspace(String workspaceId) async {
     final settingsFilePath = await _resolveSettingsFilePath();
     return _lockManager.withExclusiveLock(settingsFilePath, () async {
-      final document = await _loadDocumentLocked(settingsFilePath);
-      final target = _findWorkspace(document.workspaces, workspaceId);
-      final updatedDocument = document.copyWith(activeWorkspaceId: target.id);
+      final loaded = await _loadDocumentLocked(settingsFilePath);
+      final target = _findWorkspace(loaded.document.workspaces, workspaceId);
+      final updatedDocument = loaded.document.copyWith(
+        activeWorkspaceId: target.id,
+      );
       await _persistDocumentLocked(
         settingsFilePath,
         updatedDocument,
         secretUpdated: false,
+        priorPrimaryBytes: loaded.primaryBytes,
       );
       return _hydrateWorkspacePassword(target, updatedDocument);
     });
@@ -245,7 +279,8 @@ class SecureSettingsRepository implements SettingsRepository {
   }) async {
     final settingsFilePath = await _resolveSettingsFilePath();
     return _lockManager.withExclusiveLock(settingsFilePath, () async {
-      final document = await _loadDocumentLocked(settingsFilePath);
+      final loaded = await _loadDocumentLocked(settingsFilePath);
+      final document = loaded.document;
       final created = _buildNewWorkspace(
         document.workspaces,
         name,
@@ -267,11 +302,26 @@ class SecureSettingsRepository implements SettingsRepository {
         workspaces: <AppWorkspace>[...document.workspaces, persistedEntry],
         passwordStoredWorkspaceIds: nextPasswordIds,
       );
-      await _persistDocumentLocked(
-        settingsFilePath,
-        updatedDocument,
-        secretUpdated: secretUpdated,
-      );
+      try {
+        await _persistDocumentLocked(
+          settingsFilePath,
+          updatedDocument,
+          secretUpdated: secretUpdated,
+          priorPrimaryBytes: loaded.primaryBytes,
+        );
+      } on Object {
+        if (secretUpdated) {
+          await _rollbackWorkspacePasswordQuietly(
+            created.id,
+            const _PasswordRollbackSnapshot(
+              hadStoredSecret: false,
+              wasCached: false,
+              wasUnreadable: false,
+            ),
+          );
+        }
+        rethrow;
+      }
       return created;
     });
   }
@@ -279,50 +329,62 @@ class SecureSettingsRepository implements SettingsRepository {
   @override
   Future<AppWorkspace> deleteWorkspace(String workspaceId) async {
     final settingsFilePath = await _resolveSettingsFilePath();
-    return _lockManager.withExclusiveLock(settingsFilePath, () async {
-      final document = await _loadDocumentLocked(settingsFilePath);
-      final updated = _removeWorkspace(
-        document.workspaces,
-        document.activeWorkspaceId,
-        workspaceId,
-      );
-      final targetId = workspaceId.trim();
-      final nextPasswordIds = Set<String>.from(
-        document.passwordStoredWorkspaceIds,
-      )..remove(targetId);
-      final nextUnknownById = Map<String, Map<String, Object?>>.from(
-        document.unknownWorkspaceFieldsById,
-      )..remove(targetId);
-      final updatedDocument = document.copyWith(
-        activeWorkspaceId: updated.activeId,
-        workspaces: updated.workspaces,
-        passwordStoredWorkspaceIds: nextPasswordIds,
-        unknownWorkspaceFieldsById: nextUnknownById,
-      );
-      await _persistDocumentLocked(
-        settingsFilePath,
-        updatedDocument,
-        secretUpdated: false,
-      );
-      _cachedPasswordsByWorkspaceId.remove(targetId);
-      _unreadableSecretWorkspaceIds.remove(targetId);
-      await _deleteKeyQuietly(
-        '${buildProfile.webdavPasswordKeyPrefix}$targetId',
-      );
-      await _deleteKeyQuietly('${buildProfile.syncStorageKeyPrefix}$targetId');
-      final active = _resolveActiveWorkspace(
-        updatedDocument.workspaces,
-        updatedDocument.activeWorkspaceId,
-      );
-      return _hydrateWorkspacePassword(active, updatedDocument);
-    });
+    final targetId = workspaceId.trim();
+    final activeWorkspace = await _lockManager.withExclusiveLock(
+      settingsFilePath,
+      () async {
+        final loaded = await _loadDocumentLocked(settingsFilePath);
+        final document = loaded.document;
+        final updated = _removeWorkspace(
+          document.workspaces,
+          document.activeWorkspaceId,
+          workspaceId,
+        );
+        final nextPasswordIds = Set<String>.from(
+          document.passwordStoredWorkspaceIds,
+        )..remove(targetId);
+        final nextUnknownById = Map<String, Map<String, Object?>>.from(
+          document.unknownWorkspaceFieldsById,
+        )..remove(targetId);
+        final updatedDocument = document.copyWith(
+          activeWorkspaceId: updated.activeId,
+          workspaces: updated.workspaces,
+          passwordStoredWorkspaceIds: nextPasswordIds,
+          unknownWorkspaceFieldsById: nextUnknownById,
+        );
+        await _persistDocumentLocked(
+          settingsFilePath,
+          updatedDocument,
+          secretUpdated: false,
+          priorPrimaryBytes: loaded.primaryBytes,
+        );
+        _cachedPasswordsByWorkspaceId.remove(targetId);
+        _unreadableSecretWorkspaceIds.remove(targetId);
+        _cachedSyncStatesByWorkspaceId.remove(targetId);
+        _migratedOrAbsentLegacySyncIds.remove(targetId);
+        await _deleteKeyQuietly(
+          '${buildProfile.webdavPasswordKeyPrefix}$targetId',
+        );
+        await _deleteKeyQuietly(
+          '${buildProfile.syncStorageKeyPrefix}$targetId',
+        );
+        final active = _resolveActiveWorkspace(
+          updatedDocument.workspaces,
+          updatedDocument.activeWorkspaceId,
+        );
+        return _hydrateWorkspacePassword(active, updatedDocument);
+      },
+    );
+    await _deleteSyncStateFileQuietly(targetId);
+    return activeWorkspace;
   }
 
   @override
   Future<AppWorkspace> loadActiveWorkspace() async {
     final settingsFilePath = await _resolveSettingsFilePath();
     return _lockManager.withExclusiveLock(settingsFilePath, () async {
-      final document = await _loadDocumentLocked(settingsFilePath);
+      final loaded = await _loadDocumentLocked(settingsFilePath);
+      final document = loaded.document;
       final active = _resolveActiveWorkspace(
         document.workspaces,
         document.activeWorkspaceId,
@@ -341,29 +403,63 @@ class SecureSettingsRepository implements SettingsRepository {
   Future<List<WorkspaceSummary>> loadWorkspaceSummaries() async {
     final settingsFilePath = await _resolveSettingsFilePath();
     return _lockManager.withExclusiveLock(settingsFilePath, () async {
-      final document = await _loadDocumentLocked(settingsFilePath);
+      final loaded = await _loadDocumentLocked(settingsFilePath);
       return List<WorkspaceSummary>.unmodifiable(<WorkspaceSummary>[
-        for (final workspace in document.workspaces) workspace.summary,
+        for (final workspace in loaded.document.workspaces) workspace.summary,
       ]);
     });
   }
 
   @override
   Future<WorkspaceSyncState> loadWorkspaceSyncState(String workspaceId) async {
-    try {
-      final raw = await _storage.read(
-        key: '${buildProfile.syncStorageKeyPrefix}${workspaceId.trim()}',
+    final targetId = _tryValidateSyncWorkspaceId(workspaceId);
+    if (targetId == null) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.storage,
+        'settings.sync_state.invalid_workspace_id',
       );
-      if (raw == null || raw.trim().isEmpty) {
-        return WorkspaceSyncState.empty;
-      }
-      final bytes = _base64Service.decodeBytes(raw.trim());
-      final wireBytes = _decodeSyncStateWireBytes(bytes);
-      if (wireBytes == null) {
-        return WorkspaceSyncState.empty;
-      }
-      return WorkspaceSyncState.fromBytes(wireBytes);
+      return WorkspaceSyncState.empty;
+    }
+    if (_cachedSyncStatesByWorkspaceId[targetId] case final cached?) {
+      return cached;
+    }
+    try {
+      final syncFilePath = await _resolveSyncStateFilePath(targetId);
+      return await _lockManager.withExclusiveLock(syncFilePath, () async {
+        if (_cachedSyncStatesByWorkspaceId[targetId] case final cached?) {
+          return cached;
+        }
+        final entityType = FileSystemEntity.typeSync(
+          syncFilePath,
+          followLinks: false,
+        );
+        if (entityType == FileSystemEntityType.file) {
+          return _loadSyncStateFromFileLocked(targetId, syncFilePath);
+        }
+        if (entityType != FileSystemEntityType.notFound) {
+          AppLogger.event(
+            LogLevel.warn,
+            LogTag.storage,
+            'settings.sync_state.invalid_file_type',
+            fields: <String, Object?>{
+              'workspace_id': targetId,
+              'entity_type': _entityTypeToken(entityType),
+            },
+          );
+          return WorkspaceSyncState.empty;
+        }
+        if (_migratedOrAbsentLegacySyncIds.contains(targetId)) {
+          return WorkspaceSyncState.empty;
+        }
+        return _migrateLegacySyncStateLocked(targetId, syncFilePath);
+      });
     } on Object {
+      _logSyncStateCorrupt(
+        workspaceId: targetId,
+        source: 'load',
+        reason: 'unexpected_error',
+      );
       return WorkspaceSyncState.empty;
     }
   }
@@ -375,7 +471,8 @@ class SecureSettingsRepository implements SettingsRepository {
   ) async {
     final settingsFilePath = await _resolveSettingsFilePath();
     return _lockManager.withExclusiveLock(settingsFilePath, () async {
-      final document = await _loadDocumentLocked(settingsFilePath);
+      final loaded = await _loadDocumentLocked(settingsFilePath);
+      final document = loaded.document;
       final updated = _renameWorkspaceEntry(
         document.workspaces,
         workspaceId,
@@ -386,38 +483,53 @@ class SecureSettingsRepository implements SettingsRepository {
         settingsFilePath,
         updatedDocument,
         secretUpdated: false,
+        priorPrimaryBytes: loaded.primaryBytes,
       );
       return _hydrateWorkspacePassword(updated.renamed, updatedDocument);
     });
   }
 
+  /// Exposes the resolved `settings.json` path for cross-platform path-handling unit tests.
+  @visibleForTesting
+  Future<String> resolveSettingsFilePathForTesting() =>
+      _resolveSettingsFilePath();
+
   @override
   Future<void> saveConfig(WebDavConfig config) async {
     final settingsFilePath = await _resolveSettingsFilePath();
     await _lockManager.withExclusiveLock(settingsFilePath, () async {
-      final document = await _loadDocumentLocked(settingsFilePath);
+      final loaded = await _loadDocumentLocked(settingsFilePath);
+      final document = loaded.document;
       final active = _resolveActiveWorkspace(
         document.workspaces,
         document.activeWorkspaceId,
       );
-      final updatedWorkspaces = _updateWorkspaceConfigEntry(
-        document.workspaces,
-        active.id,
-        config.copyWith(password: ''),
-      );
-      final secretSync = await _syncPasswordForSave(
-        active.id,
-        config.password,
-        document.passwordStoredWorkspaceIds,
-      );
-      final updatedDocument = document.copyWith(
-        workspaces: updatedWorkspaces,
-        passwordStoredWorkspaceIds: secretSync.nextStoredIds,
-      );
-      await _persistDocumentLocked(
+      await _saveWorkspaceConfigLocked(
         settingsFilePath,
-        updatedDocument,
-        secretUpdated: secretSync.secretUpdated,
+        document,
+        active.id,
+        config,
+        priorPrimaryBytes: loaded.primaryBytes,
+      );
+    });
+  }
+
+  @override
+  Future<void> saveConfigForWorkspace(
+    String workspaceId,
+    WebDavConfig config,
+  ) async {
+    final settingsFilePath = await _resolveSettingsFilePath();
+    await _lockManager.withExclusiveLock(settingsFilePath, () async {
+      final loaded = await _loadDocumentLocked(settingsFilePath);
+      final document = loaded.document;
+      final target = _findWorkspace(document.workspaces, workspaceId);
+      await _saveWorkspaceConfigLocked(
+        settingsFilePath,
+        document,
+        target.id,
+        config,
+        priorPrimaryBytes: loaded.primaryBytes,
       );
     });
   }
@@ -427,14 +539,41 @@ class SecureSettingsRepository implements SettingsRepository {
     String workspaceId,
     WorkspaceSyncState state,
   ) async {
-    final rawBytes = state.toBytes();
-    final compressed = gzip.encode(rawBytes);
-    final payload = compressed.length < rawBytes.length ? compressed : rawBytes;
-    final encoded = _base64Service.encodeBytes(payload);
-    await _storage.write(
-      key: '${buildProfile.syncStorageKeyPrefix}${workspaceId.trim()}',
-      value: encoded,
-    );
+    final targetId = _tryValidateSyncWorkspaceId(workspaceId);
+    if (targetId == null) {
+      throw const WorkspaceException(
+        WorkspaceErrorKind.settingsPersistenceFailed,
+        'Invalid workspace identifier for sync state.',
+      );
+    }
+    final syncFilePath = await _resolveSyncStateFilePath(targetId);
+    await _lockManager.withExclusiveLock(syncFilePath, () async {
+      final entityType = _inspectFileType(syncFilePath, 'sync_state');
+      if (state == WorkspaceSyncState.empty) {
+        if (entityType == FileSystemEntityType.file) {
+          try {
+            File(syncFilePath).deleteSync();
+          } on FileSystemException catch (error) {
+            throw WorkspaceException(
+              WorkspaceErrorKind.settingsPersistenceFailed,
+              'Could not delete workspace sync state file.',
+              cause: error,
+            );
+          }
+        }
+        _cachedSyncStatesByWorkspaceId.remove(targetId);
+        _migratedOrAbsentLegacySyncIds.add(targetId);
+        await _deleteKeyQuietly(
+          '${buildProfile.syncStorageKeyPrefix}$targetId',
+        );
+        return;
+      }
+      _ensureParentDirectory(syncFilePath);
+      final payload = await _encodeSyncStatePayload(state);
+      await _lockManager.writeAtomically(syncFilePath, payload);
+      _cachedSyncStatesByWorkspaceId[targetId] = state;
+      _migratedOrAbsentLegacySyncIds.add(targetId);
+    });
   }
 
   @override
@@ -444,8 +583,30 @@ class SecureSettingsRepository implements SettingsRepository {
     return notice;
   }
 
-  /// Decompresses gzip-wrapped [bytes] with a strict upper output bound, or returns raw `TTS\x04` bytes directly.
-  List<int>? _decodeSyncStateWireBytes(List<int> bytes) {
+  /// Captures prior keyring and cache state for [workspaceId] before a password mutation so persistence failures roll back cleanly.
+  Future<_PasswordRollbackSnapshot> _capturePasswordRollbackSnapshot(
+    String workspaceId,
+    Set<String> currentStoredIds,
+  ) async {
+    final hadStoredSecret = currentStoredIds.contains(workspaceId);
+    final wasCached = _cachedPasswordsByWorkspaceId.containsKey(workspaceId);
+    final wasUnreadable = _unreadableSecretWorkspaceIds.contains(workspaceId);
+    var previousPassword = _cachedPasswordsByWorkspaceId[workspaceId];
+    if (hadStoredSecret && !wasCached) {
+      previousPassword = await _readKeyQuietly(
+        '${buildProfile.webdavPasswordKeyPrefix}$workspaceId',
+      );
+    }
+    return _PasswordRollbackSnapshot(
+      hadStoredSecret: hadStoredSecret,
+      previousPassword: previousPassword,
+      wasCached: wasCached,
+      wasUnreadable: wasUnreadable,
+    );
+  }
+
+  /// Decompresses gzip-wrapped [bytes] with a strict upper output bound, offloading to a worker isolate when payload length meets [_isolateOffloadThresholdBytes].
+  Future<List<int>?> _decodeSyncStateWireBytes(List<int> bytes) async {
     final isGzip =
         bytes.length >= 2 &&
         bytes[0] == _gzipMagicByte0 &&
@@ -453,28 +614,40 @@ class SecureSettingsRepository implements SettingsRepository {
     if (!isGzip) {
       return bytes;
     }
-    final sink = _BoundedBytesSink(WorkspaceSyncState.maxSerializedBytes);
-    final inputSink = gzip.decoder.startChunkedConversion(sink);
-    for (var offset = 0; offset < bytes.length; offset += _gzipChunkBytes) {
-      final end = offset + _gzipChunkBytes < bytes.length
-          ? offset + _gzipChunkBytes
-          : bytes.length;
-      inputSink.add(bytes.sublist(offset, end));
-      if (sink.exceeded) {
-        return null;
-      }
+    if (bytes.length >= _isolateOffloadThresholdBytes) {
+      return Isolate.run(() => _decodeGzipSyncStateBytesSync(bytes));
     }
-    inputSink.close();
-    if (sink.exceeded) {
-      return null;
-    }
-    return sink.takeBytes();
+    return _decodeGzipSyncStateBytesSync(bytes);
   }
 
   /// Best-effort deletes [key] from [_storage], ignoring unavailable keyring errors.
   Future<void> _deleteKeyQuietly(String key) async {
     try {
       await _storage.write(key: key, value: null);
+    } on Object {
+      // Best-effort cleanup after workspace removal.
+    }
+  }
+
+  /// Best-effort deletes the host-local `.tts` sync state file and evicts in-memory sync caches for [workspaceId] under its exclusive lock.
+  Future<void> _deleteSyncStateFileQuietly(String workspaceId) async {
+    final targetId = _tryValidateSyncWorkspaceId(workspaceId);
+    if (targetId == null) {
+      return;
+    }
+    try {
+      final syncFilePath = await _resolveSyncStateFilePath(targetId);
+      await _lockManager.withExclusiveLock(syncFilePath, () async {
+        try {
+          if (FileSystemEntity.typeSync(syncFilePath, followLinks: false) ==
+              FileSystemEntityType.file) {
+            File(syncFilePath).deleteSync();
+          }
+        } finally {
+          _cachedSyncStatesByWorkspaceId.remove(targetId);
+          _migratedOrAbsentLegacySyncIds.remove(targetId);
+        }
+      });
     } on Object {
       // Best-effort cleanup after workspace removal.
     }
@@ -499,6 +672,15 @@ class SecureSettingsRepository implements SettingsRepository {
         cause: error,
       );
     }
+  }
+
+  /// Serializes [state] as gzip-compressed `TTS\x04` bytes when compression reduces size, offloading to a worker isolate when raw payload length meets [_isolateOffloadThresholdBytes].
+  Future<List<int>> _encodeSyncStatePayload(WorkspaceSyncState state) async {
+    final rawBytes = state.toBytes();
+    if (rawBytes.length >= _isolateOffloadThresholdBytes) {
+      return Isolate.run(() => _compressSyncStateBytesSync(rawBytes));
+    }
+    return _compressSyncStateBytesSync(rawBytes);
   }
 
   /// Populates [workspace]'s WebDAV password from cache or [_storage] when stored.
@@ -575,20 +757,38 @@ class SecureSettingsRepository implements SettingsRepository {
     return _androidStorageChannel.invokeMethod<String>('getFilesDirectory');
   }
 
-  /// Loads `settings.json` under the exclusive lock, performing backup recovery, quarantine, or legacy migration.
-  Future<PersistedSettingsDocument> _loadDocumentLocked(
-    String settingsFilePath,
-  ) async {
+  /// Loads `settings.json` under the exclusive lock, reusing the stat-validated cache when unchanged and performing backup recovery or quarantine when corrupt.
+  Future<({PersistedSettingsDocument document, List<int>? primaryBytes})>
+  _loadDocumentLocked(String settingsFilePath) async {
     final backupPath = '$settingsFilePath.bak';
     final primaryType = _inspectFileType(settingsFilePath, 'primary');
     final backupType = _inspectFileType(backupPath, 'backup');
 
     if (primaryType == FileSystemEntityType.file) {
+      final stat = FileStat.statSync(settingsFilePath);
+      if (_cachedSettingsSnapshot case final cached?
+          when cached.filePath == settingsFilePath &&
+              cached.modified == stat.modified &&
+              cached.changed == stat.changed &&
+              cached.size == stat.size) {
+        _logSettingsLoad(cached.document);
+        return (document: cached.document, primaryBytes: cached.rawBytes);
+      }
       final decodedPrimary = _tryReadAndDecodeFile(settingsFilePath);
       if (decodedPrimary != null) {
+        _updateSettingsCache(
+          settingsFilePath,
+          decodedPrimary.document,
+          decodedPrimary.rawBytes,
+          stat: stat,
+        );
         _logSettingsLoad(decodedPrimary.document);
-        return decodedPrimary.document;
+        return (
+          document: decodedPrimary.document,
+          primaryBytes: decodedPrimary.rawBytes,
+        );
       }
+      _cachedSettingsSnapshot = null;
       final quarantinedPrimary = _quarantineCorruptFile(settingsFilePath);
       return _recoverFromBackupOrResetLocked(
         settingsFilePath,
@@ -598,6 +798,7 @@ class SecureSettingsRepository implements SettingsRepository {
       );
     }
 
+    _cachedSettingsSnapshot = null;
     if (backupType == FileSystemEntityType.file) {
       return _recoverFromBackupOrResetLocked(
         settingsFilePath,
@@ -607,122 +808,132 @@ class SecureSettingsRepository implements SettingsRepository {
       );
     }
 
-    final migrated = await _migrateLegacyTtwV2IfPresent(settingsFilePath);
-    if (migrated != null) {
-      return migrated;
-    }
     _logSettingsLoad(PersistedSettingsDocument.initial);
-    return PersistedSettingsDocument.initial;
+    return (document: PersistedSettingsDocument.initial, primaryBytes: null);
   }
 
-  /// Migrates legacy `TTW\x02` settings from [AppBuildProfile.legacySettingsStorageKey] once on first launch.
-  @Deprecated(
-    'One-time TTW\\x02 migration hook for pre-0.4.0 settings. '
-    'Scheduled for removal in 0.5.0.',
-  )
-  Future<PersistedSettingsDocument?> _migrateLegacyTtwV2IfPresent(
-    String settingsFilePath,
+  /// Reads, decompresses, and caches the host-local `.tts` sync state file for [targetId] under its exclusive lock.
+  Future<WorkspaceSyncState> _loadSyncStateFromFileLocked(
+    String targetId,
+    String syncFilePath,
   ) async {
-    final legacyKey = buildProfile.legacySettingsStorageKey;
-    final String? rawLegacy;
-    try {
-      rawLegacy = await _storage.read(key: legacyKey);
-    } on Object catch (error) {
-      _logKeyringFailure(
-        'settings.legacy_migration.keyring_unavailable',
-        error,
-        level: LogLevel.warn,
-      );
-      return null;
-    }
-    if (rawLegacy == null || rawLegacy.trim().isEmpty) {
-      return null;
-    }
-
-    final ({List<AppWorkspace> workspaces, String activeId}) legacyDecoded;
-    try {
-      final bytes = _legacyBase64Service.decodeBytes(rawLegacy.trim());
-      legacyDecoded = LegacyTtwV2Converter.decodeTtwV2Bytes(bytes);
-    } on Base64Exception catch (error) {
-      AppLogger.event(
-        LogLevel.error,
-        LogTag.storage,
-        'settings.legacy_migration.failed',
-        fields: <String, Object?>{'error_kind': error.kind.name},
-      );
-      return null;
-    } on WorkspaceException catch (error) {
-      AppLogger.event(
-        LogLevel.error,
-        LogTag.storage,
-        'settings.legacy_migration.failed',
-        fields: <String, Object?>{'error_kind': error.kind.name},
-      );
-      return null;
-    }
-
-    final passwordStoredIds = <String>{};
-    var migratedPasswords = 0;
-    for (final workspace in legacyDecoded.workspaces) {
-      if (workspace.config.password.isNotEmpty) {
-        await _writeWorkspacePassword(workspace.id, workspace.config.password);
-        passwordStoredIds.add(workspace.id);
-        migratedPasswords++;
-      }
-    }
-
-    final strippedWorkspaces = <AppWorkspace>[
-      for (final workspace in legacyDecoded.workspaces)
-        _stripPassword(workspace),
-    ];
-    final migratedDocument = PersistedSettingsDocument(
-      schemaVersion: SettingsCodec.currentSchemaVersion,
-      activeWorkspaceId: legacyDecoded.activeId,
-      workspaces: strippedWorkspaces,
-      passwordStoredWorkspaceIds: passwordStoredIds,
+    _syncStateDiskReadCount++;
+    final fileBytes = _readBoundedRegularBytes(
+      syncFilePath,
+      WorkspaceSyncState.maxSerializedBytes,
     );
-    await _persistDocumentLocked(
-      settingsFilePath,
-      migratedDocument,
-      secretUpdated: migratedPasswords > 0,
-    );
-    final verifiedReadBack = _tryReadAndDecodeFile(settingsFilePath);
-    if (verifiedReadBack == null) {
-      throw const WorkspaceException(
-        WorkspaceErrorKind.settingsPersistenceFailed,
-        'Migrated settings.json failed post-write verification.',
+    if (fileBytes == null) {
+      _logSyncStateCorrupt(
+        workspaceId: targetId,
+        source: 'file',
+        reason: 'read_or_size_exceeded',
       );
+      return WorkspaceSyncState.empty;
     }
-
-    var legacyKeyRemoved = true;
+    final List<int>? wireBytes;
     try {
-      await _storage.write(key: legacyKey, value: null);
-    } on Object catch (error) {
-      legacyKeyRemoved = false;
-      _logKeyringFailure(
-        'settings.legacy_migration.cleanup_failed',
-        error,
-        level: LogLevel.warn,
+      wireBytes = await _decodeSyncStateWireBytes(fileBytes);
+    } on Object {
+      _logSyncStateCorrupt(
+        workspaceId: targetId,
+        source: 'file',
+        reason: 'decompress_failed',
       );
+      return WorkspaceSyncState.empty;
     }
+    if (wireBytes == null) {
+      _logSyncStateCorrupt(
+        workspaceId: targetId,
+        source: 'file',
+        reason: 'decompress_bound_exceeded',
+      );
+      return WorkspaceSyncState.empty;
+    }
+    final decoded = WorkspaceSyncState.fromBytes(wireBytes);
+    if (decoded == WorkspaceSyncState.empty) {
+      _logSyncStateCorrupt(
+        workspaceId: targetId,
+        source: 'file',
+        reason: 'invalid_payload',
+      );
+      return WorkspaceSyncState.empty;
+    }
+    _cachedSyncStatesByWorkspaceId[targetId] = decoded;
+    _migratedOrAbsentLegacySyncIds.add(targetId);
+    return decoded;
+  }
+
+  /// Migrates a legacy `0.4.0` sync state entry from [_storage] to [syncFilePath] and deletes the legacy keyring key.
+  Future<WorkspaceSyncState> _migrateLegacySyncStateLocked(
+    String targetId,
+    String syncFilePath,
+  ) async {
+    final legacyKey = '${buildProfile.syncStorageKeyPrefix}$targetId';
+    final String? raw;
+    try {
+      raw = await _storage.read(key: legacyKey);
+    } on Object {
+      _logSyncStateCorrupt(
+        workspaceId: targetId,
+        source: 'legacy_secure_storage',
+        reason: 'keyring_read_failed',
+      );
+      return WorkspaceSyncState.empty;
+    }
+    if (raw == null || raw.trim().isEmpty) {
+      _migratedOrAbsentLegacySyncIds.add(targetId);
+      return WorkspaceSyncState.empty;
+    }
+    final List<int>? wireBytes;
+    try {
+      final bytes = _base64Service.decodeBytes(raw.trim());
+      wireBytes = await _decodeSyncStateWireBytes(bytes);
+    } on Object {
+      _logSyncStateCorrupt(
+        workspaceId: targetId,
+        source: 'legacy_secure_storage',
+        reason: 'decode_failed',
+      );
+      return WorkspaceSyncState.empty;
+    }
+    if (wireBytes == null) {
+      _logSyncStateCorrupt(
+        workspaceId: targetId,
+        source: 'legacy_secure_storage',
+        reason: 'decompress_bound_exceeded',
+      );
+      return WorkspaceSyncState.empty;
+    }
+    final decoded = WorkspaceSyncState.fromBytes(wireBytes);
+    if (decoded == WorkspaceSyncState.empty) {
+      _logSyncStateCorrupt(
+        workspaceId: targetId,
+        source: 'legacy_secure_storage',
+        reason: 'invalid_payload',
+      );
+      return WorkspaceSyncState.empty;
+    }
+    _ensureParentDirectory(syncFilePath);
+    final payload = await _encodeSyncStatePayload(decoded);
+    await _lockManager.writeAtomically(syncFilePath, payload);
+    await _deleteKeyQuietly(legacyKey);
+    _cachedSyncStatesByWorkspaceId[targetId] = decoded;
+    _migratedOrAbsentLegacySyncIds.add(targetId);
     AppLogger.event(
       LogLevel.info,
       LogTag.storage,
-      'settings.legacy_migration.completed',
-      fields: <String, Object?>{
-        'workspace_count': verifiedReadBack.document.workspaces.length,
-        'migrated_passwords': migratedPasswords,
-        'legacy_key_removed': legacyKeyRemoved,
-      },
+      'settings.sync_state.migrated',
+      fields: <String, Object?>{'workspace_id': targetId},
     );
-    return verifiedReadBack.document;
+    return decoded;
   }
 
-  /// Atomically writes [document] to [settingsFilePath], rotating valid prior settings to `.bak`.
+  /// Atomically writes [document] to [settingsFilePath], rotating validated [priorPrimaryBytes] to `.bak` without re-reading disk.
   Future<void> _persistDocumentLocked(
     String settingsFilePath,
     PersistedSettingsDocument document, {
     required bool secretUpdated,
+    required List<int>? priorPrimaryBytes,
   }) async {
     final backupPath = '$settingsFilePath.bak';
     final primaryType = _inspectFileType(settingsFilePath, 'primary');
@@ -730,16 +941,16 @@ class SecureSettingsRepository implements SettingsRepository {
     _ensureParentDirectory(settingsFilePath);
 
     var backupRotated = false;
-    if (primaryType == FileSystemEntityType.file) {
-      backupRotated = await _rotateBackupIfValidLocked(
-        settingsFilePath,
-        backupPath,
-      );
+    if (primaryType == FileSystemEntityType.file && priorPrimaryBytes != null) {
+      await _lockManager.writeAtomically(backupPath, priorPrimaryBytes);
+      backupRotated = true;
     }
 
     final encodedJson = SettingsCodec.encodeJson(document);
     final encodedBytes = _utf8Codec.encode(encodedJson);
+    _cachedSettingsSnapshot = null;
     await _lockManager.writeAtomically(settingsFilePath, encodedBytes);
+    _updateSettingsCache(settingsFilePath, document, encodedBytes);
     AppLogger.event(
       LogLevel.debug,
       LogTag.storage,
@@ -786,8 +997,36 @@ class SecureSettingsRepository implements SettingsRepository {
     }
   }
 
+  /// Reads at most [maxBytes] from regular file [path], returning `null` if unreadable or oversized.
+  Uint8List? _readBoundedRegularBytes(String path, int maxBytes) {
+    try {
+      final randomAccessFile = File(path).openSync();
+      try {
+        final bytes = randomAccessFile.readSync(maxBytes + 1);
+        if (bytes.length > maxBytes) {
+          return null;
+        }
+        return bytes;
+      } finally {
+        randomAccessFile.closeSync();
+      }
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  /// Best-effort reads [key] from [_storage], returning `null` when unavailable.
+  Future<String?> _readKeyQuietly(String key) async {
+    try {
+      return await _storage.read(key: key);
+    } on Object {
+      return null;
+    }
+  }
+
   /// Restores [settingsFilePath] from [backupPath] or resets cleanly to [PersistedSettingsDocument.initial].
-  Future<PersistedSettingsDocument> _recoverFromBackupOrResetLocked(
+  Future<({PersistedSettingsDocument document, List<int> primaryBytes})>
+  _recoverFromBackupOrResetLocked(
     String settingsFilePath,
     String backupPath, {
     required FileSystemEntityType backupType,
@@ -795,11 +1034,19 @@ class SecureSettingsRepository implements SettingsRepository {
   }) async {
     var quarantinedPath = quarantinedPrimaryPath;
     if (backupType == FileSystemEntityType.file) {
-      final decodedBackup = _tryReadAndDecodeFile(backupPath);
+      final decodedBackup = _tryReadAndDecodeFile(
+        backupPath,
+        countAsPrimaryRead: false,
+      );
       if (decodedBackup != null) {
         _ensureParentDirectory(settingsFilePath);
         await _lockManager.writeAtomically(
           settingsFilePath,
+          decodedBackup.rawBytes,
+        );
+        _updateSettingsCache(
+          settingsFilePath,
+          decodedBackup.document,
           decodedBackup.rawBytes,
         );
         _lastRecoveryNotice = SettingsRecoveryNotice(
@@ -815,7 +1062,10 @@ class SecureSettingsRepository implements SettingsRepository {
             'workspace_count': decodedBackup.document.workspaces.length,
           },
         );
-        return decodedBackup.document;
+        return (
+          document: decodedBackup.document,
+          primaryBytes: decodedBackup.rawBytes,
+        );
       }
       final quarantinedBackup = _quarantineCorruptFile(backupPath);
       quarantinedPath ??= quarantinedBackup;
@@ -826,6 +1076,11 @@ class SecureSettingsRepository implements SettingsRepository {
       SettingsCodec.encodeJson(PersistedSettingsDocument.initial),
     );
     await _lockManager.writeAtomically(settingsFilePath, initialBytes);
+    _updateSettingsCache(
+      settingsFilePath,
+      PersistedSettingsDocument.initial,
+      initialBytes,
+    );
     _lastRecoveryNotice = SettingsRecoveryNotice(
       kind: SettingsRecoveryKind.resetAfterQuarantine,
       quarantinedFilePath: quarantinedPath,
@@ -839,7 +1094,10 @@ class SecureSettingsRepository implements SettingsRepository {
         'fallback': 'default_workspace',
       },
     );
-    return PersistedSettingsDocument.initial;
+    return (
+      document: PersistedSettingsDocument.initial,
+      primaryBytes: initialBytes,
+    );
   }
 
   /// Resolves `<Context.filesDir>/<dataDirectoryName>` on Android without falling back to `cacheDir`.
@@ -863,8 +1121,37 @@ class SecureSettingsRepository implements SettingsRepository {
         'Android persistent files directory resolved to empty path.',
       );
     }
-    return '${_trimTrailingSeparators(trimmed)}$separator'
-        '${buildProfile.dataDirectoryName}';
+    if (Platform.isAndroid && _androidFilesDirectoryResolver == null) {
+      LocalFileRepository.cacheAndroidFilesDirectory(trimmed);
+    }
+    return _joinDirectoryAndChild(
+      trimmed,
+      buildProfile.dataDirectoryName,
+      separator,
+    );
+  }
+
+  /// Resolves and caches the platform-native absolute settings directory path.
+  Future<String> _resolveSettingsDirectoryPath() async {
+    if (_cachedSettingsDirectoryPath case final cached?) {
+      return cached;
+    }
+    final separator = Platform.pathSeparator;
+    final override = _settingsDirectoryOverride?.trim() ?? '';
+    final String directoryPath;
+    if (override.isNotEmpty) {
+      directoryPath = TdfFilePath.trimTrailingSeparators(override);
+    } else if (Platform.isAndroid || _androidFilesDirectoryResolver != null) {
+      directoryPath = await _resolveAndroidSettingsDirectory(separator);
+    } else {
+      directoryPath = TdfFilePath.trimTrailingSeparators(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: buildProfile,
+        ),
+      );
+    }
+    _cachedSettingsDirectoryPath = directoryPath;
+    return directoryPath;
   }
 
   /// Resolves and caches the platform-native absolute path of `settings.json`.
@@ -872,48 +1159,102 @@ class SecureSettingsRepository implements SettingsRepository {
     if (_cachedSettingsFilePath case final cached?) {
       return cached;
     }
-    final separator = Platform.pathSeparator;
-    final override = _settingsDirectoryOverride?.trim() ?? '';
-    final String directoryPath;
-    if (override.isNotEmpty) {
-      directoryPath = _trimTrailingSeparators(override);
-    } else if (Platform.isAndroid || _androidFilesDirectoryResolver != null) {
-      directoryPath = await _resolveAndroidSettingsDirectory(separator);
-    } else {
-      directoryPath = _trimTrailingSeparators(
-        LocalFileRepository.resolveDefaultDirectoryPath(
-          buildProfile: buildProfile,
-        ),
-      );
-    }
-    final resolved =
-        '$directoryPath$separator${SettingsCodec.settingsFileName}';
+    final directoryPath = await _resolveSettingsDirectoryPath();
+    final resolved = _joinDirectoryAndChild(
+      directoryPath,
+      SettingsCodec.settingsFileName,
+      Platform.pathSeparator,
+    );
     _cachedSettingsFilePath = resolved;
     return resolved;
   }
 
-  /// Copies valid existing [settingsFilePath] bytes atomically to [backupPath] before overwriting.
-  Future<bool> _rotateBackupIfValidLocked(
-    String settingsFilePath,
-    String backupPath,
+  /// Resolves the host-local `sync_state_<workspaceId>.tts` file path inside the settings directory.
+  Future<String> _resolveSyncStateFilePath(String validWorkspaceId) async {
+    final directoryPath = await _resolveSettingsDirectoryPath();
+    return _joinDirectoryAndChild(
+      directoryPath,
+      'sync_state_$validWorkspaceId.tts',
+      Platform.pathSeparator,
+    );
+  }
+
+  /// Best-effort restores [_storage], [_cachedPasswordsByWorkspaceId], and [_unreadableSecretWorkspaceIds] for [workspaceId] after a persistence failure.
+  Future<void> _rollbackWorkspacePasswordQuietly(
+    String workspaceId,
+    _PasswordRollbackSnapshot snapshot,
   ) async {
+    final key = '${buildProfile.webdavPasswordKeyPrefix}$workspaceId';
+    if (!snapshot.hadStoredSecret) {
+      await _deleteKeyQuietly(key);
+      _cachedPasswordsByWorkspaceId.remove(workspaceId);
+    } else if (snapshot.previousPassword case final previous?
+        when previous.isNotEmpty) {
+      await _writeKeyQuietly(key, previous);
+      if (snapshot.wasCached) {
+        _cachedPasswordsByWorkspaceId[workspaceId] = previous;
+      } else {
+        _cachedPasswordsByWorkspaceId.remove(workspaceId);
+      }
+    } else if (snapshot.wasCached && snapshot.previousPassword == '') {
+      await _deleteKeyQuietly(key);
+      _cachedPasswordsByWorkspaceId[workspaceId] = '';
+    } else {
+      _cachedPasswordsByWorkspaceId.remove(workspaceId);
+    }
+    if (snapshot.wasUnreadable) {
+      _unreadableSecretWorkspaceIds.add(workspaceId);
+    } else {
+      _unreadableSecretWorkspaceIds.remove(workspaceId);
+    }
+  }
+
+  /// Validates and persists [config] and its keyring password onto [targetWorkspaceId] under the exclusive lock.
+  Future<void> _saveWorkspaceConfigLocked(
+    String settingsFilePath,
+    PersistedSettingsDocument document,
+    String targetWorkspaceId,
+    WebDavConfig config, {
+    required List<int>? priorPrimaryBytes,
+  }) async {
+    final updatedWorkspaces = _updateWorkspaceConfigEntry(
+      document.workspaces,
+      targetWorkspaceId,
+      config.copyWith(password: ''),
+    );
+    final secretSync = await _syncPasswordForSave(
+      targetWorkspaceId,
+      config.password,
+      document.passwordStoredWorkspaceIds,
+    );
+    final updatedDocument = document.copyWith(
+      workspaces: updatedWorkspaces,
+      passwordStoredWorkspaceIds: secretSync.nextStoredIds,
+    );
     try {
-      final existing = _tryReadAndDecodeFile(settingsFilePath);
-      if (existing == null) {
-        return false;
+      await _persistDocumentLocked(
+        settingsFilePath,
+        updatedDocument,
+        secretUpdated: secretSync.secretUpdated,
+        priorPrimaryBytes: priorPrimaryBytes,
+      );
+    } on Object {
+      if (secretSync.rollback case final snapshot?
+          when secretSync.secretUpdated) {
+        await _rollbackWorkspacePasswordQuietly(targetWorkspaceId, snapshot);
       }
-      await _lockManager.writeAtomically(backupPath, existing.rawBytes);
-      return true;
-    } on WorkspaceException catch (error) {
-      if (error.kind == WorkspaceErrorKind.unsupportedSettingsSchemaVersion) {
-        rethrow;
-      }
-      return false;
+      rethrow;
     }
   }
 
   /// Synchronizes [password] for [workspaceId] against [_cachedPasswordsByWorkspaceId] and [_storage].
-  Future<({Set<String> nextStoredIds, bool secretUpdated})>
+  Future<
+    ({
+      Set<String> nextStoredIds,
+      bool secretUpdated,
+      _PasswordRollbackSnapshot? rollback,
+    })
+  >
   _syncPasswordForSave(
     String workspaceId,
     String password,
@@ -924,34 +1265,48 @@ class SecureSettingsRepository implements SettingsRepository {
           currentStoredIds.contains(workspaceId) &&
           _cachedPasswordsByWorkspaceId[workspaceId] == password;
       if (isUnchanged) {
-        return (nextStoredIds: currentStoredIds, secretUpdated: false);
+        return (
+          nextStoredIds: currentStoredIds,
+          secretUpdated: false,
+          rollback: null,
+        );
       }
+      final rollback = await _capturePasswordRollbackSnapshot(
+        workspaceId,
+        currentStoredIds,
+      );
       await _writeWorkspacePassword(workspaceId, password);
       return (
         nextStoredIds: <String>{...currentStoredIds, workspaceId},
         secretUpdated: true,
+        rollback: rollback,
       );
     }
     if (_unreadableSecretWorkspaceIds.contains(workspaceId) ||
         !currentStoredIds.contains(workspaceId)) {
-      return (nextStoredIds: currentStoredIds, secretUpdated: false);
+      return (
+        nextStoredIds: currentStoredIds,
+        secretUpdated: false,
+        rollback: null,
+      );
     }
+    final rollback = await _capturePasswordRollbackSnapshot(
+      workspaceId,
+      currentStoredIds,
+    );
     await _deleteWorkspacePassword(workspaceId);
     final updatedIds = Set<String>.from(currentStoredIds)..remove(workspaceId);
-    return (nextStoredIds: updatedIds, secretUpdated: true);
+    return (nextStoredIds: updatedIds, secretUpdated: true, rollback: rollback);
   }
 
-  /// Reads and decodes a regular settings JSON file at [path], returning `null` if corrupt.
+  /// Reads and decodes a regular settings JSON file at [path] via bounded I/O, returning `null` if unreadable, oversized, or corrupt.
   ({PersistedSettingsDocument document, List<int> rawBytes})?
-  _tryReadAndDecodeFile(String path) {
-    final List<int> rawBytes;
-    try {
-      final file = File(path);
-      if (file.lengthSync() > SettingsCodec.maxJsonBytes) {
-        return null;
-      }
-      rawBytes = file.readAsBytesSync();
-    } on FileSystemException {
+  _tryReadAndDecodeFile(String path, {bool countAsPrimaryRead = true}) {
+    if (countAsPrimaryRead) {
+      _settingsDiskReadCount++;
+    }
+    final rawBytes = _readBoundedRegularBytes(path, SettingsCodec.maxJsonBytes);
+    if (rawBytes == null) {
       return null;
     }
 
@@ -985,6 +1340,37 @@ class SecureSettingsRepository implements SettingsRepository {
         rethrow;
       }
       return null;
+    }
+  }
+
+  /// Refreshes [_cachedSettingsSnapshot] with [document], [rawBytes], and the current file metadata of [settingsFilePath].
+  void _updateSettingsCache(
+    String settingsFilePath,
+    PersistedSettingsDocument document,
+    List<int> rawBytes, {
+    FileStat? stat,
+  }) {
+    final effectiveStat = stat ?? FileStat.statSync(settingsFilePath);
+    if (effectiveStat.type != FileSystemEntityType.file) {
+      _cachedSettingsSnapshot = null;
+      return;
+    }
+    _cachedSettingsSnapshot = (
+      filePath: settingsFilePath,
+      modified: effectiveStat.modified,
+      changed: effectiveStat.changed,
+      size: effectiveStat.size,
+      document: document,
+      rawBytes: rawBytes,
+    );
+  }
+
+  /// Best-effort writes [value] to [key] in [_storage], ignoring unavailable keyring errors during rollback.
+  Future<void> _writeKeyQuietly(String key, String value) async {
+    try {
+      await _storage.write(key: key, value: value);
+    } on Object {
+      // Best-effort rollback when settings persistence fails.
     }
   }
 
@@ -1048,6 +1434,12 @@ abstract class SettingsRepository {
   /// Saves [config] to the currently active workspace after verifying `.tdf` file path uniqueness.
   Future<void> saveConfig(WebDavConfig config);
 
+  /// Saves [config] to the specific workspace matching [workspaceId], throwing [WorkspaceErrorKind.workspaceNotFound] if absent.
+  Future<void> saveConfigForWorkspace(
+    String workspaceId,
+    WebDavConfig config,
+  ) => saveConfig(config);
+
   /// Persists the synchronization [state] for [workspaceId].
   Future<void> saveWorkspaceSyncState(
     String workspaceId,
@@ -1092,6 +1484,30 @@ class _BoundedBytesSink implements Sink<List<int>> {
   List<int> takeBytes() => _builder.takeBytes();
 }
 
+/// Snapshot of prior workspace password storage and cache state used for rollback on persistence failure.
+@immutable
+class _PasswordRollbackSnapshot {
+  /// Creates a [_PasswordRollbackSnapshot].
+  const _PasswordRollbackSnapshot({
+    required this.hadStoredSecret,
+    required this.wasCached,
+    required this.wasUnreadable,
+    this.previousPassword,
+  });
+
+  /// Whether `settings.json` previously recorded a stored password for this workspace.
+  final bool hadStoredSecret;
+
+  /// Previously cached or stored password value, if known.
+  final String? previousPassword;
+
+  /// Whether `_cachedPasswordsByWorkspaceId` previously held an entry for this workspace.
+  final bool wasCached;
+
+  /// Whether `_unreadableSecretWorkspaceIds` previously marked this workspace as unreadable.
+  final bool wasUnreadable;
+}
+
 /// Validates and constructs a new [AppWorkspace] against [existingWorkspaces].
 AppWorkspace _buildNewWorkspace(
   List<AppWorkspace> existingWorkspaces,
@@ -1115,9 +1531,8 @@ AppWorkspace _buildNewWorkspace(
       WebDavConfig(localFilePath: suggestedFile, filePath: suggestedFile);
   AppWorkspace.validateConfigPaths(effectiveConfig, summaries);
 
-  final trimmedId = id?.trim() ?? '';
-  final resolvedId = trimmedId.isNotEmpty
-      ? trimmedId
+  final resolvedId = id != null
+      ? _validateCustomWorkspaceId(id, existingWorkspaces)
       : AppWorkspace.deriveWorkspaceId(validatedName, summaries);
 
   return AppWorkspace(
@@ -1128,6 +1543,47 @@ AppWorkspace _buildNewWorkspace(
       filePath: effectiveConfig.filePath.trim(),
     ),
   );
+}
+
+/// Compresses [rawBytes] with gzip and returns the shorter of compressed or raw bytes.
+List<int> _compressSyncStateBytesSync(List<int> rawBytes) {
+  final compressed = gzip.encode(rawBytes);
+  return compressed.length < rawBytes.length ? compressed : rawBytes;
+}
+
+/// Decompresses gzip-wrapped [bytes] in chunks while enforcing [WorkspaceSyncState.maxSerializedBytes].
+List<int>? _decodeGzipSyncStateBytesSync(List<int> bytes) {
+  const gzipChunkBytes = 4096;
+  final typedBytes = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+  final sink = _BoundedBytesSink(WorkspaceSyncState.maxSerializedBytes);
+  final inputSink = gzip.decoder.startChunkedConversion(sink);
+  var abortedEarly = false;
+  try {
+    for (var offset = 0; offset < typedBytes.length; offset += gzipChunkBytes) {
+      final end = offset + gzipChunkBytes < typedBytes.length
+          ? offset + gzipChunkBytes
+          : typedBytes.length;
+      inputSink.add(Uint8List.sublistView(typedBytes, offset, end));
+      if (sink.exceeded) {
+        abortedEarly = true;
+        return null;
+      }
+    }
+  } finally {
+    if (abortedEarly) {
+      try {
+        inputSink.close();
+      } on Object {
+        // Ignore truncated-stream trailer errors while releasing zlib sink resources.
+      }
+    } else {
+      inputSink.close();
+    }
+  }
+  if (sink.exceeded) {
+    return null;
+  }
+  return sink.takeBytes();
 }
 
 /// Ensures the parent directory of [filePath] exists, wrapping I/O failures into [WorkspaceException].
@@ -1180,11 +1636,27 @@ String _formatQuarantineTimestamp(DateTime utcNow) {
   return '$year$month${day}T$hour$minute${second}Z';
 }
 
+/// Joins [directoryPath] and [childName] using [separator] while preserving POSIX and Windows drive roots.
+String _joinDirectoryAndChild(
+  String directoryPath,
+  String childName,
+  String separator,
+) {
+  final cleanDirectory = TdfFilePath.trimTrailingSeparators(directoryPath);
+  if (cleanDirectory.isEmpty) {
+    return childName;
+  }
+  final lastCode = cleanDirectory.codeUnitAt(cleanDirectory.length - 1);
+  if (lastCode == 0x2F || lastCode == 0x5C) {
+    return '$cleanDirectory$childName';
+  }
+  return '$cleanDirectory$separator$childName';
+}
+
 /// Logs an obfuscation-safe structured keyring error event.
 void _logKeyringFailure(
   String eventName,
   Object error, {
-  LogLevel level = LogLevel.error,
   String? workspaceId,
   String? operation,
 }) {
@@ -1197,7 +1669,7 @@ void _logKeyringFailure(
     _ => ('unexpected_error', null),
   };
   AppLogger.event(
-    level,
+    LogLevel.error,
     LogTag.storage,
     eventName,
     fields: <String, Object?>{
@@ -1219,6 +1691,24 @@ void _logSettingsLoad(PersistedSettingsDocument document) {
       'workspace_count': document.workspaces.length,
       'active_id': document.activeWorkspaceId,
       'schema_version': document.schemaVersion,
+    },
+  );
+}
+
+/// Emits a warning diagnostic event when persisted sync state falls back to [WorkspaceSyncState.empty].
+void _logSyncStateCorrupt({
+  required String workspaceId,
+  required String source,
+  required String reason,
+}) {
+  AppLogger.event(
+    LogLevel.warn,
+    LogTag.storage,
+    'settings.sync_state.corrupt',
+    fields: <String, Object?>{
+      'workspace_id': workspaceId,
+      'source': source,
+      'reason': reason,
     },
   );
 }
@@ -1288,13 +1778,21 @@ AppWorkspace _resolveActiveWorkspace(
 AppWorkspace _stripPassword(AppWorkspace workspace) =>
     workspace.copyWith(config: workspace.config.copyWith(password: ''));
 
-/// Removes trailing POSIX and Windows path separators from [path], preserving root paths.
-String _trimTrailingSeparators(String path) {
-  var result = path;
-  while (result.length > 1 && (result.endsWith('/') || result.endsWith(r'\'))) {
-    result = result.substring(0, result.length - 1);
+/// Validates [workspaceId] as a single filename-safe segment without path separators, traversal, colons, or control characters.
+String? _tryValidateSyncWorkspaceId(String workspaceId) {
+  final trimmed = workspaceId.trim();
+  if (trimmed.isEmpty ||
+      trimmed.length > 128 ||
+      trimmed == '.' ||
+      trimmed == '..' ||
+      trimmed.contains('..') ||
+      trimmed.contains('/') ||
+      trimmed.contains(r'\') ||
+      trimmed.contains(':') ||
+      AppWorkspace.hasControlCharacters(trimmed)) {
+    return null;
   }
-  return result;
+  return trimmed;
 }
 
 /// Validates and updates the [WebDavConfig] of [activeId] in [workspaces].
@@ -1323,4 +1821,34 @@ List<AppWorkspace> _updateWorkspaceConfigEntry(
     for (final workspace in workspaces)
       if (workspace.id == active.id) updatedActive else workspace,
   ];
+}
+
+/// Validates a caller-supplied workspace [rawId] for control-character/filename safety and uniqueness across [existingWorkspaces].
+String _validateCustomWorkspaceId(
+  String rawId,
+  List<AppWorkspace> existingWorkspaces,
+) {
+  if (AppWorkspace.hasControlCharacters(rawId)) {
+    throw const WorkspaceException(
+      WorkspaceErrorKind.settingsPersistenceFailed,
+      'Workspace identifier contains invalid characters.',
+    );
+  }
+  final validatedId = _tryValidateSyncWorkspaceId(rawId);
+  if (validatedId == null) {
+    throw const WorkspaceException(
+      WorkspaceErrorKind.settingsPersistenceFailed,
+      'Workspace identifier is invalid.',
+    );
+  }
+  final normalizedTarget = validatedId.toLowerCase();
+  for (final existing in existingWorkspaces) {
+    if (existing.id.toLowerCase() == normalizedTarget) {
+      throw WorkspaceException(
+        WorkspaceErrorKind.settingsPersistenceFailed,
+        'A workspace with identifier "$validatedId" already exists.',
+      );
+    }
+  }
+  return validatedId;
 }

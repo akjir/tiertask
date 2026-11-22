@@ -116,7 +116,7 @@ class _FailingWriteLocalFileRepository extends FakeLocalFileRepository {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final fixedNow = DateTime.utc(2026, 11, 10, 12, 0);
+  final fixedNow = DateTime.utc(2026, 11, 10, 12);
 
   group('FloatingNotice', () {
     test('supports value equality, hashCode, and hasUndoAction semantics across all tones', () {
@@ -228,7 +228,6 @@ void main() {
     test('consumes async-resolved startup recovery notice when activeWorkspaceProvider completes later', () async {
       final loadGate = Completer<void>();
       final settingsRepository = _DelayedRecoverySettingsRepository(
-        initialConfig: const WebDavConfig(language: AppLanguage.english),
         onLoad: () => loadGate.future,
         recoveryNotice: const SettingsRecoveryNotice(
           kind: SettingsRecoveryKind.resetAfterQuarantine,
@@ -579,5 +578,115 @@ void main() {
         reason: 'Failed Undo with no remaining latestNotice must dismiss the Undo toast cleanly',
       );
     });
+
+    test('rejects concurrent overlapping undoLatest calls and suppresses stale notice across ABA workspace switches', () async {
+      final task1 = TaskItem(
+        id: 'conc000001',
+        title: 'First task',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+      );
+      final task2 = TaskItem(
+        id: 'conc000002',
+        title: 'Second task',
+        createdAt: fixedNow,
+        modifiedAt: fixedNow,
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[task1, task2],
+        queueBlock: TdfQueueBlock(
+          taskIds: const <String>['conc000001', 'conc000002'],
+        ),
+        evaluationTime: fixedNow,
+      );
+      const config = WebDavConfig(
+        language: AppLanguage.english,
+        storageMode: StorageMode.local,
+      );
+      final undoGate = Completer<void>();
+      var gateUndoSaves = false;
+      final localRepository = _GatedWriteLocalFileRepository(
+        config: config,
+        initialTdf: const TdfService().serialize(board),
+        onSave: () async {
+          if (gateUndoSaves) {
+            await undoGate.future;
+          }
+        },
+      );
+      final workspaceNotifier = _ControllableWorkspaceNotifier();
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(config),
+          ),
+          activeWorkspaceProvider.overrideWith(() => workspaceNotifier),
+          localFileRepositoryProvider.overrideWithValue(localRepository),
+          clockProvider.overrideWithValue(() => fixedNow),
+        ],
+      );
+      addTearDown(container.dispose);
+      final workspaceA = await container.read(activeWorkspaceProvider.future);
+      await container.read(taskNotifierProvider.future);
+
+      final noticeSub = container.listen(floatingNoticeProvider, (_, _) {});
+      addTearDown(noticeSub.close);
+
+      final taskNotifier = container.read(taskNotifierProvider.notifier);
+      await taskNotifier.deleteTask(task1.id);
+      await taskNotifier.deleteTask(task2.id);
+      expect(container.read(taskUndoStateProvider).stackDepth, equals(2));
+
+      // Gate the first undo save so a concurrent second undoLatest overlaps mid-flight.
+      gateUndoSaves = true;
+      final noticeNotifier = container.read(floatingNoticeProvider.notifier);
+      final firstUndo = noticeNotifier.undoLatest(fromShortcut: true);
+      final overlappingUndo = await noticeNotifier.undoLatest(
+        fromShortcut: true,
+      );
+      expect(
+        overlappingUndo,
+        isFalse,
+        reason: 'Concurrent overlapping undoLatest must return false instead of popping a second entry',
+      );
+
+      // Perform an ABA workspace switch (A -> B -> A) while firstUndo is still suspended!
+      workspaceNotifier.emitWorkspace(
+        const AppWorkspace(
+          id: 'workspace_b',
+          name: 'Workspace B',
+          config: WebDavConfig(
+            language: AppLanguage.english,
+            localFilePath: 'b.tdf',
+            filePath: 'b.tdf',
+          ),
+        ),
+      );
+      workspaceNotifier.emitWorkspace(workspaceA);
+
+      undoGate.complete();
+      await firstUndo;
+      expect(
+        container.read(floatingNoticeProvider),
+        isNull,
+        reason: 'Stale undoLatest completion after A -> B -> A workspace switch must not show an undone toast in the new session',
+      );
+    });
   });
+}
+
+class _GatedWriteLocalFileRepository extends FakeLocalFileRepository {
+  _GatedWriteLocalFileRepository({
+    required super.config,
+    required super.initialTdf,
+    required this.onSave,
+  });
+
+  final Future<void> Function() onSave;
+
+  @override
+  Future<void> saveTdf(String tdfContent) async {
+    await onSave();
+    await super.saveTdf(tdfContent);
+  }
 }

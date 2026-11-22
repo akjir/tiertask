@@ -411,7 +411,7 @@ void main() {
         reason: 'Longitude -540.0 must wrap to -180.0',
       );
 
-      final northPole10 = PlusCodeService.encode(90.0, 0.0, codeLength: 10);
+      final northPole10 = PlusCodeService.encode(90.0, 0.0);
       expect(
         PlusCodeService.decode(northPole10)?.latitudeHi,
         closeTo(90.0, 1e-6),
@@ -423,7 +423,7 @@ void main() {
         closeTo(90.0, 1e-6),
         reason: 'North Pole 11-digit code must be inside northernmost subcell',
       );
-      final southPole10 = PlusCodeService.encode(-90.0, 0.0, codeLength: 10);
+      final southPole10 = PlusCodeService.encode(-90.0, 0.0);
       expect(
         PlusCodeService.decode(southPole10)?.latitudeLo,
         closeTo(-90.0, 1e-6),

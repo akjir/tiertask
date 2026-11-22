@@ -175,21 +175,28 @@ class _UiPillState extends State<UiPill> {
       onPrimaryTap: isInteractive ? widget.onPressed : null,
     );
 
-    Widget decorated = AnimatedContainer(
-      duration: tokens.focus.hoverDuration,
-      constraints: BoxConstraints(minHeight: _resolveMinHeight(tokens)),
-      decoration: BoxDecoration(
-        color: palette.background,
-        borderRadius: BorderRadius.circular(radius),
-        border: useDashedBorder
-            ? null
-            : Border.all(
-                color: palette.border,
-                width: tokens.radii.borderWidth,
-              ),
-      ),
-      child: bodyContent,
+    final boxDecoration = BoxDecoration(
+      color: palette.background,
+      borderRadius: BorderRadius.circular(radius),
+      border: useDashedBorder
+          ? null
+          : Border.all(color: palette.border, width: tokens.radii.borderWidth),
     );
+    final minHeightConstraints = BoxConstraints(
+      minHeight: _resolveMinHeight(tokens),
+    );
+
+    Widget decorated = isInteractive
+        ? AnimatedContainer(
+            duration: tokens.focus.hoverDuration,
+            constraints: minHeightConstraints,
+            decoration: boxDecoration,
+            child: bodyContent,
+          )
+        : ConstrainedBox(
+            constraints: minHeightConstraints,
+            child: DecoratedBox(decoration: boxDecoration, child: bodyContent),
+          );
 
     if (useDashedBorder) {
       decorated = CustomPaint(
@@ -202,35 +209,34 @@ class _UiPillState extends State<UiPill> {
       );
     }
 
-    final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
-    decorated = Stack(
-      fit: StackFit.passthrough,
-      clipBehavior: Clip.none,
-      children: <Widget>[
-        decorated,
-        if (_showFocusRing && isInteractive)
-          Positioned.fill(
-            left: -ringInset,
-            top: -ringInset,
-            right: -ringInset,
-            bottom: -ringInset,
-            child: IgnorePointer(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(radius + ringInset),
-                  border: Border.all(
-                    color: tokens.colors.accent,
-                    width: tokens.focus.ringWidth,
+    Widget result = decorated;
+    if (isInteractive) {
+      final ringInset = tokens.focus.ringOffset + tokens.focus.ringWidth;
+      final focusableContent = Stack(
+        fit: StackFit.passthrough,
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          decorated,
+          if (_showFocusRing)
+            Positioned.fill(
+              left: -ringInset,
+              top: -ringInset,
+              right: -ringInset,
+              bottom: -ringInset,
+              child: IgnorePointer(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(radius + ringInset),
+                    border: Border.all(
+                      color: tokens.colors.accent,
+                      width: tokens.focus.ringWidth,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-      ],
-    );
-
-    Widget result = decorated;
-    if (isInteractive) {
+        ],
+      );
       result = FocusableActionDetector(
         focusNode: widget.focusNode,
         enabled: widget.enabled,
@@ -261,11 +267,11 @@ class _UiPillState extends State<UiPill> {
         },
         child:
             widget.variant == UiPillVariant.splitChip && widget.onRemove != null
-            ? result
+            ? focusableContent
             : GestureDetector(
                 behavior: HitTestBehavior.opaque,
                 onTap: widget.onPressed,
-                child: result,
+                child: focusableContent,
               ),
       );
     }

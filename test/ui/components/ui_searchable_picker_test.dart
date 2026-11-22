@@ -282,5 +282,80 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'virtualizes large desktop option lists lazily without shrinkWrap and shrinks cleanly on narrow filter results',
+      (tester) async {
+        final scrollController = ScrollController();
+        addTearDown(scrollController.dispose);
+        final options = <UiPickerOption<String>>[
+          for (var i = 0; i < 1000; i++)
+            UiPickerOption<String>(
+              id: 'opt_$i',
+              value: 'opt_$i',
+              label: i < 2 ? 'Needle Option $i' : 'Candidate Option $i',
+            ),
+        ];
+
+        await pumpUiWidget(
+          tester,
+          SingleChildScrollView(
+            child: SizedBox(
+              width: 420.0,
+              child: UiSearchablePicker<String>(
+                options: options,
+                selectedIds: const <String>{},
+                scrollController: scrollController,
+                emptyText: 'No options',
+                onToggleOption: (_) {},
+              ),
+            ),
+          ),
+        );
+
+        final listView = tester.widget<ListView>(find.byType(ListView));
+        expect(
+          listView.shrinkWrap,
+          isFalse,
+          reason: 'Desktop picker exceeding maxListHeight must disable shrinkWrap for lazy virtualization',
+        );
+        expect(
+          find.byKey(const ValueKey<String>('picker_opt_opt_0')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey<String>('picker_opt_opt_999')),
+          findsNothing,
+          reason: 'Offscreen tail options must not be eagerly materialized',
+        );
+
+        // Filtering down to 2 items must fit compactly without overflow or controller errors.
+        await tester.enterText(find.byType(TextField), 'Needle');
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(
+          find.byKey(const ValueKey<String>('picker_opt_opt_0')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey<String>('picker_opt_opt_1')),
+          findsOneWidget,
+        );
+        expect(
+          tester.getSize(find.byType(ListView)).height,
+          lessThan(224.0),
+          reason: 'Small filtered result set must keep compact height',
+        );
+
+        // Clearing query returns cleanly to lazy non-shrink-wrapped virtualization.
+        await tester.enterText(find.byType(TextField), '');
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(
+          tester.widget<ListView>(find.byType(ListView)).shrinkWrap,
+          isFalse,
+        );
+      },
+    );
   });
 }

@@ -13,12 +13,15 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
+import 'package:tiertask/models/tdf_payload_comparison.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
@@ -150,7 +153,7 @@ void main() {
         reason: 'Midnight clock is omitted in canonical output',
       );
       final nineAm = TdfRepeatClock.tryParse('09:00');
-      expect(nineAm, equals(const TdfRepeatClock(hour: 9, minute: 0)));
+      expect(nineAm, equals(const TdfRepeatClock(hour: 9)));
       expect(nineAm?.formatCanonical(), equals('09:00'));
 
       final withSeconds = TdfRepeatClock.tryParse('14:30:15');
@@ -172,43 +175,43 @@ void main() {
 
       expect(
         zone.resolveLocalToUtc(2026, 3, 28, 9, 0, 0),
-        equals(DateTime.utc(2026, 3, 28, 8, 0, 0)),
+        equals(DateTime.utc(2026, 3, 28, 8)),
         reason: '2026-03-28 09:00:00 CET (UTC+1) -> 2026-03-28 08:00:00 UTC',
       );
       expect(
         zone.resolveLocalToUtc(2026, 3, 29, 9, 0, 0),
-        equals(DateTime.utc(2026, 3, 29, 7, 0, 0)),
+        equals(DateTime.utc(2026, 3, 29, 7)),
         reason: '2026-03-29 09:00:00 CEST (UTC+2) -> 2026-03-29 07:00:00 UTC',
       );
       expect(
         zone.resolveLocalToUtc(2026, 3, 29, 2, 30, 0),
-        equals(DateTime.utc(2026, 3, 29, 1, 30, 0)),
+        equals(DateTime.utc(2026, 3, 29, 1, 30)),
         reason: '2026-03-29 02:30:00 falls in spring-forward gap -> pre-gap UTC+1 -> 01:30:00 UTC (03:30:00 CEST)',
       );
       expect(
-        zone.toLocalWallClock(DateTime.utc(2026, 3, 29, 1, 30, 0)),
-        equals(DateTime.utc(2026, 3, 29, 3, 30, 0)),
+        zone.toLocalWallClock(DateTime.utc(2026, 3, 29, 1, 30)),
+        equals(DateTime.utc(2026, 3, 29, 3, 30)),
         reason:
             'Resolved 2026-03-29 01:30:00 UTC is 03:30:00 local after the gap',
       );
       expect(
         zone.resolveLocalToUtc(2026, 3, 30, 2, 30, 0),
-        equals(DateTime.utc(2026, 3, 30, 0, 30, 0)),
+        equals(DateTime.utc(2026, 3, 30, 0, 30)),
         reason: '2026-03-30 02:30:00 CEST (UTC+2) -> 2026-03-30 00:30:00 UTC',
       );
       expect(
         zone.resolveLocalToUtc(2026, 10, 25, 2, 30, 0),
-        equals(DateTime.utc(2026, 10, 25, 0, 30, 0)),
+        equals(DateTime.utc(2026, 10, 25, 0, 30)),
         reason: '2026-10-25 02:30:00 occurs twice during fall-back overlap -> first occurrence (UTC+2) -> 00:30:00 UTC',
       );
       expect(
         zone.resolveLocalToUtc(2026, 10, 25, 9, 0, 0),
-        equals(DateTime.utc(2026, 10, 25, 8, 0, 0)),
+        equals(DateTime.utc(2026, 10, 25, 8)),
         reason: '2026-10-25 09:00:00 CET (UTC+1) -> 2026-10-25 08:00:00 UTC',
       );
       expect(
         zone.resolveLocalToUtc(2026, 11, 5, 0, 0, 0),
-        equals(DateTime.utc(2026, 11, 4, 23, 0, 0)),
+        equals(DateTime.utc(2026, 11, 4, 23)),
         reason: '2026-11-05 00:00:00 CET (UTC+1) -> 2026-11-04 23:00:00 UTC',
       );
     });
@@ -219,14 +222,14 @@ void main() {
         unit: RepeatUnit.days,
         clock: TdfRepeatClock(hour: 2, minute: 30),
       );
-      final completedOnMar28Utc = DateTime.utc(2026, 3, 28, 10, 0, 0);
+      final completedOnMar28Utc = DateTime.utc(2026, 3, 28, 10);
       final nextDueGapUtc = dailyAt0230.nextDueUtc(
         completedAtUtc: completedOnMar28Utc,
         timeZone: TdfTimeZoneContext.europeBerlin,
       );
       expect(
         nextDueGapUtc,
-        equals(DateTime.utc(2026, 3, 29, 1, 30, 0)),
+        equals(DateTime.utc(2026, 3, 29, 1, 30)),
         reason: 'Completing on 2026-03-28 schedules 2026-03-29 02:30 local -> 01:30 UTC via pre-gap offset',
       );
       expect(
@@ -236,12 +239,12 @@ void main() {
       );
 
       final nextDueMar30Utc = dailyAt0230.nextDueUtc(
-        completedAtUtc: DateTime.utc(2026, 3, 29, 10, 0, 0),
+        completedAtUtc: DateTime.utc(2026, 3, 29, 10),
         timeZone: TdfTimeZoneContext.europeBerlin,
       );
       expect(
         nextDueMar30Utc,
-        equals(DateTime.utc(2026, 3, 30, 0, 30, 0)),
+        equals(DateTime.utc(2026, 3, 30, 0, 30)),
         reason: 'Completing on 2026-03-29 schedules 2026-03-30 02:30 CEST -> 00:30 UTC',
       );
 
@@ -303,13 +306,13 @@ void main() {
           TdfTaskDependency
         >[
           const TdfTaskDependency(taskId: '8jKaCdOkD2', requiredCompletion: 2),
-          const TdfTaskDependency(taskId: '3nQp7ROkB8', requiredCompletion: 1),
+          const TdfTaskDependency(taskId: '3nQp7ROkB8'),
           const TdfTaskDependency(taskId: '8jKaCdOkD2', requiredCompletion: 5),
         ]);
         expect(
           deduplicated,
           equals(const <TdfTaskDependency>[
-            TdfTaskDependency(taskId: '3nQp7ROkB8', requiredCompletion: 1),
+            TdfTaskDependency(taskId: '3nQp7ROkB8'),
             TdfTaskDependency(taskId: '8jKaCdOkD2', requiredCompletion: 5),
           ]),
           reason: 'Deduplication must retain greatest requirement and sort by ascending ASCII ID',
@@ -320,7 +323,7 @@ void main() {
         const label = TdfLabel(id: '4x9p2mOkD2', name: 'Home');
         expect(
           label.effectiveModifiedAt,
-          equals(DateTime.utc(1970, 1, 1, 0, 0, 0)),
+          equals(DateTime.utc(1970)),
           reason: 'Section 6.7.2 requires unstamped labels to use 1970-01-01 00:00:00 UTC',
         );
       });
@@ -709,7 +712,7 @@ void main() {
         color: '#112233',
         note: 'Engineering context',
         isScoped: true,
-        modifiedAt: DateTime.utc(2026, 11, 1, 10, 0),
+        modifiedAt: DateTime.utc(2026, 11, 1, 10),
         links: mutableLinks,
         conditions: <TaskCondition>[
           DayTaskCondition.fromWeekdays(const <int>[1, 2, 3, 4, 5]),
@@ -831,7 +834,7 @@ void main() {
       );
       expect(
         febOccurrence.newAnchor,
-        equals(TdfLocalDateTime(2026, 1, 31, 18, 0, 0)),
+        equals(TdfLocalDateTime(2026, 1, 31, 18)),
         reason: 'Clamped Feb 28 must preserve derived Jan 31 18:00:00 anchor',
       );
       expect(
@@ -843,19 +846,18 @@ void main() {
       const lateClockRule = TaskRepeatRule(
         count: 1,
         unit: RepeatUnit.days,
-        clock: TdfRepeatClock(hour: 20, minute: 0),
-        leadDays: 0,
+        clock: TdfRepeatClock(hour: 20),
       );
-      final morningDue = DateTime.utc(2026, 11, 1, 10, 0);
+      final morningDue = DateTime.utc(2026, 11, 1, 10);
       final clamped = lateClockRule.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 11, 1, 8, 0),
+        completedAtUtc: DateTime.utc(2026, 11, 1, 8),
         oldDueUtc: morningDue,
         timeZone: TdfTimeZoneContext.utc,
       );
-      expect(clamped.newDueUtc, equals(DateTime.utc(2026, 11, 2, 10, 0)));
+      expect(clamped.newDueUtc, equals(DateTime.utc(2026, 11, 2, 10)));
       expect(
         clamped.newSuspendedUtc,
-        equals(DateTime.utc(2026, 11, 2, 10, 0)),
+        equals(DateTime.utc(2026, 11, 2, 10)),
         reason: 'candidateSuspended > newDue must clamp newSuspendedUtc to newDueUtc',
       );
 
@@ -867,8 +869,8 @@ void main() {
       );
       expect(
         () => hugeLeadRule.computeNextMode2Schedule(
-          completedAtUtc: DateTime.utc(1, 1, 1, 0, 0),
-          oldDueUtc: DateTime.utc(1, 1, 2, 12, 0),
+          completedAtUtc: DateTime.utc(1),
+          oldDueUtc: DateTime.utc(1, 1, 2, 12),
           timeZone: TdfTimeZoneContext.utc,
         ),
         throwsA(
@@ -882,7 +884,7 @@ void main() {
     });
 
     test('enforces TaskItem ownership normalization, dueLeadWindow checks, toCompleted rules, and canonicalDirectChildStatementCount', () {
-      final now = DateTime.utc(2026, 11, 1, 12, 0, 0);
+      final now = DateTime.utc(2026, 11, 1, 12);
 
       // Orphaned isDuePassive, dueNote, and suspendedNote are normalized away on construction:
       final orphanNormalized = TaskItem(
@@ -904,7 +906,6 @@ void main() {
         suspendedAt: now.add(const Duration(hours: 2)),
         suspendedNote: 'Waiting on deploy window',
         dueAt: now.add(const Duration(hours: 24)),
-        isDuePassive: false,
         dueNote: 'Contract SLA',
         origin: const TaskOrigin(namespace: 'jira', externalKey: 'OPS-1'),
         history: <TaskHistoryEntry>[
@@ -950,7 +951,7 @@ void main() {
           .copyWith(
             isPriority: true,
             dependencies: const <TdfTaskDependency>[
-              TdfTaskDependency(taskId: 'dep0000001', requiredCompletion: 1),
+              TdfTaskDependency(taskId: 'dep0000001'),
             ],
           )
           .toCompleted(now.add(const Duration(hours: 3)));
@@ -994,7 +995,7 @@ void main() {
         ),
         labelIds: const <String>['lblWork001'],
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'dep0000001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'dep0000001'),
         ],
         suspendedAt: now.add(const Duration(days: 1)),
         suspendedNote: 'Suspended note',
@@ -1237,8 +1238,8 @@ void main() {
 
       final decision = TdfBoundDeletionDecision(
         resolution: TdfDeletionResolution.undelete,
-        expectedLiveModifiedAt: DateTime.utc(2026, 11, 16, 9, 0),
-        expectedDeletionAt: DateTime.utc(2026, 11, 16, 10, 0),
+        expectedLiveModifiedAt: DateTime.utc(2026, 11, 16, 9),
+        expectedDeletionAt: DateTime.utc(2026, 11, 16, 10),
         expectedLivePayloadSignature: 'sig-1',
       );
       expect(
@@ -1246,8 +1247,8 @@ void main() {
         equals(
           TdfBoundDeletionDecision(
             resolution: TdfDeletionResolution.undelete,
-            expectedLiveModifiedAt: DateTime.utc(2026, 11, 16, 9, 0),
-            expectedDeletionAt: DateTime.utc(2026, 11, 16, 10, 0),
+            expectedLiveModifiedAt: DateTime.utc(2026, 11, 16, 9),
+            expectedDeletionAt: DateTime.utc(2026, 11, 16, 10),
             expectedLivePayloadSignature: 'sig-1',
           ),
         ),
@@ -1258,8 +1259,8 @@ void main() {
           equals(
             TdfBoundDeletionDecision(
               resolution: TdfDeletionResolution.undelete,
-              expectedLiveModifiedAt: DateTime.utc(2026, 11, 16, 9, 0),
-              expectedDeletionAt: DateTime.utc(2026, 11, 16, 10, 0),
+              expectedLiveModifiedAt: DateTime.utc(2026, 11, 16, 9),
+              expectedDeletionAt: DateTime.utc(2026, 11, 16, 10),
               expectedLivePayloadSignature: 'sig-2',
             ),
           ),
@@ -1276,14 +1277,14 @@ void main() {
       expect(maxVal.formatCompact(), equals('9999-12-31 23:59:59'));
       expect(minVal.compareTo(maxVal), lessThan(0));
       expect(maxVal.compareTo(minVal), greaterThan(0));
-      expect(minVal.compareTo(TdfLocalDateTime(1, 1, 1, 0, 0, 0)), equals(0));
+      expect(minVal.compareTo(TdfLocalDateTime(1, 1, 1)), equals(0));
       expect(
         TdfLocalDateTime.fromWallClock(DateTime.utc(2026, 2, 28, 18, 0, 5)),
         equals(TdfLocalDateTime(2026, 2, 28, 18, 0, 5)),
       );
       expect(
         TdfLocalDateTime.tryParse('2000-02-29', '08:30'),
-        equals(TdfLocalDateTime(2000, 2, 29, 8, 30, 0)),
+        equals(TdfLocalDateTime(2000, 2, 29, 8, 30)),
       );
       expect(
         TdfLocalDateTime.tryParseInput('2026-01-31 18:00:05'),
@@ -1305,7 +1306,7 @@ void main() {
       final epochStamped = TdfLabel(
         id: '4x9p2mOkD2',
         name: 'Home',
-        modifiedAt: DateTime.utc(1970, 1, 1, 0, 0, 0),
+        modifiedAt: DateTime.utc(1970),
       );
       const unstamped = TdfLabel(id: '4x9p2mOkD2', name: 'Home');
       expect(
@@ -1322,21 +1323,21 @@ void main() {
       // 2026-03-08 02:30 local falls in EST->EDT spring gap (02:00 -> 03:00); pre-gap EST (-05:00) -> 07:30:00 UTC.
       expect(
         ny.resolveLocalToUtc(2026, 3, 8, 2, 30, 0),
-        equals(DateTime.utc(2026, 3, 8, 7, 30, 0)),
+        equals(DateTime.utc(2026, 3, 8, 7, 30)),
       );
       expect(
-        ny.toLocalWallClock(DateTime.utc(2026, 3, 8, 7, 30, 0)),
-        equals(DateTime.utc(2026, 3, 8, 3, 30, 0)),
+        ny.toLocalWallClock(DateTime.utc(2026, 3, 8, 7, 30)),
+        equals(DateTime.utc(2026, 3, 8, 3, 30)),
       );
       // 2026-11-01 01:30 local falls in EDT->EST autumn fold (01:00..01:59 repeats); first occurrence is EDT (-04:00) -> 05:30:00 UTC.
       expect(
         ny.resolveLocalToUtc(2026, 11, 1, 1, 30, 0),
-        equals(DateTime.utc(2026, 11, 1, 5, 30, 0)),
+        equals(DateTime.utc(2026, 11, 1, 5, 30)),
       );
       // Second occurrence 06:30:00 UTC still formats to 01:30:00 local EST:
       expect(
-        ny.toLocalWallClock(DateTime.utc(2026, 11, 1, 6, 30, 0)),
-        equals(DateTime.utc(2026, 11, 1, 1, 30, 0)),
+        ny.toLocalWallClock(DateTime.utc(2026, 11, 1, 6, 30)),
+        equals(DateTime.utc(2026, 11, 1, 1, 30)),
       );
       // Boundary overflow: 9999-12-31 23:30 in EST (-05:00) -> 10000-01-01 04:30 UTC -> InvalidTimestamp:
       expect(
@@ -1347,9 +1348,9 @@ void main() {
       // Synthetic negative-DST observer (Ireland-style: standard IST = +01:00 in summer, negative winter DST = +00:00;
       // autumn fold in October +3600 -> 0; spring forward jump in March 0 -> +3600 at 01:00 UTC creating gap 01:00..01:59 local):
       final gapTransitionUtcSec =
-          DateTime.utc(2026, 3, 29, 1, 0, 0).millisecondsSinceEpoch ~/ 1000;
+          DateTime.utc(2026, 3, 29, 1).millisecondsSinceEpoch ~/ 1000;
       final foldTransitionUtcSec =
-          DateTime.utc(2026, 10, 25, 1, 0, 0).millisecondsSinceEpoch ~/ 1000;
+          DateTime.utc(2026, 10, 25, 1).millisecondsSinceEpoch ~/ 1000;
       var minObservedEpochSec = 1 << 60;
       final negativeDstZone = TdfTimeZoneContext.customObserver(
         'Test/NegativeDST',
@@ -1367,24 +1368,24 @@ void main() {
       // Gap at 2026-03-29 01:30 local -> pre-gap offset 0 -> 01:30:00 UTC (02:30 local):
       expect(
         negativeDstZone.resolveLocalToUtc(2026, 3, 29, 1, 30, 0),
-        equals(DateTime.utc(2026, 3, 29, 1, 30, 0)),
+        equals(DateTime.utc(2026, 3, 29, 1, 30)),
       );
       // Fold at 2026-10-25 01:30 local -> occurs at 00:30 UTC (+3600) and 01:30 UTC (0); earliest is 00:30 UTC:
       expect(
         negativeDstZone.resolveLocalToUtc(2026, 10, 25, 1, 30, 0),
-        equals(DateTime.utc(2026, 10, 25, 0, 30, 0)),
+        equals(DateTime.utc(2026, 10, 25, 0, 30)),
       );
 
       // Sub-hour (30-minute) DST observer (Lord Howe style: +10:30 = 37800s -> +11:00 = 39600s at 2026-10-04 15:30 UTC, gap 02:00..02:29 local):
       final subHourJumpSec =
-          DateTime.utc(2026, 10, 4, 15, 30, 0).millisecondsSinceEpoch ~/ 1000;
+          DateTime.utc(2026, 10, 4, 15, 30).millisecondsSinceEpoch ~/ 1000;
       final subHourZone = TdfTimeZoneContext.customObserver(
         'Test/LordHowe',
         (int s) => s >= subHourJumpSec ? 39600 : 37800,
       );
       expect(
         subHourZone.resolveLocalToUtc(2026, 10, 5, 2, 15, 0),
-        equals(DateTime.utc(2026, 10, 4, 15, 45, 0)),
+        equals(DateTime.utc(2026, 10, 4, 15, 45)),
         reason:
             '30-minute gap must use pre-gap +10:30 offset via binary search',
       );
@@ -1396,27 +1397,27 @@ void main() {
       final y2Utc = sysZone.resolveLocalToUtc(2, 6, 15, 12, 0, 0);
       expect(
         sysZone.toLocalWallClock(y2Utc),
-        equals(DateTime.utc(2, 6, 15, 12, 0, 0)),
+        equals(DateTime.utc(2, 6, 15, 12)),
       );
       final y9998Utc = sysZone.resolveLocalToUtc(9998, 6, 15, 12, 0, 0);
       expect(
         sysZone.toLocalWallClock(y9998Utc),
-        equals(DateTime.utc(9998, 6, 15, 12, 0, 0)),
+        equals(DateTime.utc(9998, 6, 15, 12)),
       );
 
-      const autoConfig = WebDavConfig(timeZoneMode: AppTimeZoneMode.automatic);
+      const autoConfig = WebDavConfig();
       expect(autoConfig.resolveTimeZoneContext(), equals(sysZone));
       const manualConfig = WebDavConfig(
         timeZoneMode: AppTimeZoneMode.manual,
         manualTimeZoneOffsetMinutes: 120,
       );
       expect(
-        manualConfig.localWallClockToUtc(DateTime.utc(2026, 11, 16, 12, 0, 0)),
-        equals(DateTime.utc(2026, 11, 16, 10, 0, 0)),
+        manualConfig.localWallClockToUtc(DateTime.utc(2026, 11, 16, 12)),
+        equals(DateTime.utc(2026, 11, 16, 10)),
       );
       expect(
-        manualConfig.toLocalWallClock(DateTime.utc(2026, 11, 16, 10, 0, 0)),
-        equals(DateTime.utc(2026, 11, 16, 12, 0, 0)),
+        manualConfig.toLocalWallClock(DateTime.utc(2026, 11, 16, 10)),
+        equals(DateTime.utc(2026, 11, 16, 12)),
       );
     });
 
@@ -1425,29 +1426,26 @@ void main() {
       final orphanAnchor = TaskItem(
         id: '8jKaCdOkD2',
         title: 'Orphan anchor',
-        dueAnchor: TdfLocalDateTime(2026, 1, 31, 18, 0, 0),
+        dueAnchor: TdfLocalDateTime(2026, 1, 31, 18),
       );
       expect(orphanAnchor.dueAnchor, isNull);
 
       final withAnchor = TaskItem(
         id: '8jKaCdOkD2',
         title: 'Anchored',
-        dueAt: DateTime.utc(2026, 2, 28, 17, 0, 0),
-        dueAnchor: TdfLocalDateTime(2026, 1, 31, 18, 0, 0),
+        dueAt: DateTime.utc(2026, 2, 28, 17),
+        dueAnchor: TdfLocalDateTime(2026, 1, 31, 18),
       );
-      expect(
-        withAnchor.dueAnchor,
-        equals(TdfLocalDateTime(2026, 1, 31, 18, 0, 0)),
-      );
+      expect(withAnchor.dueAnchor, equals(TdfLocalDateTime(2026, 1, 31, 18)));
       expect(withAnchor.copyWith(clearDueAt: true).dueAnchor, isNull);
       expect(
         withAnchor.copyWith(clearDueAnchor: true).dueAt,
-        equals(DateTime.utc(2026, 2, 28, 17, 0, 0)),
+        equals(DateTime.utc(2026, 2, 28, 17)),
       );
       expect(withAnchor.copyWith(clearDueAnchor: true).dueAnchor, isNull);
       expect(
-        withAnchor.toCompleted(DateTime.utc(2026, 2, 28, 12, 0, 0)).dueAnchor,
-        equals(TdfLocalDateTime(2026, 1, 31, 18, 0, 0)),
+        withAnchor.toCompleted(DateTime.utc(2026, 2, 28, 12)).dueAnchor,
+        equals(TdfLocalDateTime(2026, 1, 31, 18)),
       );
       expect(withAnchor.toActive(clearDueAt: true).dueAnchor, isNull);
 
@@ -1456,37 +1454,37 @@ void main() {
       const monthlyRule = TaskRepeatRule(
         count: 1,
         unit: RepeatUnit.months,
-        clock: TdfRepeatClock(hour: 8, minute: 0),
+        clock: TdfRepeatClock(hour: 8),
         leadDays: 2,
       );
-      final jan31DueUtc = DateTime.utc(2026, 1, 31, 17, 0, 0);
-      final jan31Anchor = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
+      final jan31DueUtc = DateTime.utc(2026, 1, 31, 17);
+      final jan31Anchor = TdfLocalDateTime(2026, 1, 31, 18);
 
       // Step 1 (k = 1 on Jan 31): clamps to Feb 28 17:00 UTC, preserves anchor 2026-01-31 18:00:00:
       final step1 = monthlyRule.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 1, 31, 10, 0, 0),
+        completedAtUtc: DateTime.utc(2026, 1, 31, 10),
         oldDueUtc: jan31DueUtc,
         oldAnchor: jan31Anchor,
         timeZone: berlin,
       );
-      expect(step1.newDueUtc, equals(DateTime.utc(2026, 2, 28, 17, 0, 0)));
+      expect(step1.newDueUtc, equals(DateTime.utc(2026, 2, 28, 17)));
       expect(step1.newAnchor, equals(jan31Anchor));
-      expect(step1.newSuspendedUtc, equals(DateTime.utc(2026, 2, 26, 7, 0, 0)));
+      expect(step1.newSuspendedUtc, equals(DateTime.utc(2026, 2, 26, 7)));
 
       // Step 2 (k = 1 on Feb 28): advances (Y_cur, M_cur) = (2026, 2) by 1 month with D_a = 31 -> Mar 31 16:00 UTC (18:00 CEST):
       final step2 = monthlyRule.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 2, 28, 10, 0, 0),
+        completedAtUtc: DateTime.utc(2026, 2, 28, 10),
         oldDueUtc: step1.newDueUtc,
         oldAnchor: step1.newAnchor,
         timeZone: berlin,
       );
-      expect(step2.newDueUtc, equals(DateTime.utc(2026, 3, 31, 16, 0, 0)));
-      expect(step2.newAnchor, equals(TdfLocalDateTime(2026, 3, 31, 18, 0, 0)));
-      expect(step2.newSuspendedUtc, equals(DateTime.utc(2026, 3, 29, 6, 0, 0)));
+      expect(step2.newDueUtc, equals(DateTime.utc(2026, 3, 31, 16)));
+      expect(step2.newAnchor, equals(TdfLocalDateTime(2026, 3, 31, 18)));
+      expect(step2.newSuspendedUtc, equals(DateTime.utc(2026, 3, 29, 6)));
 
       // Direct k = 2 jump when Jan 31 is completed late on 2026-03-10:
       final directK2 = monthlyRule.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 3, 10, 10, 0, 0),
+        completedAtUtc: DateTime.utc(2026, 3, 10, 10),
         oldDueUtc: jan31DueUtc,
         oldAnchor: jan31Anchor,
         timeZone: berlin,
@@ -1499,18 +1497,18 @@ void main() {
       const biMonthlyRule = TaskRepeatRule(
         count: 2,
         unit: RepeatUnit.months,
-        clock: TdfRepeatClock(hour: 8, minute: 0),
+        clock: TdfRepeatClock(hour: 8),
         leadDays: 2,
       );
       final aprStep = biMonthlyRule.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 2, 28, 10, 0, 0),
+        completedAtUtc: DateTime.utc(2026, 2, 28, 10),
         oldDueUtc: step1.newDueUtc,
         oldAnchor: step1.newAnchor,
         timeZone: berlin,
       );
       expect(
         aprStep.newDueUtc,
-        equals(DateTime.utc(2026, 4, 30, 16, 0, 0)),
+        equals(DateTime.utc(2026, 4, 30, 16)),
         reason: 'Advancing (Y_cur, M_cur) = (2026, 2) by 2 months clamps D_a=31 to Apr 30 18:00 CEST',
       );
       expect(
@@ -1519,61 +1517,52 @@ void main() {
         reason: 'Clamped Apr 30 (30 < 31) must still retain anchor 2026-01-31 18:00:00',
       );
       final junStep = biMonthlyRule.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 4, 30, 10, 0, 0),
+        completedAtUtc: DateTime.utc(2026, 4, 30, 10),
         oldDueUtc: aprStep.newDueUtc,
         oldAnchor: aprStep.newAnchor,
         timeZone: berlin,
       );
-      expect(junStep.newDueUtc, equals(DateTime.utc(2026, 6, 30, 16, 0, 0)));
+      expect(junStep.newDueUtc, equals(DateTime.utc(2026, 6, 30, 16)));
       expect(junStep.newAnchor, equals(jan31Anchor));
       final augStep = biMonthlyRule.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 6, 30, 10, 0, 0),
+        completedAtUtc: DateTime.utc(2026, 6, 30, 10),
         oldDueUtc: junStep.newDueUtc,
         oldAnchor: junStep.newAnchor,
         timeZone: berlin,
       );
-      expect(augStep.newDueUtc, equals(DateTime.utc(2026, 8, 31, 16, 0, 0)));
-      expect(
-        augStep.newAnchor,
-        equals(TdfLocalDateTime(2026, 8, 31, 18, 0, 0)),
-      );
+      expect(augStep.newDueUtc, equals(DateTime.utc(2026, 8, 31, 16)));
+      expect(augStep.newAnchor, equals(TdfLocalDateTime(2026, 8, 31, 18)));
 
       // Forward DST gap deadline-clock preservation (2026-03-28 02:30 -> Mar 29 03:30 CEST -> Mar 30 02:30 CEST):
       const dailyRule = TaskRepeatRule(count: 1, unit: RepeatUnit.days);
       final gapStep1 = dailyRule.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 3, 28, 1, 0, 0),
-        oldDueUtc: DateTime.utc(2026, 3, 28, 1, 30, 0),
-        oldAnchor: TdfLocalDateTime(2026, 3, 28, 2, 30, 0),
+        completedAtUtc: DateTime.utc(2026, 3, 28, 1),
+        oldDueUtc: DateTime.utc(2026, 3, 28, 1, 30),
+        oldAnchor: TdfLocalDateTime(2026, 3, 28, 2, 30),
         timeZone: berlin,
       );
-      expect(gapStep1.newDueUtc, equals(DateTime.utc(2026, 3, 29, 1, 30, 0)));
-      expect(
-        gapStep1.newAnchor,
-        equals(TdfLocalDateTime(2026, 3, 29, 2, 30, 0)),
-      );
+      expect(gapStep1.newDueUtc, equals(DateTime.utc(2026, 3, 29, 1, 30)));
+      expect(gapStep1.newAnchor, equals(TdfLocalDateTime(2026, 3, 29, 2, 30)));
       final gapStep2 = dailyRule.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 3, 29, 1, 0, 0),
+        completedAtUtc: DateTime.utc(2026, 3, 29, 1),
         oldDueUtc: gapStep1.newDueUtc,
         oldAnchor: gapStep1.newAnchor,
         timeZone: berlin,
       );
-      expect(gapStep2.newDueUtc, equals(DateTime.utc(2026, 3, 30, 0, 30, 0)));
-      expect(
-        gapStep2.newAnchor,
-        equals(TdfLocalDateTime(2026, 3, 30, 2, 30, 0)),
-      );
+      expect(gapStep2.newDueUtc, equals(DateTime.utc(2026, 3, 30, 0, 30)));
+      expect(gapStep2.newAnchor, equals(TdfLocalDateTime(2026, 3, 30, 2, 30)));
 
       // Overdue completion inside open preparation window omits newSuspendedUtc (null):
       const noLeadMonthly = TaskRepeatRule(count: 1, unit: RepeatUnit.months);
       final overdueOpenWindow = noLeadMonthly.computeNextMode2Schedule(
-        completedAtUtc: DateTime.utc(2026, 12, 15, 9, 0, 0),
-        oldDueUtc: DateTime.utc(2026, 11, 15, 17, 0, 0),
-        oldAnchor: TdfLocalDateTime(2026, 11, 15, 18, 0, 0),
+        completedAtUtc: DateTime.utc(2026, 12, 15, 9),
+        oldDueUtc: DateTime.utc(2026, 11, 15, 17),
+        oldAnchor: TdfLocalDateTime(2026, 11, 15, 18),
         timeZone: berlin,
       );
       expect(
         overdueOpenWindow.newDueUtc,
-        equals(DateTime.utc(2026, 12, 15, 17, 0, 0)),
+        equals(DateTime.utc(2026, 12, 15, 17)),
       );
       expect(
         overdueOpenWindow.newSuspendedUtc,
@@ -1625,6 +1614,317 @@ void main() {
               'generateLocationId(${vector.epochMs}ms) suffix must equal ${vector.expectedTime}',
         );
       }
+    });
+
+    test('redacts TaskLink title and uri in toString()', () {
+      const link = TaskLink(
+        title: 'Private Runbook',
+        uri: 'https://alice:secret@internal.example/runbook?token=xyz',
+      );
+      final rendered = link.toString();
+      expect(
+        rendered,
+        equals('TaskLink(title: <redacted>, uri: <redacted>)'),
+        reason: 'TaskLink.toString must redact both title and uri',
+      );
+      expect(
+        rendered,
+        isNot(contains('Private Runbook')),
+        reason: 'TaskLink.toString must never leak link title',
+      );
+      expect(
+        rendered,
+        isNot(contains('internal.example')),
+        reason: 'TaskLink.toString must never leak link uri',
+      );
+      expect(
+        rendered,
+        isNot(contains('secret')),
+        reason: 'TaskLink.toString must never leak credentials in uri',
+      );
+    });
+  });
+
+  group('Wave 2B Core Engine Invariants (UTF-8 Order, Binary Search, TimeZone Fast Path, TaskItem Reuse)', () {
+    test('compareUtf8Strings and TaskHistoryEntry.compareCanonical match exact UTF-8 byte order across BMP, supplementary, and lone surrogates', () {
+      int referenceUtf8Compare(String left, String right) {
+        final leftBytes = utf8.encode(left);
+        final rightBytes = utf8.encode(right);
+        final minLength = leftBytes.length < rightBytes.length
+            ? leftBytes.length
+            : rightBytes.length;
+        for (var i = 0; i < minLength; i++) {
+          final difference = leftBytes[i].compareTo(rightBytes[i]);
+          if (difference != 0) {
+            return difference;
+          }
+        }
+        return leftBytes.length.compareTo(rightBytes.length);
+      }
+
+      const samples = <String>[
+        '',
+        'A',
+        'AA',
+        'B',
+        'a',
+        'cafe',
+        'caf\u00E9',
+        'z',
+        '\u007F',
+        '\u0080',
+        '\u07FF',
+        '\u0800',
+        '\uD7FF',
+        '\uE000',
+        '\uFFFD',
+        '\uFFFF',
+        '\u{10000}',
+        '\u{10001}',
+        '\u{1F600}',
+        '\u{10FFFF}',
+        'prefix\uE000suffix',
+        'prefix\u{10000}suffix',
+        '\uD800',
+        '\uDC00',
+        '\uD800a',
+        'a\uDC00',
+        '\uD800\uD800',
+      ];
+      final timestamp = DateTime.utc(2026, 11, 20, 12);
+
+      // UTF-8 byte order places U+E000 (0xEE) before U+10000 (0xF0), opposite to UTF-16 code-unit order.
+      expect(
+        TdfPayloadComparison.compareUtf8Strings('\uE000', '\u{10000}'),
+        lessThan(0),
+        reason: 'U+E000 must sort before U+10000 in unsigned UTF-8 byte order',
+      );
+      expect(
+        TdfPayloadComparison.compareUtf8Strings('\uFFFF', '\u{10000}'),
+        lessThan(0),
+        reason: 'U+FFFF must sort before U+10000 in unsigned UTF-8 byte order',
+      );
+
+      for (final left in samples) {
+        for (final right in samples) {
+          final expected = referenceUtf8Compare(left, right);
+          final actual = TdfPayloadComparison.compareUtf8Strings(left, right);
+          expect(
+            actual.sign,
+            equals(expected.sign),
+            reason:
+                'compareUtf8Strings mismatch for code units ${left.codeUnits} vs ${right.codeUnits}',
+          );
+          final historyActual = TaskHistoryEntry.compareCanonical(
+            TaskHistoryEntry(timestampUtc: timestamp, text: left),
+            TaskHistoryEntry(timestampUtc: timestamp, text: right),
+          );
+          expect(
+            historyActual.sign,
+            equals(expected.sign),
+            reason:
+                'TaskHistoryEntry.compareCanonical mismatch for code units ${left.codeUnits} vs ${right.codeUnits}',
+          );
+        }
+      }
+    });
+
+    test('TdfDeletedBlock binary search finds first, middle, last, and absent records accurately', () {
+      final baseTime = DateTime.utc(2026, 11, 1, 10);
+      final taskRecords = <TdfDeletedTaskRecord>[
+        for (var i = 0; i < 250; i++)
+          TdfDeletedTaskRecord(
+            taskId: 'TSK${i.toString().padLeft(7, '0')}',
+            deletedAt: baseTime.add(Duration(seconds: i)),
+            completionsCheckpoint: i % 5,
+          ),
+      ];
+      final labelRecords = <TdfDeletedLabelRecord>[
+        for (var i = 0; i < 100; i++)
+          TdfDeletedLabelRecord(
+            labelId: 'LBL${i.toString().padLeft(7, '0')}',
+            deletedAt: baseTime.add(Duration(seconds: i)),
+          ),
+      ];
+      final locationRecords = <TdfDeletedLocationRecord>[
+        for (var i = 0; i < 100; i++)
+          TdfDeletedLocationRecord(
+            locationId: 'LOC${i.toString().padLeft(7, '0')}',
+            deletedAt: baseTime.add(Duration(seconds: i)),
+          ),
+      ];
+      final block = TdfDeletedBlock(
+        generation: 3,
+        tasks: taskRecords.reversed,
+        labels: labelRecords.reversed,
+        locations: locationRecords.reversed,
+      );
+
+      expect(TdfDeletedBlock.empty.findTaskRecord('TSK0000000'), isNull);
+      expect(TdfDeletedBlock.empty.findLabelRecord('LBL0000000'), isNull);
+      expect(TdfDeletedBlock.empty.findLocationRecord('LOC0000000'), isNull);
+
+      for (final index in const <int>[0, 1, 124, 125, 248, 249]) {
+        final id = 'TSK${index.toString().padLeft(7, '0')}';
+        expect(
+          block.findTaskRecord(id)?.completionsCheckpoint,
+          equals(index % 5),
+          reason: 'Binary search must locate task record at index $index',
+        );
+      }
+      expect(block.findTaskRecord('TSK'), isNull);
+      expect(block.findTaskRecord('TSK0000124A'), isNull);
+      expect(block.findTaskRecord('TSK9999999'), isNull);
+
+      for (final index in const <int>[0, 50, 99]) {
+        final labelId = 'LBL${index.toString().padLeft(7, '0')}';
+        final locationId = 'LOC${index.toString().padLeft(7, '0')}';
+        expect(
+          block.findLabelRecord(labelId)?.labelId,
+          equals(labelId),
+          reason: 'Binary search must locate label record at index $index',
+        );
+        expect(
+          block.findLocationRecord(locationId)?.locationId,
+          equals(locationId),
+          reason: 'Binary search must locate location record at index $index',
+        );
+      }
+      expect(block.findLabelRecord('LBL9999999'), isNull);
+      expect(block.findLocationRecord('LOC9999999'), isNull);
+    });
+
+    test('TdfTimeZoneContext reports isolate sendability, fast-paths non-transition sampled probes, and matches analytical America/New_York DST rules', () {
+      expect(TdfTimeZoneContext.utc.isIsolateSendable, isTrue);
+      expect(TdfTimeZoneContext.europeBerlin.isIsolateSendable, isTrue);
+      expect(TdfTimeZoneContext.americaNewYork.isIsolateSendable, isTrue);
+      expect(const TdfTimeZoneContext.systemLocal().isIsolateSendable, isTrue);
+      expect(
+        TdfTimeZoneContext.fixedOffset(const Duration(hours: 2))
+            .isIsolateSendable,
+        isTrue,
+      );
+      expect(const TdfTimeZoneContext.missing().isIsolateSendable, isTrue);
+
+      var probeCalls = 0;
+      final springTransitionUtcSec =
+          DateTime.utc(2026, 3, 8, 7).millisecondsSinceEpoch ~/ 1000;
+      final autumnTransitionUtcSec =
+          DateTime.utc(2026, 11, 1, 6).millisecondsSinceEpoch ~/ 1000;
+      final referenceNewYorkObserver = TdfTimeZoneContext.customObserver(
+        'Test/ReferenceNewYork',
+        (int utcEpochSeconds) {
+          probeCalls++;
+          if (utcEpochSeconds >= springTransitionUtcSec &&
+              utcEpochSeconds < autumnTransitionUtcSec) {
+            return -14400;
+          }
+          return -18000;
+        },
+      );
+      expect(referenceNewYorkObserver.isIsolateSendable, isFalse);
+
+      // Non-transition date must resolve in at most 4 offset probes via bracketing fast path.
+      probeCalls = 0;
+      final julyResolved = referenceNewYorkObserver.resolveLocalToUtc(
+        2026,
+        7,
+        15,
+        14,
+        30,
+        0,
+      );
+      expect(julyResolved, equals(DateTime.utc(2026, 7, 15, 18, 30)));
+      expect(
+        probeCalls,
+        lessThanOrEqualTo(4),
+        reason: 'Non-transition sampled resolution must use 3-probe bracketing fast path',
+      );
+
+      // Analytical America/New_York must match reference observer across every spring gap and autumn fold minute.
+      const newYork = TdfTimeZoneContext.americaNewYork;
+      const transitionChecks =
+          <({int month, int day, int hour, int minute, int second})>[
+            (month: 3, day: 8, hour: 1, minute: 59, second: 59),
+            (month: 3, day: 8, hour: 2, minute: 0, second: 0),
+            (month: 3, day: 8, hour: 2, minute: 30, second: 0),
+            (month: 3, day: 8, hour: 2, minute: 59, second: 59),
+            (month: 3, day: 8, hour: 3, minute: 0, second: 0),
+            (month: 11, day: 1, hour: 0, minute: 59, second: 59),
+            (month: 11, day: 1, hour: 1, minute: 0, second: 0),
+            (month: 11, day: 1, hour: 1, minute: 30, second: 0),
+            (month: 11, day: 1, hour: 1, minute: 59, second: 59),
+            (month: 11, day: 1, hour: 2, minute: 0, second: 0),
+            (month: 1, day: 15, hour: 9, minute: 0, second: 0),
+            (month: 7, day: 15, hour: 14, minute: 30, second: 0),
+          ];
+      for (final check in transitionChecks) {
+        final analytical = newYork.resolveLocalToUtc(
+          2026,
+          check.month,
+          check.day,
+          check.hour,
+          check.minute,
+          check.second,
+        );
+        final sampled = referenceNewYorkObserver.resolveLocalToUtc(
+          2026,
+          check.month,
+          check.day,
+          check.hour,
+          check.minute,
+          check.second,
+        );
+        expect(
+          analytical,
+          equals(sampled),
+          reason:
+              'Analytical America/New_York must match sampled observer at 2026-${check.month}-${check.day} ${check.hour}:${check.minute}:${check.second}',
+        );
+      }
+    });
+
+    test('TaskItem.copyWith reuses already-normalized unmodifiable collections when fields are unchanged', () {
+      final created = DateTime.utc(2026, 11, 1, 8);
+      final original = TaskItem(
+        id: '8jKaCdOkD2',
+        title: 'Original title',
+        createdAt: created,
+        labelIds: const <String>['lbl0000001'],
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'dep0000001'),
+        ],
+        links: const <TaskLink>[
+          TaskLink(title: 'Spec', uri: 'https://example.com'),
+        ],
+        history: <TaskHistoryEntry>[
+          TaskHistoryEntry(
+            timestampUtc: created.add(const Duration(minutes: 10)),
+            text: 'Second',
+          ),
+          TaskHistoryEntry(
+            timestampUtc: created.add(const Duration(minutes: 5)),
+            text: 'First',
+          ),
+        ],
+        conditions: const <TaskCondition>[
+          LocationTaskCondition(locationIds: <String>['loc0000001']),
+        ],
+        subtasks: const <SubtaskItem>[SubtaskItem(title: 'Step 1')],
+      );
+
+      final copied = original.copyWith(title: 'Updated title');
+      expect(copied.title, equals('Updated title'));
+      expect(identical(copied.history, original.history), isTrue);
+      expect(identical(copied.labelIds, original.labelIds), isTrue);
+      expect(identical(copied.dependencies, original.dependencies), isTrue);
+      expect(
+        identical(copied.blockedByTaskIds, original.blockedByTaskIds),
+        isTrue,
+      );
+      expect(identical(copied.links, original.links), isTrue);
+      expect(identical(copied.conditions, original.conditions), isTrue);
+      expect(identical(copied.subtasks, original.subtasks), isTrue);
     });
   });
 }

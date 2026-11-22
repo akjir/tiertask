@@ -544,7 +544,7 @@ abstract final class TdfBlockParser {
         note: current.fields.note,
         modifiedAt: current.fields.modifiedAt,
         links: current.fields.links,
-        conditions: TdfDirectiveParser.coalesceLocationConditions(
+        conditions: TdfMetadata.coalesceLocationConditions(
           current.fields.conditions,
         ),
       ),
@@ -685,7 +685,7 @@ abstract final class TdfBlockParser {
         dependencies: sortedDependencies,
         links: current.fields.links,
         history: current.fields.history,
-        conditions: TdfDirectiveParser.coalesceLocationConditions(
+        conditions: TdfMetadata.coalesceLocationConditions(
           current.fields.conditions,
         ),
         subtasks: current.subtasks,
@@ -1140,20 +1140,22 @@ abstract final class TdfBlockParser {
 
   /// Detects self-dependencies and multi-hop circular dependency cycles across all tasks (`CircularDependency`).
   static void _validateDependencies(TdfParserState state) {
-    final tasksById = <String, ({TaskItem task, int headerLine})>{
-      for (final item in state.tasksWithMeta)
-        item.task.id: (task: item.task, headerLine: item.headerLine),
+    final tasksById = <String, TaskItem>{
+      for (final item in state.tasksWithMeta) item.task.id: item.task,
     };
-    final visitState = <String, int>{};
-    for (final item in state.tasksWithMeta) {
-      if ((visitState[item.task.id] ?? 0) == 0) {
-        _visitDependencyNode(
-          item.task.id,
-          item.blockedLine,
-          tasksById,
-          visitState,
-        );
-      }
+    final blockedLineById = <String, int>{
+      for (final item in state.tasksWithMeta) item.task.id: item.blockedLine,
+    };
+    final cycle = TaskBoardEvaluator.findDependencyCycle(
+      tasksById,
+      traversalOrder: state.tasksWithMeta.map((item) => item.task.id),
+    );
+    if (cycle != null) {
+      TdfDirectiveParser.fail(
+        TdfErrorKind.circularDependency,
+        blockedLineById[cycle.startTaskId] ?? 1,
+        'Circular dependency detected involving task "${cycle.taskId}" and "${cycle.dependencyTaskId}".',
+      );
     }
   }
 
@@ -1198,36 +1200,5 @@ abstract final class TdfBlockParser {
         );
       }
     }
-  }
-
-  /// Traverses outgoing `blocked` edges from [taskId] to detect cycles (`CircularDependency`).
-  static void _visitDependencyNode(
-    String taskId,
-    int startLine,
-    Map<String, ({TaskItem task, int headerLine})> tasksById,
-    Map<String, int> visitState,
-  ) {
-    visitState[taskId] = 1;
-    if (tasksById[taskId] case final entry?) {
-      for (final dependency in entry.task.dependencies) {
-        final depState = visitState[dependency.taskId] ?? 0;
-        if (depState == 1) {
-          TdfDirectiveParser.fail(
-            TdfErrorKind.circularDependency,
-            startLine,
-            'Circular dependency detected involving task "$taskId" and "${dependency.taskId}".',
-          );
-        }
-        if (depState == 0 && tasksById.containsKey(dependency.taskId)) {
-          _visitDependencyNode(
-            dependency.taskId,
-            startLine,
-            tasksById,
-            visitState,
-          );
-        }
-      }
-    }
-    visitState[taskId] = 2;
   }
 }

@@ -17,15 +17,89 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
-/// Base62 alphabet (`0-9`, `A-Z`, `a-z`) for TDF entity identifiers.
-const String _base62Alphabet =
-    '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+/// Centralized 10-character Base62 entity identifier generator and validator (`spec/TDF_SPEC_0.8.0.md` Section 2.9).
+abstract final class TdfEntityId {
+  /// Canonical Base62 character alphabet (`0-9`, `A-Z`, `a-z`).
+  static const String alphabet =
+      '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
-/// Fixed length of a TDF `<location-id>` (`10`).
-const int _entityIdLength = 10;
+  /// Fixed total character length of a TDF entity identifier (`10`).
+  static const int idLength = 10;
 
-/// Modulo divisor `62^4` (`14,776,336` seconds) for the 4-character Base62 timestamp suffix.
-const int _timeModulo = 14776336;
+  /// Modulo divisor `62^4` (`14,776,336` seconds) for the 4-character Base62 timestamp suffix.
+  static const int timeModulo = 14776336;
+
+  static final math.Random _secureRandom = math.Random.secure();
+
+  /// Encodes the UTC seconds of [timestamp] modulo `62^4` (`14,776,336`) as a 4-character Base62 string.
+  static String encodeBase62Time(DateTime timestamp) {
+    final milliseconds = timestamp.toUtc().millisecondsSinceEpoch;
+    final utcSeconds = milliseconds >= 0
+        ? milliseconds ~/ 1000
+        : (milliseconds - 999) ~/ 1000;
+    final normalized = ((utcSeconds % timeModulo) + timeModulo) % timeModulo;
+    return _encodeBase62Fixed(normalized, 4);
+  }
+
+  /// Generates a unique 10-character `<6xBase62Random><4xBase62Time>` identifier not present in [existingIds].
+  static String generate({
+    DateTime? timestamp,
+    Set<String> existingIds = const <String>{},
+    math.Random? random,
+  }) {
+    final resolvedTime = timestamp ?? DateTime.now().toUtc();
+    final timePart = encodeBase62Time(resolvedTime);
+    final resolvedRandom = random ?? _secureRandom;
+    while (true) {
+      final randomPart = _randomBase62Segment(resolvedRandom);
+      final candidate = '$randomPart$timePart';
+      if (!existingIds.contains(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  /// Validates a 10-character `<6xBase62Random><4xBase62Time>` identifier without regular expressions.
+  static bool isValid(String value) {
+    if (value.length != idLength) {
+      return false;
+    }
+    for (var i = 0; i < idLength; i++) {
+      if (!_isBase62CodeUnit(value.codeUnitAt(i))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// Encodes non-negative integer [value] into a fixed-width Base62 string of [width] characters, left-padded with `'0'`.
+  static String _encodeBase62Fixed(int value, int width) {
+    final units = List<int>.filled(width, 0x30);
+    var remaining = value < 0 ? 0 : value;
+    for (var i = width - 1; i >= 0; i--) {
+      final digit = remaining % 62;
+      units[i] = alphabet.codeUnitAt(digit);
+      remaining ~/= 62;
+    }
+    return String.fromCharCodes(units);
+  }
+
+  /// Checks whether [unit] is an ASCII Base62 character (`0-9`, `A-Z`, `a-z`).
+  static bool _isBase62CodeUnit(int unit) {
+    return (unit >= 0x30 && unit <= 0x39) ||
+        (unit >= 0x41 && unit <= 0x5A) ||
+        (unit >= 0x61 && unit <= 0x7A);
+  }
+
+  /// Generates a 6-character random Base62 string segment using [random].
+  static String _randomBase62Segment(math.Random random) {
+    final units = List<int>.filled(6, 0x30);
+    for (var i = 0; i < 6; i++) {
+      units[i] = alphabet.codeUnitAt(random.nextInt(62));
+    }
+    return String.fromCharCodes(units);
+  }
+}
 
 /// Immutable representation of a TDF `location <location-id> { ... }` root block (`spec/TDF_SPEC_0.6.0.md` Section 4.3).
 @immutable
@@ -48,7 +122,7 @@ class TdfLocation {
        _radiusText = rawRadiusText;
 
   /// Fallback UTC modification timestamp (`1970-01-01 00:00:00` UTC) when a `location` block omits `modified` (`spec/TDF_SPEC_0.6.0.md` Section 6.7.1).
-  static final DateTime defaultModifiedAt = DateTime.utc(1970, 1, 1, 0, 0, 0);
+  static final DateTime defaultModifiedAt = DateTime.utc(1970);
 
   /// Unique 10-character Base62 location identifier (`<location-id>`).
   final String id;
@@ -124,20 +198,32 @@ class TdfLocation {
     final nextLat = latitude ?? this.latitude;
     final nextLon = longitude ?? this.longitude;
     final nextRad = radius ?? this.radius;
+    final normalizedLat = nextLat == 0.0 ? 0.0 : nextLat;
+    final normalizedLon = nextLon == 0.0 ? 0.0 : nextLon;
     return TdfLocation(
       id: id ?? this.id,
       name: name ?? this.name,
       note: clearNote ? null : (note ?? this.note),
       source: clearSource ? null : (source ?? this.source),
-      latitude: nextLat == 0.0 ? 0.0 : nextLat,
-      longitude: nextLon == 0.0 ? 0.0 : nextLon,
+      latitude: normalizedLat,
+      longitude: normalizedLon,
       radius: nextRad,
       modifiedAt: clearModifiedAt ? null : (modifiedAt ?? this.modifiedAt),
       rawLatitudeText:
-          latitudeText ?? (latitude != null ? null : _latitudeText),
+          latitudeText ??
+          (latitude != null
+              ? formatRoundedDouble(normalizedLat, 6)
+              : (_latitudeText ?? formatRoundedDouble(normalizedLat, 6))),
       rawLongitudeText:
-          longitudeText ?? (longitude != null ? null : _longitudeText),
-      rawRadiusText: radiusText ?? (radius != null ? null : _radiusText),
+          longitudeText ??
+          (longitude != null
+              ? formatRoundedDouble(normalizedLon, 6)
+              : (_longitudeText ?? formatRoundedDouble(normalizedLon, 6))),
+      rawRadiusText:
+          radiusText ??
+          (radius != null
+              ? formatRoundedDouble(nextRad, 2)
+              : (_radiusText ?? formatRoundedDouble(nextRad, 2))),
     );
   }
 
@@ -261,14 +347,15 @@ class TdfLocation {
     }
     final keptFrac = maxDecimals == 0 ? '' : fracPart.substring(0, maxDecimals);
     final nextDigit = fracPart.codeUnitAt(maxDecimals) - 0x30;
-    var scaled = BigInt.parse('$intPart$keptFrac');
-    if (nextDigit >= 5) {
-      scaled += BigInt.one;
-    }
-    if (scaled == BigInt.zero) {
+    final scaledDigits = _roundScaledDigits(
+      intPart,
+      keptFrac,
+      maxDecimals,
+      nextDigit,
+    );
+    if (scaledDigits == null) {
       return '0';
     }
-    final scaledDigits = scaled.toString().padLeft(maxDecimals + 1, '0');
     final splitOffset = scaledDigits.length - maxDecimals;
     final roundedInt = scaledDigits.substring(0, splitOffset);
     final roundedFrac = maxDecimals == 0
@@ -279,6 +366,34 @@ class TdfLocation {
         ? '$sign$roundedInt'
         : '$sign$roundedInt.$roundedFrac';
     return normalizeDecimalText(candidate);
+  }
+
+  /// Rounds integer+fraction digits half-away-from-zero using native 64-bit integers when within 18 digits, or [BigInt] otherwise.
+  static String? _roundScaledDigits(
+    String intPart,
+    String keptFrac,
+    int maxDecimals,
+    int nextDigit,
+  ) {
+    final combined = '$intPart$keptFrac';
+    if (combined.length <= 18) {
+      var scaledInt = int.parse(combined);
+      if (nextDigit >= 5) {
+        scaledInt += 1;
+      }
+      if (scaledInt == 0) {
+        return null;
+      }
+      return scaledInt.toString().padLeft(maxDecimals + 1, '0');
+    }
+    var scaled = BigInt.parse(combined);
+    if (nextDigit >= 5) {
+      scaled += BigInt.one;
+    }
+    if (scaled == BigInt.zero) {
+      return null;
+    }
+    return scaled.toString().padLeft(maxDecimals + 1, '0');
   }
 
   @override
@@ -311,65 +426,16 @@ class TdfLocation {
   String toString() => 'location $id';
 }
 
-/// Generates a unique 10-character TDF 0.6.0 location identifier (`<6xBase62Random><4xBase62Time>`).
+/// Generates a unique 10-character TDF location identifier (`<6xBase62Random><4xBase62Time>`).
 String generateLocationId({
   DateTime? timestamp,
   Set<String> existingIds = const <String>{},
   math.Random? random,
-}) {
-  final resolvedTime = timestamp ?? DateTime.now().toUtc();
-  final milliseconds = resolvedTime.toUtc().millisecondsSinceEpoch;
-  final utcSeconds = milliseconds >= 0
-      ? milliseconds ~/ 1000
-      : (milliseconds - 999) ~/ 1000;
-  final normalizedTime =
-      ((utcSeconds % _timeModulo) + _timeModulo) % _timeModulo;
-  final timePart = _encodeBase62Fixed(normalizedTime, 4);
-  final resolvedRandom = random ?? math.Random.secure();
-  while (true) {
-    final randomPart = _randomBase62Segment(resolvedRandom);
-    final candidate = '$randomPart$timePart';
-    if (!existingIds.contains(candidate)) {
-      return candidate;
-    }
-  }
-}
+}) => TdfEntityId.generate(
+  timestamp: timestamp,
+  existingIds: existingIds,
+  random: random,
+);
 
-/// Checks whether [value] is a canonical 10-character TDF 0.6.0 location identifier (`[0-9A-Za-z]{10}`).
-bool isValidLocationId(String value) {
-  if (value.length != _entityIdLength) {
-    return false;
-  }
-  for (var i = 0; i < _entityIdLength; i++) {
-    final unit = value.codeUnitAt(i);
-    final isBase62 =
-        (unit >= 0x30 && unit <= 0x39) ||
-        (unit >= 0x41 && unit <= 0x5A) ||
-        (unit >= 0x61 && unit <= 0x7A);
-    if (!isBase62) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/// Encodes non-negative integer [value] into a fixed-width Base62 string of [width] characters, left-padded with `'0'`.
-String _encodeBase62Fixed(int value, int width) {
-  final units = List<int>.filled(width, 0x30);
-  var remaining = value < 0 ? 0 : value;
-  for (var i = width - 1; i >= 0; i--) {
-    final digit = remaining % 62;
-    units[i] = _base62Alphabet.codeUnitAt(digit);
-    remaining ~/= 62;
-  }
-  return String.fromCharCodes(units);
-}
-
-/// Generates a 6-character random Base62 string segment using [random].
-String _randomBase62Segment(math.Random random) {
-  final units = List<int>.filled(6, 0x30);
-  for (var i = 0; i < 6; i++) {
-    units[i] = _base62Alphabet.codeUnitAt(random.nextInt(62));
-  }
-  return String.fromCharCodes(units);
-}
+/// Checks whether [value] is a canonical 10-character TDF location identifier (`[0-9A-Za-z]{10}`).
+bool isValidLocationId(String value) => TdfEntityId.isValid(value);

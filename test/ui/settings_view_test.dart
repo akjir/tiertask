@@ -21,6 +21,7 @@ import 'package:tiertask/l10n/app_localizations.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
+import 'package:tiertask/providers/log_viewer_providers.dart';
 import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
@@ -45,6 +46,17 @@ class _ControlledSettingsRepository extends InMemorySettingsRepository {
     }
     await super.saveConfig(config);
   }
+
+  @override
+  Future<void> saveConfigForWorkspace(
+    String workspaceId,
+    WebDavConfig config,
+  ) async {
+    if (saveGate case final gate?) {
+      await gate.future;
+    }
+    await super.saveConfigForWorkspace(workspaceId, config);
+  }
 }
 
 class _SpyLocalFileRepository extends FakeLocalFileRepository {
@@ -52,14 +64,12 @@ class _SpyLocalFileRepository extends FakeLocalFileRepository {
     required super.config,
     super.initialTdf = 'tdf 0.8.0\n',
     this.existingFileNames = const <String>['tasks.tdf', 'archive.tdf'],
-    this.pickedDirectoryPath,
     this.pickedFilePath,
   });
 
   final List<String> existingFileNames;
   int pickDirectoryCalls = 0;
   int pickTdfFileCalls = 0;
-  String? pickedDirectoryPath;
   String? pickedFilePath;
 
   @override
@@ -68,7 +78,7 @@ class _SpyLocalFileRepository extends FakeLocalFileRepository {
   @override
   Future<String?> pickDirectory({String? initialDirectory}) async {
     pickDirectoryCalls++;
-    return pickedDirectoryPath;
+    return null;
   }
 
   @override
@@ -131,7 +141,6 @@ void main() {
     username: 'alice',
     password: 'app-password-secret',
     filePath: 'notes/tasks.tdf',
-    localFilePath: 'tasks.tdf',
     storageMode: StorageMode.both,
     language: AppLanguage.english,
   );
@@ -144,7 +153,7 @@ void main() {
   }
 
   setUp(() {
-    AppLogger.resetForTesting(clock: () => DateTime.utc(2026, 11, 21, 12, 0));
+    AppLogger.resetForTesting(clock: () => DateTime.utc(2026, 11, 21, 12));
   });
 
   tearDown(() {
@@ -158,14 +167,7 @@ void main() {
         final settingsRepository = InMemorySettingsRepository(
           const WebDavConfig(
             language: AppLanguage.english,
-            themeMode: AppThemeMode.system,
-            themePalette: AppThemePalette.calm,
-            timeZoneMode: AppTimeZoneMode.automatic,
-            dueLeadWindow: DueLeadWindow.hours24,
-            locationEnabled: false,
-            diagnosticsEnabled: false,
             storageMode: StorageMode.local,
-            localWatchEnabled: true,
           ),
         );
 
@@ -265,13 +267,8 @@ void main() {
         expect(offsetField.selectOptions.first.label, equals('UTC-12:00'));
         expect(offsetField.selectOptions.last.label, equals('UTC+14:00'));
 
-        final offsetDropdown = find.descendant(
-          of: offsetFieldFinder,
-          matching: find.byType(DropdownButton<String>),
-        );
-        await scrollToAndTap(tester, offsetDropdown);
-        await tester.tap(find.text('UTC+05:30').last);
-        await tester.pumpAndSettle();
+        await scrollToAndTap(tester, offsetFieldFinder);
+        await scrollToAndTap(tester, find.text('UTC+05:30').last);
         expect(
           (await settingsRepository.loadConfig()).manualTimeZoneOffsetMinutes,
           equals(330),
@@ -286,13 +283,11 @@ void main() {
           dueLeadField.selectOptions.length,
           equals(DueLeadWindow.values.length),
         );
-        final dueLeadDropdown = find.descendant(
-          of: dueLeadFieldFinder,
-          matching: find.byType(DropdownButton<String>),
+        await scrollToAndTap(tester, dueLeadFieldFinder);
+        await scrollToAndTap(
+          tester,
+          find.text(localizations.dueLeadWindow48Hours).last,
         );
-        await scrollToAndTap(tester, dueLeadDropdown);
-        await tester.tap(find.text(localizations.dueLeadWindow48Hours).last);
-        await tester.pumpAndSettle();
         expect(
           (await settingsRepository.loadConfig()).dueLeadWindow,
           equals(DueLeadWindow.hours48),
@@ -336,36 +331,33 @@ void main() {
         expect(logStorageFieldFinder, findsOneWidget);
         expect(
           tester.widget<UiField>(logLevelFieldFinder).selectOptions.length,
-          equals(LogLevel.values.length),
+          equals(configurableDiagnosticLogLevels.length),
         );
         expect(
           tester.widget<UiField>(logStorageFieldFinder).selectOptions.length,
           equals(StorageMode.values.length),
         );
 
+        await scrollToAndTap(tester, logLevelFieldFinder);
         await scrollToAndTap(
           tester,
-          find.descendant(
-            of: logLevelFieldFinder,
-            matching: find.byType(DropdownButton<String>),
-          ),
+          find.text(localizations.logLevelDebug).last,
         );
-        await tester.tap(find.text(localizations.logLevelDebug).last);
-        await tester.pumpAndSettle();
         expect(
           (await settingsRepository.loadConfig()).logLevel,
           equals(LogLevel.debug),
         );
 
+        await scrollToAndTap(tester, logStorageFieldFinder);
         await scrollToAndTap(
           tester,
-          find.descendant(
-            of: logStorageFieldFinder,
-            matching: find.byType(DropdownButton<String>),
-          ),
+          find
+              .descendant(
+                of: logStorageFieldFinder,
+                matching: find.text(localizations.logStorageBoth),
+              )
+              .last,
         );
-        await tester.tap(find.text(localizations.logStorageBoth).last);
-        await tester.pumpAndSettle();
         expect(
           (await settingsRepository.loadConfig()).logStorageMode,
           equals(StorageMode.both),
@@ -387,6 +379,56 @@ void main() {
           find.byKey(const ValueKey<String>('settings_open_log_viewer_button')),
         );
         expect(container.read(shellProvider).view, equals(ShellView.logs));
+      },
+    );
+
+    testWidgets(
+      'excludes unlocalized CRASH from diagnostic log level selector options',
+      (tester) async {
+        final settingsRepository = InMemorySettingsRepository(
+          const WebDavConfig(
+            language: AppLanguage.english,
+            storageMode: StorageMode.local,
+            diagnosticsEnabled: true,
+          ),
+        );
+
+        await pumpLeafWidget(
+          tester,
+          const _SettingsTestFrame(),
+          settingsRepository: settingsRepository,
+          surfaceSize: const Size(1280, 900),
+        );
+
+        final logLevelFieldFinder = find.byKey(
+          const ValueKey<String>('settings_log_level_select'),
+        );
+        expect(logLevelFieldFinder, findsOneWidget);
+
+        final options = tester
+            .widget<UiField>(logLevelFieldFinder)
+            .selectOptions;
+        expect(
+          options.map((option) => option.value).toList(),
+          equals(
+            configurableDiagnosticLogLevels.map((level) => level.name).toList(),
+          ),
+          reason: 'Settings log level dropdown must expose only configurable levels',
+        );
+        expect(
+          options.any((option) => option.value == LogLevel.crash.name),
+          isFalse,
+          reason: 'LogLevel.crash must never appear as a selectable option',
+        );
+
+        await scrollToAndTap(tester, logLevelFieldFinder);
+        expect(
+          find.text(LogLevel.crash.label),
+          findsNothing,
+          reason: 'Unlocalized CRASH label must not render in dropdown menu',
+        );
+        expect(find.text(localizations.logLevelDebug), findsOneWidget);
+        expect(find.text(localizations.logLevelError), findsOneWidget);
       },
     );
 
@@ -841,7 +883,6 @@ void main() {
         (tester) async {
           final spyLocalRepo = _SpyLocalFileRepository(
             config: configuredBoth,
-            pickedDirectoryPath: null,
             pickedFilePath: '/tmp/selected.tdf',
           );
           final spyTaskNotifier = _SpySettingsTaskNotifier();
@@ -852,7 +893,6 @@ void main() {
             config: configuredBoth,
             localFileRepository: spyLocalRepo,
             taskNotifierFactory: () => spyTaskNotifier,
-            supportsNativeDirectoryPicker: true,
             surfaceSize: viewportCase.size,
           );
 
@@ -1010,7 +1050,6 @@ void main() {
           tester,
           _SettingsTestFrame(scrollController: scrollController),
           config: configuredBoth,
-          surfaceSize: const Size(1280, 860),
           presetId: 'plum_umber',
           themeMode: ThemeMode.dark,
         );
@@ -1094,7 +1133,6 @@ void main() {
             storageMode: StorageMode.both,
             language: AppLanguage.english,
           ),
-          activate: false,
         );
 
         final container = await pumpLeafWidget(

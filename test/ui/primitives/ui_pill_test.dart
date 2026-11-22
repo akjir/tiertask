@@ -194,7 +194,6 @@ void main() {
                   const UiPill(
                     key: ValueKey<String>('badge_accent'),
                     label: 'Badge',
-                    variant: UiPillVariant.badge,
                     tone: UiPillTone.accent,
                   ),
                 ],
@@ -377,18 +376,91 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'omits AnimatedContainer and Stack on non-interactive count, badge, devBadge, and read-only meta pills',
+      (tester) async {
+        await pumpUiWidget(
+          tester,
+          const Wrap(
+            spacing: 6.0,
+            children: <Widget>[
+              UiPill(
+                key: ValueKey<String>('pill_count'),
+                label: '3 / 5',
+                variant: UiPillVariant.count,
+              ),
+              UiPill(
+                key: ValueKey<String>('pill_badge'),
+                label: 'Auto-saved',
+                tone: UiPillTone.success,
+              ),
+              UiPill(
+                key: ValueKey<String>('pill_dev'),
+                label: 'DEV',
+                tone: UiPillTone.warning,
+                isMono: true,
+              ),
+              UiPill(
+                key: ValueKey<String>('pill_meta_readonly'),
+                label: 'Focus',
+                variant: UiPillVariant.meta,
+                tone: UiPillTone.soft,
+              ),
+            ],
+          ),
+        );
+
+        for (final keyName in const <String>[
+          'pill_count',
+          'pill_badge',
+          'pill_dev',
+          'pill_meta_readonly',
+        ]) {
+          final pillFinder = find.byKey(ValueKey<String>(keyName));
+          expect(
+            find.descendant(
+              of: pillFinder,
+              matching: find.byType(AnimatedContainer),
+            ),
+            findsNothing,
+            reason:
+                'Non-interactive $keyName must use plain DecoratedBox instead of AnimatedContainer',
+          );
+          expect(
+            find.descendant(of: pillFinder, matching: find.byType(Stack)),
+            findsNothing,
+            reason: 'Non-interactive $keyName must omit unnecessary Stack',
+          );
+        }
+      },
+    );
   });
 }
 
-/// Extracts the [BoxDecoration] rendered by the [AnimatedContainer] inside [pillFinder].
+/// Extracts the [BoxDecoration] rendered by the outer container inside [pillFinder].
 BoxDecoration _readPillDecoration(WidgetTester tester, Finder pillFinder) {
-  final container = tester.widget<AnimatedContainer>(
-    find.descendant(of: pillFinder, matching: find.byType(AnimatedContainer)),
+  final animatedFinder = find.descendant(
+    of: pillFinder,
+    matching: find.byType(AnimatedContainer),
   );
-  if (container.decoration case final BoxDecoration box) {
-    return box;
+  if (animatedFinder.evaluate().isNotEmpty) {
+    final container = tester.widget<AnimatedContainer>(animatedFinder.first);
+    if (container.decoration case final BoxDecoration box) {
+      return box;
+    }
   }
-  fail('Expected BoxDecoration on AnimatedContainer');
+  final decoratedFinder = find.descendant(
+    of: pillFinder,
+    matching: find.byType(DecoratedBox),
+  );
+  for (final element in decoratedFinder.evaluate()) {
+    final widget = element.widget;
+    if (widget is DecoratedBox && widget.decoration is BoxDecoration) {
+      return widget.decoration as BoxDecoration;
+    }
+  }
+  fail('Expected BoxDecoration on UiPill surface');
 }
 
 /// Extracts the top border color from [box].

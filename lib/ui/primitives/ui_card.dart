@@ -392,34 +392,45 @@ class _UiStandardCard extends StatelessWidget {
         headerBadge != null ||
         headerTrailing != null;
 
+    final decoration = BoxDecoration(
+      color: isHighlighted ? colors.soft : colors.panel,
+      borderRadius: BorderRadius.circular(tokens.radii.card),
+      border: Border.all(
+        color: isHighlighted ? colors.accent : colors.line,
+        width: tokens.radii.borderWidth,
+      ),
+    );
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (hasHeader) ...<Widget>[
+          _UiCardHeaderRow(
+            icon: headerIcon,
+            title: headerTitle,
+            badge: headerBadge,
+            trailing: headerTrailing,
+            isInset: false,
+          ),
+          SizedBox(height: tokens.spacing.space3),
+        ],
+        child,
+      ],
+    );
+
+    if (!isHighlighted) {
+      return Container(
+        padding: padding,
+        decoration: decoration,
+        child: content,
+      );
+    }
+
     return AnimatedContainer(
       duration: tokens.focus.hoverDuration,
       padding: padding,
-      decoration: BoxDecoration(
-        color: isHighlighted ? colors.soft : colors.panel,
-        borderRadius: BorderRadius.circular(tokens.radii.card),
-        border: Border.all(
-          color: isHighlighted ? colors.accent : colors.line,
-          width: tokens.radii.borderWidth,
-        ),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          if (hasHeader) ...<Widget>[
-            _UiCardHeaderRow(
-              icon: headerIcon,
-              title: headerTitle,
-              badge: headerBadge,
-              trailing: headerTrailing,
-              isInset: false,
-            ),
-            SizedBox(height: tokens.spacing.space3),
-          ],
-          child,
-        ],
-      ),
+      decoration: decoration,
+      child: content,
     );
   }
 }
@@ -554,8 +565,7 @@ class _UiDraftCard extends StatelessWidget {
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
 
-    return AnimatedContainer(
-      duration: tokens.focus.hoverDuration,
+    return Container(
       padding: padding,
       decoration: BoxDecoration(
         color: colors.panel,
@@ -687,13 +697,30 @@ class _UiExpandableCard extends StatefulWidget {
   State<_UiExpandableCard> createState() => _UiExpandableCardState();
 }
 
-/// Tracks collapsed hover highlight and keyboard focus ring for [_UiExpandableCard].
+/// Tracks collapsed hover highlight, keyboard focus ring, and lazy [AnimatedSize] mounting for [_UiExpandableCard].
 class _UiExpandableCardState extends State<_UiExpandableCard> {
   /// Whether the pointer is hovering over the card.
   bool _isHovered = false;
 
+  /// Whether [AnimatedSize] is mounted for an active expansion or collapse transition.
+  bool _mountAnimatedSize = false;
+
   /// Whether keyboard focus ring is visible on the header toggle.
   bool _showFocusRing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _mountAnimatedSize = widget.isExpanded && widget.expandedChild != null;
+  }
+
+  @override
+  void didUpdateWidget(covariant _UiExpandableCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isExpanded && widget.expandedChild != null) {
+      _mountAnimatedSize = true;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -760,21 +787,31 @@ class _UiExpandableCardState extends State<_UiExpandableCard> {
                 ),
                 child: widget.collapsedMetadata,
               ),
-            AnimatedSize(
-              duration: tokens.focus.expandDuration,
-              curve: Curves.easeOut,
-              alignment: Alignment.topCenter,
-              child: widget.isExpanded && widget.expandedChild != null
-                  ? Padding(
-                      padding: const EdgeInsets.only(top: 10.0),
-                      child: widget.expandedChild,
-                    )
-                  : const SizedBox.shrink(),
-            ),
+            if (_mountAnimatedSize)
+              AnimatedSize(
+                duration: tokens.focus.expandDuration,
+                curve: Curves.easeOut,
+                alignment: Alignment.topCenter,
+                onEnd: _handleExpandAnimationEnd,
+                child: widget.isExpanded && widget.expandedChild != null
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 10.0),
+                        child: widget.expandedChild,
+                      )
+                    : const SizedBox.shrink(),
+              ),
           ],
         ),
       ),
     );
+  }
+
+  /// Unmounts [AnimatedSize] after a collapse animation finishes to avoid idle tickers on collapsed cards.
+  void _handleExpandAnimationEnd() {
+    if ((!widget.isExpanded || widget.expandedChild == null) &&
+        _mountAnimatedSize) {
+      setState(() => _mountAnimatedSize = false);
+    }
   }
 }
 
@@ -904,7 +941,6 @@ class _UiExpandableHeader extends StatelessWidget {
     }
 
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
       children: <Widget>[
         if (leading case final leadingWidget?) ...<Widget>[
           SizedBox(

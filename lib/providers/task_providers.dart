@@ -26,7 +26,6 @@ import '../models/task_board_undo.dart';
 import '../models/task_item.dart';
 import '../models/task_tier.dart';
 import '../models/tdf_metadata.dart';
-import '../models/tdf_payload_comparison.dart';
 import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
@@ -65,20 +64,20 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   String? _conflictWatchDigest;
   Future<void>? _inFlightSync;
+  bool _isApplyingUndo = false;
+  TaskBoardEvaluationStamp? _lastEvaluationStamp;
   String? _lastFailedWatchDigest;
-  bool _lastMutationCommitted = true;
   String? _lastSelfWipeDigest;
   TaskBoard? _lastSyncedBoard;
   String? _lastSyncedLocalFilePath;
   int _mutationEpoch = 0;
   int _nextUndoSequence = 0;
   TaskBoard? _pendingConflictOriginBoard;
-  final Set<int> _rolledBackEpochs = <int>{};
   final ListQueue<TaskUndoEntry> _undoStack = ListQueue<TaskUndoEntry>();
   String? _undoWorkspaceId;
 
-  /// Whether the most recent board mutation committed locally without rolling back.
-  bool get lastMutationCommitted => _lastMutationCommitted;
+  /// Latest evaluation context stamped by [TaskNotifier] for its published [TaskBoard], or `null` when unavailable.
+  TaskBoardEvaluationStamp? get lastEvaluationStamp => _lastEvaluationStamp;
 
   /// Returns the current [TaskBoard] snapshot or an empty board if not yet loaded.
   TaskBoard get _currentBoard => state.asData?.value ?? TaskBoard.empty();
@@ -89,39 +88,38 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   @override
   Future<TaskBoard> build() async {
-    ref
+    final unregisterUnload = ref
         .read(workspaceUnloadCoordinatorProvider)
         .register(prepareForWorkspaceUnload);
+    ref.onDispose(unregisterUnload);
     ref.listen<DueLeadWindow?>(
       webDavConfigProvider.select(
         (asyncConfig) => asyncConfig.asData?.value.dueLeadWindow,
       ),
       _handleDueLeadWindowChanged,
     );
+    final workspaceIdFuture = ref.watch(
+      activeWorkspaceProvider.selectAsync((workspace) => workspace.id),
+    );
+    final storageBindingFuture = ref.watch(
+      webDavConfigProvider.selectAsync(_storageBindingOf),
+    );
     _syncUndoWorkspaceId(ref.read(activeWorkspaceProvider).asData?.value.id);
     _pendingConflictOriginBoard = null;
     _conflictWatchDigest = null;
+    _isApplyingUndo = false;
+    _lastEvaluationStamp = null;
     _lastFailedWatchDigest = null;
-    _lastMutationCommitted = true;
     _lastSelfWipeDigest = null;
     _lastSyncedBoard = null;
     _lastSyncedLocalFilePath = null;
-    state = const AsyncLoading();
-    final storageBinding = await ref.watch(
-      webDavConfigProvider.selectAsync(
-        (value) => (
-          filePath: value.filePath,
-          localFilePath: value.localFilePath,
-          password: value.password,
-          serverUrl: value.serverUrl,
-          storageMode: value.storageMode,
-          username: value.username,
-        ),
-      ),
-    );
-    final activeWorkspaceId = ref.watch(
-      activeWorkspaceProvider.select((value) => value.asData?.value.id),
-    );
+    final (activeWorkspaceId, storageBinding) = await (
+      workspaceIdFuture,
+      storageBindingFuture,
+    ).wait;
+    if (!ref.mounted) {
+      return TaskBoard.empty();
+    }
     final config =
         ref.read(webDavConfigProvider).asData?.value ??
         WebDavConfig(
@@ -137,14 +135,30 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       return TaskBoard.empty();
     }
     await _awaitInFlightSync();
-    final operation = _runSyncWithStatus(config, isInitialLoad: true);
+    if (!_isMountedOnWorkspace(activeWorkspaceId)) {
+      return TaskBoard.empty();
+    }
+    final operation = _runSyncWithStatus(
+      config,
+      workspaceId: activeWorkspaceId,
+      isInitialLoad: true,
+    );
     _inFlightSync = operation;
     try {
       final board = await operation;
-      _recordSyncedLocalBoard(board, config);
+      if (_isMountedOnWorkspace(activeWorkspaceId)) {
+        _stampEvaluatedBoard(
+          board,
+          evaluatedUtc: ref.read(clockProvider)(),
+          config: readCurrentConfig(ref),
+        );
+        _recordSyncedLocalBoard(board, config);
+      }
       return board;
     } on TdfSyncOutcomeException {
-      await _recordConflictWatchDigestIfLocal(config);
+      if (_isMountedOnWorkspace(activeWorkspaceId)) {
+        await _recordConflictWatchDigestIfLocal(config);
+      }
       rethrow;
     } finally {
       if (identical(_inFlightSync, operation)) {
@@ -154,7 +168,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Adds a new TDF `label` block with [name], optional `#RRGGBB` [color], and validated [links] and persists to storage.
-  Future<void> addLabel(
+  Future<bool> addLabel(
     String name, {
     String? color,
     String? id,
@@ -163,9 +177,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     Iterable<TaskLink>? links,
     List<TaskCondition> conditions = const [],
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.addLabel(
         name,
         color: color,
@@ -183,7 +197,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Adds a new TDF `location` block with [name], [latitude], [longitude], and [radiusMeters] and persists to storage.
-  Future<void> addLocation(
+  Future<bool> addLocation(
     String name, {
     required double latitude,
     required double longitude,
@@ -192,9 +206,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     String? id,
     String? note,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.addLocation(
         name,
         latitude: latitude,
@@ -213,7 +227,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Adds a new task to [targetTier] (defaulting to [TaskTier.planned]), runs the
   /// Auto-Pull Cascade, and persists to the active `.tdf` storage backend.
-  Future<void> addTask(
+  Future<bool> addTask(
     String title, {
     String? note,
     TaskTier targetTier = TaskTier.planned,
@@ -239,9 +253,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     List<TaskCondition> conditions = const [],
     DateTime? currentDate,
     String? id,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.addTask(
         title,
         note: note,
@@ -276,7 +290,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Appends and canonically deduplicates a single [TaskHistoryEntry] on [taskId] and persists to storage when changed.
-  Future<void> addTaskHistoryEntry(
+  Future<bool> addTaskHistoryEntry(
     String taskId, {
     required DateTime timestampUtc,
     required String text,
@@ -294,19 +308,19 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       dueLeadWindow: _currentDueLeadWindow,
     );
     if (updatedBoard == boardBefore) {
-      return;
+      return true;
     }
-    await _commitMutation(updatedBoard);
+    return _commitMutation(updatedBoard);
   }
 
   /// Moves an active task immediately to Tier 4 ([TaskTier.blocked]) and persists to storage.
-  Future<void> blockTask(
+  Future<bool> blockTask(
     String taskId, {
     DateTime? suspendedUntil,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.blockTask(
         taskId,
         suspendedUntil: suspendedUntil,
@@ -320,11 +334,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Marks an active task as done in Tier 6 ([TaskTier.completed]), prunes expired tasks,
   /// triggers the Auto-Pull Cascade, and persists to storage.
-  Future<void> completeTask(
+  Future<bool> completeTask(
     String taskId, {
     int? expectedCompletions,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final boardBefore = _currentBoard;
     final taskBefore = boardBefore.findTask(taskId);
@@ -349,7 +363,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             boardAfter: updatedBoard,
           )
         : null;
-    await _commitMutation(updatedBoard, undoEntry: undoEntry);
+    return _commitMutation(
+      updatedBoard,
+      undoEntry: undoEntry,
+      evaluatedUtc: utcNow,
+    );
   }
 
   /// Atomically creates a label with [name] and assigns it to [taskId] in a single board persistence cycle.
@@ -361,47 +379,21 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     DateTime? currentDate,
   }) async {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    final boardBefore = _currentBoard;
-    final existingTask = boardBefore.findTask(taskId);
-    if (existingTask == null || existingTask.isCompleted) {
-      return null;
-    }
-    final timeZone = _resolveTimeZone(utcNow);
-    final dueLeadWindow = _currentDueLeadWindow;
-    final generatedId =
-        id ??
-        generateLabelId(
-          existingIds: <String>{
-            for (final label in boardBefore.labels) label.id,
-          },
-        );
-    final boardWithLabel = boardBefore.addLabel(
-      name,
+    final outcome = _currentBoard.createLabelAndAssignToTask(
+      taskId: taskId,
+      name: name,
       color: color,
-      id: generatedId,
+      id: id,
       currentDate: utcNow,
       localEvaluationTime: localNow,
-      timeZone: timeZone,
-      dueLeadWindow: dueLeadWindow,
+      timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
-    final createdLabel = boardWithLabel.findLabel(generatedId);
+    final createdLabel = outcome.label;
     if (createdLabel == null) {
       return null;
     }
-    final selectedSet = <String>{...existingTask.labelIds, createdLabel.id};
-    final orderedLabelIds = <String>[
-      for (final label in boardWithLabel.labels)
-        if (selectedSet.contains(label.id)) label.id,
-    ];
-    final updatedBoard = boardWithLabel.updateTask(
-      taskId,
-      labelIds: orderedLabelIds,
-      currentDate: utcNow,
-      localEvaluationTime: localNow,
-      timeZone: timeZone,
-      dueLeadWindow: dueLeadWindow,
-    );
-    final committed = await _commitMutation(updatedBoard);
+    final committed = await _commitMutation(outcome.board);
     if (!committed) {
       return null;
     }
@@ -409,9 +401,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Deletes the label with [labelId], strips its reference from all tasks, and persists to storage.
-  Future<void> deleteLabel(String labelId, {DateTime? currentDate}) async {
+  Future<bool> deleteLabel(String labelId, {DateTime? currentDate}) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.deleteLabel(
         labelId,
         currentDate: utcNow,
@@ -423,12 +415,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Deletes the location with [locationId], strips its reference from all tasks and labels, and persists to storage.
-  Future<void> deleteLocation(
-    String locationId, {
-    DateTime? currentDate,
-  }) async {
+  Future<bool> deleteLocation(String locationId, {DateTime? currentDate}) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.deleteLocation(
         locationId,
         currentDate: utcNow,
@@ -440,7 +429,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Deletes the task with [taskId], removes its `queue` entry, and persists to storage.
-  Future<void> deleteTask(String taskId, {DateTime? currentDate}) async {
+  Future<bool> deleteTask(String taskId, {DateTime? currentDate}) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final boardBefore = _currentBoard;
     final taskBefore = boardBefore.findTask(taskId);
@@ -461,15 +450,19 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             boardAfter: updatedBoard,
           )
         : null;
-    await _commitMutation(updatedBoard, undoEntry: undoEntry);
+    return _commitMutation(
+      updatedBoard,
+      undoEntry: undoEntry,
+      evaluatedUtc: utcNow,
+    );
   }
 
   /// Downgrades an active task per `TDF_SPEC.md` Section 6.3 and persists to storage.
-  Future<void> downgradeTask(
+  Future<bool> downgradeTask(
     String taskId, {
     String? activeFilterLabelId,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final locationFix = ref.read(locationStateProvider).fix;
     final boardBefore = _currentBoard;
@@ -501,18 +494,23 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             taskBefore: taskBefore,
           )
         : null;
-    await _commitMutation(updatedBoard, undoEntry: undoEntry);
+    return _commitMutation(
+      updatedBoard,
+      undoEntry: undoEntry,
+      evaluatedUtc: utcNow,
+      stampEvaluation: activeFilterLabelId == null && locationFix == null,
+    );
   }
 
   /// Moves [taskId] within the shared `queue` block and persists to storage.
-  Future<void> moveTaskInQueue(
+  Future<bool> moveTaskInQueue(
     String taskId, {
     String? beforeTaskId,
     String? afterTaskId,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.moveTaskInQueue(
         taskId,
         beforeTaskId: beforeTaskId,
@@ -528,11 +526,14 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Awaits any in-flight synchronization and flushes the outgoing [TaskBoard] to local storage if populated before switching workspaces.
   Future<void> prepareForWorkspaceUnload() async {
     await _flushOutgoingWorkspaceBoard();
+    if (!ref.mounted) {
+      return;
+    }
     _clearUndoStack('workspace_unload');
   }
 
-  /// Synchronizes and persists the in-memory [board] state across the configured local and WebDAV stages.
-  Future<void> pushToRemote(
+  /// Synchronizes and persists the in-memory [board] state across the configured local and WebDAV stages, returning whether it committed locally.
+  Future<bool> pushToRemote(
     TaskBoard board, {
     TaskBoard? fallbackBoard,
     Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
@@ -540,7 +541,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }) async {
     await _awaitInFlightSync();
     if (!ref.mounted) {
-      return;
+      return false;
     }
     final operation = _executePushToRemote(
       board,
@@ -550,7 +551,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     );
     _inFlightSync = operation;
     try {
-      await operation;
+      return await operation;
     } finally {
       if (identical(_inFlightSync, operation)) {
         _inFlightSync = null;
@@ -588,7 +589,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Removes a single [TaskHistoryEntry] from [taskId] when present and persists to storage when changed.
-  Future<void> removeTaskHistoryEntry(
+  Future<bool> removeTaskHistoryEntry(
     String taskId, {
     required DateTime timestampUtc,
     required String text,
@@ -605,9 +606,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       dueLeadWindow: _currentDueLeadWindow,
     );
     if (updatedBoard == boardBefore) {
-      return;
+      return true;
     }
-    await _commitMutation(updatedBoard);
+    return _commitMutation(updatedBoard);
   }
 
   /// Resolves pending `DeletionConflict` items via explicit or bound `Delete` / `Undelete` decisions (`TDF-DEL-003`).
@@ -642,13 +643,13 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Restores a completed task to [targetTier] (defaulting to [TaskTier.planned]) per
   /// `TDF_SPEC.md` Section 6.5 and persists to storage.
-  Future<void> restoreTask(
+  Future<bool> restoreTask(
     String taskId, {
     TaskTier targetTier = TaskTier.planned,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.restoreTask(
         taskId,
         targetTier: targetTier,
@@ -661,13 +662,13 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Schedules a task from `Someday` into the active pull cycle per `TDF_SPEC.md` Section 6.2 and persists to storage.
-  Future<void> scheduleTask(
+  Future<bool> scheduleTask(
     String taskId, {
     bool isPriority = false,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.scheduleTask(
         taskId,
         isPriority: isPriority,
@@ -682,7 +683,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Switches the active workspace's local `.tdf` file to [newConfig] without moving or deleting the previous file, initializes the target file if missing, and reloads the board.
   Future<void> selectLocalFile(WebDavConfig newConfig) async {
     await _flushOutgoingWorkspaceBoard();
-    final previousConfig = resolveCurrentConfig(ref);
+    if (!ref.mounted) {
+      return;
+    }
+    final previousConfig = readCurrentConfig(ref);
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    if (!ref.mounted) {
+      return;
+    }
+    final startingWorkspaceId = workspace.id;
     final localizations = lookupAppLocalizations(
       newConfig.language.resolveLocale(PlatformDispatcher.instance.locale),
     );
@@ -696,57 +705,90 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final targetPath = targetRepo.resolveFilePath();
 
     try {
-      await settingsRepo.saveConfig(newConfig);
+      await settingsRepo.saveConfigForWorkspace(startingWorkspaceId, newConfig);
     } on WorkspaceException catch (error) {
       throw LocalFileException(
         localizations.localizeWorkspaceError(error),
         cause: error,
       );
     }
+    if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+      return;
+    }
 
     try {
       await targetRepo.initializeIfMissing();
     } on Object {
-      await settingsRepo.saveConfig(previousConfig);
+      await settingsRepo.saveConfigForWorkspace(
+        startingWorkspaceId,
+        previousConfig,
+      );
       rethrow;
     }
+    if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+      return;
+    }
 
-    final workspace = await ref.read(activeWorkspaceProvider.future);
     _pendingConflictOriginBoard = null;
     _conflictWatchDigest = null;
     _lastFailedWatchDigest = null;
-    _lastMutationCommitted = true;
     _lastSelfWipeDigest = null;
     _lastSyncedBoard = null;
     _lastSyncedLocalFilePath = null;
     _clearUndoStack('select_local_file');
-    await TaskSyncPipeline.resetLocalSyncBaseline(ref, workspace.id);
+    await TaskSyncPipeline.resetLocalSyncBaseline(ref, startingWorkspaceId);
+    if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+      return;
+    }
+    final storageBindingChanged =
+        _storageBindingOf(previousConfig) != _storageBindingOf(newConfig);
     await ref.read(webDavConfigProvider.notifier).updateConfig(newConfig);
+    AppLogger.info(
+      LogTag.sync,
+      'Selected local TDF file workspace=$startingWorkspaceId path=$targetPath',
+    );
+    if (storageBindingChanged || !_isMountedOnWorkspace(startingWorkspaceId)) {
+      return;
+    }
     final updatedConfig = await ref.read(webDavConfigProvider.future);
+    if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+      return;
+    }
     await _awaitInFlightSync();
-    final operation = _runSyncWithStatus(updatedConfig, isInitialLoad: true);
+    if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+      return;
+    }
+    final operation = _runSyncWithStatus(
+      updatedConfig,
+      workspaceId: startingWorkspaceId,
+      isInitialLoad: true,
+    );
     _inFlightSync = operation;
     try {
       final board = await operation;
-      state = AsyncData(board);
+      if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+        return;
+      }
+      _setEvaluatedState(board, config: updatedConfig);
       _recordSyncedLocalBoard(board, updatedConfig);
     } on TdfSyncOutcomeException {
-      await _recordConflictWatchDigestIfLocal(updatedConfig);
+      if (_isMountedOnWorkspace(startingWorkspaceId)) {
+        await _recordConflictWatchDigestIfLocal(updatedConfig);
+      }
       rethrow;
     } finally {
       if (identical(_inFlightSync, operation)) {
         _inFlightSync = null;
       }
     }
-    AppLogger.info(
-      LogTag.sync,
-      'Selected local TDF file workspace=${workspace.id} path=$targetPath',
-    );
   }
 
   /// Synchronizes the in-memory board with the configured local and/or WebDAV storage backends.
   Future<void> syncFromRemote() async {
     await _awaitInFlightSync();
+    if (!ref.mounted) {
+      return;
+    }
     final operation = _executeSyncFromRemote();
     _inFlightSync = operation;
     try {
@@ -761,6 +803,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Tests storage access using [config], runs the two-stage merge pipeline, and updates the board.
   Future<void> testConnectionAndSync(WebDavConfig config) async {
     await _awaitInFlightSync();
+    if (!ref.mounted) {
+      return;
+    }
     final operation = _executeTestConnectionAndSync(config);
     _inFlightSync = operation;
     try {
@@ -773,11 +818,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Toggles the subtask step at [stepIndex] on [taskId] and persists to storage.
-  Future<void> toggleSubtask(
+  Future<bool> toggleSubtask(
     String taskId,
     int stepIndex, {
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
     final boardBefore = _currentBoard;
     final taskBefore = boardBefore.findTask(taskId);
@@ -805,7 +850,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             boardAfter: updatedBoard,
           )
         : null;
-    await _commitMutation(updatedBoard, undoEntry: undoEntry);
+    return _commitMutation(
+      updatedBoard,
+      undoEntry: undoEntry,
+      evaluatedUtc: utcNow,
+    );
   }
 
   /// Pops and reverses the most recent undoable task mutation when available.
@@ -813,73 +862,86 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     int? expectedSequence,
     DateTime? currentDate,
   }) async {
-    if (_undoStack.isEmpty) {
+    if (_isApplyingUndo || _undoStack.isEmpty) {
       return false;
     }
     if (expectedSequence != null &&
         _undoStack.last.sequence != expectedSequence) {
       return false;
     }
-    final entry = _undoStack.removeLast();
-    ref
-        .read(taskUndoStateProvider.notifier)
-        .update(TaskUndoState(stackDepth: _undoStack.length));
-    final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    final outcome = TaskBoardUndo.apply(
-      _currentBoard,
-      entry,
-      utcNow: utcNow,
-      localEvaluationTime: localNow,
-      timeZone: _resolveTimeZone(utcNow),
-      dueLeadWindow: _currentDueLeadWindow,
-    );
-    if (outcome == null) {
-      return false;
-    }
-    if (AppLogger.shouldLog(LogLevel.info)) {
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.domain,
-        'task.undo.apply',
-        fields: <String, Object?>{
-          'id': entry.snapshotTask.id,
-          'kind': entry.kind.name,
-          'seq': entry.sequence,
-          'remaining': _undoStack.length,
-        },
-      );
-    }
-    final persisted = await _commitMutation(
-      outcome.board,
-      taskConflictResolutions: outcome.taskConflictResolutions,
-    );
-    if (!persisted) {
-      if (_undoStack.length < TaskBoardUndo.maxUndoEntries) {
-        _undoStack.addLast(entry);
-      }
+    _isApplyingUndo = true;
+    try {
+      final entry = _undoStack.removeLast();
       ref
           .read(taskUndoStateProvider.notifier)
           .update(TaskUndoState(stackDepth: _undoStack.length));
-      if (AppLogger.shouldLog(LogLevel.warn)) {
+      final (utcNow, localNow) = _resolveTimestamps(currentDate);
+      final outcome = TaskBoardUndo.apply(
+        _currentBoard,
+        entry,
+        utcNow: utcNow,
+        localEvaluationTime: localNow,
+        timeZone: _resolveTimeZone(utcNow),
+        dueLeadWindow: _currentDueLeadWindow,
+      );
+      if (outcome == null) {
+        return false;
+      }
+      if (AppLogger.shouldLog(LogLevel.info)) {
         AppLogger.event(
-          LogLevel.warn,
+          LogLevel.info,
           LogTag.domain,
-          'task.undo.rollback',
+          'task.undo.apply',
           fields: <String, Object?>{
             'id': entry.snapshotTask.id,
             'kind': entry.kind.name,
             'seq': entry.sequence,
-            'direction': 'undo',
+            'remaining': _undoStack.length,
           },
         );
       }
-      return false;
+      final startingWorkspaceId = ref
+          .read(activeWorkspaceProvider)
+          .asData
+          ?.value
+          .id;
+      final persisted = await _commitMutation(
+        outcome.board,
+        taskConflictResolutions: outcome.taskConflictResolutions,
+      );
+      if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+        return false;
+      }
+      if (!persisted) {
+        if (_undoStack.length < TaskBoardUndo.maxUndoEntries) {
+          _undoStack.addLast(entry);
+        }
+        ref
+            .read(taskUndoStateProvider.notifier)
+            .update(TaskUndoState(stackDepth: _undoStack.length));
+        if (AppLogger.shouldLog(LogLevel.warn)) {
+          AppLogger.event(
+            LogLevel.warn,
+            LogTag.domain,
+            'task.undo.rollback',
+            fields: <String, Object?>{
+              'id': entry.snapshotTask.id,
+              'kind': entry.kind.name,
+              'seq': entry.sequence,
+              'direction': 'undo',
+            },
+          );
+        }
+        return false;
+      }
+      return true;
+    } finally {
+      _isApplyingUndo = false;
     }
-    return true;
   }
 
   /// Updates an existing label with [labelId] and persists the updated board to storage.
-  Future<void> updateLabel(
+  Future<bool> updateLabel(
     String labelId, {
     String? name,
     String? color,
@@ -890,9 +952,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     Iterable<TaskLink>? links,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.updateLabel(
         labelId,
         name: name,
@@ -912,7 +974,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Updates an existing location with [locationId] and persists the updated board to storage.
-  Future<void> updateLocation(
+  Future<bool> updateLocation(
     String locationId, {
     String? name,
     double? latitude,
@@ -923,9 +985,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     String? note,
     bool clearNote = false,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.updateLocation(
         locationId,
         name: name,
@@ -945,7 +1007,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Updates an existing task with [taskId] and persists the updated board to storage.
-  Future<void> updateTask(
+  Future<bool> updateTask(
     String taskId, {
     String? title,
     String? note,
@@ -978,9 +1040,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     Iterable<TaskHistoryEntry>? history,
     List<TaskCondition>? conditions,
     DateTime? currentDate,
-  }) async {
+  }) {
     final (utcNow, localNow) = _resolveTimestamps(currentDate);
-    await _commitMutation(
+    return _commitMutation(
       _currentBoard.updateTask(
         taskId,
         title: title,
@@ -1022,7 +1084,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   }
 
   /// Atomically updates [taskId]'s subtasks and completes [taskId] in one persistence cycle with Undo capture.
-  Future<void> updateTaskAndComplete(
+  Future<bool> updateTaskAndComplete(
     String taskId, {
     required List<SubtaskItem> subtasks,
     required bool subtasksAutoFinish,
@@ -1032,36 +1094,16 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final boardBefore = _currentBoard;
     final taskBefore = boardBefore.findTask(taskId);
     if (taskBefore == null || taskBefore.isCompleted) {
-      return;
+      return false;
     }
-    final timeZone = _resolveTimeZone(utcNow);
-    final dueLeadWindow = _currentDueLeadWindow;
-    final stagedSubtasks =
-        subtasksAutoFinish &&
-            subtasks.isNotEmpty &&
-            subtasks.every((step) => step.isCompleted)
-        ? <SubtaskItem>[
-            for (var i = 0; i < subtasks.length; i++)
-              i == subtasks.length - 1
-                  ? subtasks[i].copyWith(isCompleted: false)
-                  : subtasks[i],
-          ]
-        : subtasks;
-    final withSubtasks = boardBefore.updateTask(
+    final completedBoard = boardBefore.updateTaskSubtasksAndComplete(
       taskId,
-      subtasks: stagedSubtasks,
+      subtasks: subtasks,
       subtasksAutoFinish: subtasksAutoFinish,
       currentDate: utcNow,
       localEvaluationTime: localNow,
-      timeZone: timeZone,
-      dueLeadWindow: dueLeadWindow,
-    );
-    final completedBoard = withSubtasks.completeTask(
-      taskId,
-      currentDate: utcNow,
-      localEvaluationTime: localNow,
-      timeZone: timeZone,
-      dueLeadWindow: dueLeadWindow,
+      timeZone: _resolveTimeZone(utcNow),
+      dueLeadWindow: _currentDueLeadWindow,
     );
     final updatedTask = completedBoard.findTask(taskId);
     final undoEntry =
@@ -1074,11 +1116,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             boardAfter: completedBoard,
           )
         : null;
-    await _commitMutation(completedBoard, undoEntry: undoEntry);
+    return _commitMutation(
+      completedBoard,
+      undoEntry: undoEntry,
+      evaluatedUtc: utcNow,
+    );
   }
 
   /// Replaces an existing `(oldTimestampUtc, oldText)` history entry on [taskId] and persists to storage when changed.
-  Future<void> updateTaskHistoryEntry(
+  Future<bool> updateTaskHistoryEntry(
     String taskId, {
     required DateTime oldTimestampUtc,
     required String oldText,
@@ -1099,9 +1145,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       dueLeadWindow: _currentDueLeadWindow,
     );
     if (updatedBoard == boardBefore) {
-      return;
+      return true;
     }
-    await _commitMutation(updatedBoard);
+    return _commitMutation(updatedBoard);
   }
 
   /// Wipes and re-initializes the local `.tdf` file for [config], optionally creating a `.bak` backup first, and resets synchronization baselines.
@@ -1112,9 +1158,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     config,
     isRemote: false,
     createBackup: createBackup,
-    wipeTarget: () => ref
-        .read(localFileRepositoryProvider)
-        .wipeTdf(createBackup: createBackup),
+    wipeTarget: (localRepo, _) => localRepo.wipeTdf(createBackup: createBackup),
   );
 
   /// Wipes and re-initializes the remote WebDAV `.tdf` file for [config], optionally creating a `.bak` backup first, and resets synchronization baselines.
@@ -1123,6 +1167,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     bool createBackup = false,
   }) async {
     await _awaitInFlightSync();
+    if (!ref.mounted) {
+      return;
+    }
     final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
     if (!config.storageMode.usesWebDav || !config.isWebDavConfigured) {
       final exception = WebDavException(localizations.errorWebDavNotConfigured);
@@ -1133,9 +1180,8 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       config,
       isRemote: true,
       createBackup: createBackup,
-      wipeTarget: () => ref
-          .read(webDavRepositoryProvider)
-          .wipeTdf(createBackup: createBackup),
+      wipeTarget: (_, webDavRepo) =>
+          webDavRepo.wipeTdf(createBackup: createBackup),
     );
   }
 
@@ -1180,7 +1226,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     } else if (alignedBoard != previousBoard) {
       _pruneInvalidatedUndoEntries(previousBoard, alignedBoard);
     }
-    state = AsyncData(alignedBoard);
+    _setEvaluatedState(alignedBoard);
   }
 
   /// Awaits all currently running synchronization operations in FIFO order without propagating their exceptions.
@@ -1214,7 +1260,6 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Clears [_undoStack] for [reason] and optionally resets [taskUndoStateProvider].
   void _clearUndoStack(String reason, {bool resetProvider = true}) {
     final cleared = _undoStack.length;
-    _rolledBackEpochs.clear();
     if (cleared > 0) {
       _undoStack.clear();
       if (AppLogger.shouldLog(LogLevel.info)) {
@@ -1231,130 +1276,42 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
-  /// Collects IDs in [queue] before [limitIndex] that are also present in [sharedMembers].
-  Set<String> _collectSharedPredecessors(
-    List<String> queue,
-    int limitIndex,
-    Set<String> sharedMembers,
-  ) {
-    final predecessors = <String>{};
-    for (var i = 0; i < limitIndex; i++) {
-      final candidate = queue[i];
-      if (sharedMembers.contains(candidate)) {
-        predecessors.add(candidate);
-      }
-    }
-    return predecessors;
-  }
-
   /// Updates the in-memory board state and executes the two-stage persistence pipeline, rolling back on local failure.
   Future<bool> _commitMutation(
     TaskBoard updatedBoard, {
     TaskUndoEntry? undoEntry,
     Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
+    DateTime? evaluatedUtc,
+    bool stampEvaluation = true,
   }) async {
+    final startingWorkspaceId = ref
+        .read(activeWorkspaceProvider)
+        .asData
+        ?.value
+        .id;
     final epoch = ++_mutationEpoch;
     final previousBoard = _currentBoard;
-    state = AsyncData(updatedBoard);
+    if (stampEvaluation) {
+      _setEvaluatedState(updatedBoard, evaluatedUtc: evaluatedUtc);
+    } else {
+      _lastEvaluationStamp = null;
+      state = AsyncData(updatedBoard);
+    }
     final evictedEntry = undoEntry != null
         ? _recordOptimisticUndoEntry(undoEntry)
         : null;
-    await pushToRemote(
+    final committed = await pushToRemote(
       updatedBoard,
       fallbackBoard: previousBoard,
       taskConflictResolutions: taskConflictResolutions,
       mutationEpoch: epoch,
     );
-    final rolledBack = _rolledBackEpochs.remove(epoch);
-    _lastMutationCommitted = !rolledBack;
-    if (rolledBack && undoEntry != null) {
+    if (!committed &&
+        undoEntry != null &&
+        _isMountedOnWorkspace(startingWorkspaceId)) {
       _rollbackOptimisticUndoEntry(undoEntry, evictedEntry: evictedEntry);
     }
-    return !rolledBack;
-  }
-
-  /// Returns `true` when any dependent task in [dependentIds] had a non-cleanup change between [previousBoard] and [nextBoard].
-  bool _didAnyDependentChange(
-    Iterable<String> dependentIds,
-    TaskBoard previousBoard,
-    TaskBoard nextBoard, {
-    required Map<String, TaskItem> nextLiveTasksById,
-    required Set<String> nextDeletedTaskIds,
-    required DateTime nowUtc,
-  }) {
-    for (final dependentId in dependentIds) {
-      if (_didTaskChangeModuloBlockCleanup(
-        dependentId,
-        previousBoard,
-        nextBoard,
-        nextLiveTasksById: nextLiveTasksById,
-        nextDeletedTaskIds: nextDeletedTaskIds,
-        nowUtc: nowUtc,
-      )) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// Returns `true` when [taskId] was added, deleted, completed, or had a non-cleanup payload edit between [previousBoard] and [nextBoard].
-  bool _didTaskChangeModuloBlockCleanup(
-    String taskId,
-    TaskBoard previousBoard,
-    TaskBoard nextBoard, {
-    required Map<String, TaskItem> nextLiveTasksById,
-    required Set<String> nextDeletedTaskIds,
-    required DateTime nowUtc,
-  }) {
-    final previousTask = previousBoard.findTask(taskId);
-    final nextTask = nextBoard.findTask(taskId);
-    if (previousTask == nextTask) {
-      return false;
-    }
-    if (previousTask == null || nextTask == null) {
-      return true;
-    }
-    if (previousTask.isCompleted ||
-        previousTask.completedAt != null ||
-        nextTask.isCompleted ||
-        nextTask.completedAt != null) {
-      return true;
-    }
-    return !TdfPayloadComparison.taskPayloadsEqualModuloBlockCleanup(
-      left: previousTask,
-      right: nextTask,
-      liveTasksById: nextLiveTasksById,
-      deletedTaskIds: nextDeletedTaskIds,
-      nowUtc: nowUtc,
-    );
-  }
-
-  /// Returns `true` when [taskId]'s queue membership or relative order among shared queued tasks changed between [previousQueue] and [nextQueue].
-  bool _didTaskQueuePlacementChange(
-    String taskId,
-    List<String> previousQueue,
-    List<String> nextQueue,
-  ) {
-    final previousIndex = previousQueue.indexOf(taskId);
-    final nextIndex = nextQueue.indexOf(taskId);
-    if ((previousIndex >= 0) != (nextIndex >= 0)) {
-      return true;
-    }
-    if (previousIndex < 0) {
-      return false;
-    }
-    final sharedMembers = previousQueue.toSet().intersection(nextQueue.toSet());
-    final previousPredecessors = _collectSharedPredecessors(
-      previousQueue,
-      previousIndex,
-      sharedMembers,
-    );
-    final nextPredecessors = _collectSharedPredecessors(
-      nextQueue,
-      nextIndex,
-      sharedMembers,
-    );
-    return !setEquals(previousPredecessors, nextPredecessors);
+    return committed;
   }
 
   /// Executes digest-gated reconciliation of an external local `.tdf` file change for [workspaceId].
@@ -1385,6 +1342,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           .read(syncStateProvider.notifier)
           .setError(readFailure.toString(), fileReadReport: readFailure.report);
       return false;
+    } on Object catch (error) {
+      if (!ref.mounted || !_isSameActiveWatchTarget(workspaceId, config)) {
+        return false;
+      }
+      _logWatchError(workspaceId, config.storageMode, error);
+      ref
+          .read(syncStateProvider.notifier)
+          .setError(AppLogger.sanitize(error.toString()));
+      return false;
     }
     if (!ref.mounted || !_isSameActiveWatchTarget(workspaceId, config)) {
       return false;
@@ -1393,9 +1359,21 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _logWatchSkip(workspaceId, 'missing_or_empty');
       return false;
     }
-    final syncState = await ref
-        .read(settingsRepositoryProvider)
-        .loadWorkspaceSyncState(workspaceId);
+    final WorkspaceSyncState syncState;
+    try {
+      syncState = await ref
+          .read(settingsRepositoryProvider)
+          .loadWorkspaceSyncState(workspaceId);
+    } on Object catch (error) {
+      if (!ref.mounted || !_isSameActiveWatchTarget(workspaceId, config)) {
+        return false;
+      }
+      _logWatchError(workspaceId, config.storageMode, error);
+      ref
+          .read(syncStateProvider.notifier)
+          .setError(AppLogger.sanitize(error.toString()));
+      return false;
+    }
     if (!ref.mounted || !_isSameActiveWatchTarget(workspaceId, config)) {
       return false;
     }
@@ -1428,19 +1406,25 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return _runExternalWatchSynchronize(workspaceId, latestConfig, disk.digest);
   }
 
-  /// Executes a single [pushToRemote] persistence pass for [board].
-  Future<void> _executePushToRemote(
+  /// Executes a single [pushToRemote] persistence pass for [board], returning `true` when persisted locally or no storage backend is active.
+  Future<bool> _executePushToRemote(
     TaskBoard board, {
     TaskBoard? fallbackBoard,
     Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
     int? mutationEpoch,
   }) async {
     final workspace = await ref.read(activeWorkspaceProvider.future);
+    if (!ref.mounted) {
+      return false;
+    }
     final WebDavConfig config =
         ref.read(webDavConfigProvider).asData?.value ??
         await ref.read(webDavConfigProvider.future);
+    if (!_isMountedOnWorkspace(workspace.id)) {
+      return false;
+    }
     if (!config.hasActiveStorage) {
-      return;
+      return true;
     }
 
     var localStageSucceeded = false;
@@ -1449,17 +1433,21 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       final converged = await TaskSyncPipeline.synchronize(
         ref,
         config,
+        workspaceId: workspace.id,
         taskConflictResolutions: taskConflictResolutions,
         candidateBoard: board,
-        candidateOriginBoard: fallbackBoard ?? _pendingConflictOriginBoard,
+        candidateOriginBoard: _pendingConflictOriginBoard ?? fallbackBoard,
         onLocalStageMerged: (mergedBoard) {
+          if (!_isMountedOnWorkspace(workspace.id)) {
+            return;
+          }
           localStageSucceeded = true;
           _pendingConflictOriginBoard = null;
           _conflictWatchDigest = null;
           _lastFailedWatchDigest = null;
           _lastSelfWipeDigest = null;
           if (mutationEpoch == null || mutationEpoch == _mutationEpoch) {
-            state = AsyncData(
+            _setEvaluatedState(
               _alignBoardWithCurrentLeadWindow(
                 mergedBoard,
                 config.dueLeadWindow,
@@ -1468,21 +1456,20 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           }
         },
       );
-      if (!ref.mounted) {
-        return;
+      if (!_isMountedOnWorkspace(workspace.id)) {
+        return localStageSucceeded;
       }
       if (taskConflictResolutions.isNotEmpty && mutationEpoch == null) {
         _clearUndoStack('resolve_deletion_conflict');
       }
       final isCurrentEpoch =
           mutationEpoch == null || mutationEpoch == _mutationEpoch;
-      if (isCurrentEpoch &&
-          ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
+      if (isCurrentEpoch) {
         final aligned = _alignBoardWithCurrentLeadWindow(
           converged,
           config.dueLeadWindow,
         );
-        state = AsyncData(aligned);
+        _setEvaluatedState(aligned);
         _recordSyncedLocalBoard(aligned, config);
       }
       _pendingConflictOriginBoard = null;
@@ -1492,12 +1479,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       ref
           .read(syncStateProvider.notifier)
           .setSuccess(ref.read(clockProvider)().toUtc());
+      return true;
     } on TdfSyncOutcomeException catch (error) {
-      if (!ref.mounted) {
-        return;
+      if (!_isMountedOnWorkspace(workspace.id)) {
+        return localStageSucceeded;
       }
       if (!localStageSucceeded && mutationEpoch != null) {
-        _rolledBackEpochs.add(mutationEpoch);
         _pendingConflictOriginBoard ??= fallbackBoard;
       }
       if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
@@ -1511,20 +1498,15 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             outcome: error,
           );
       await _recordConflictWatchDigestIfLocal(config);
+      return localStageSucceeded;
     } on Object catch (error) {
-      if (!ref.mounted) {
-        return;
+      if (!_isMountedOnWorkspace(workspace.id)) {
+        return localStageSucceeded;
       }
       if (!localStageSucceeded) {
-        if (mutationEpoch != null) {
-          _rolledBackEpochs.add(mutationEpoch);
-        }
         final isCurrentEpoch =
             mutationEpoch == null || mutationEpoch == _mutationEpoch;
-        if (isCurrentEpoch &&
-            fallbackBoard != null &&
-            ref.read(activeWorkspaceProvider).asData?.value.id ==
-                workspace.id) {
+        if (isCurrentEpoch && fallbackBoard != null) {
           state = AsyncData(
             _alignBoardWithCurrentLeadWindow(
               fallbackBoard,
@@ -1541,6 +1523,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
                 ? error.report
                 : null,
           );
+      return localStageSucceeded;
     }
   }
 
@@ -1587,8 +1570,12 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
 
   /// Executes a serialized [syncFromRemote] pass.
   Future<void> _executeSyncFromRemote() async {
-    final config = await ref.read(webDavConfigProvider.future);
+    final workspace = await ref.read(activeWorkspaceProvider.future);
     if (!ref.mounted) {
+      return;
+    }
+    final config = await ref.read(webDavConfigProvider.future);
+    if (!_isMountedOnWorkspace(workspace.id)) {
       return;
     }
     final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
@@ -1618,12 +1605,14 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     try {
       final board = await _runSyncWithStatus(
         config,
+        workspaceId: workspace.id,
         candidateBoard: existingBoard,
         candidateOriginBoard: _pendingConflictOriginBoard,
         candidateMatchesLastSyncedLocal: matchesLastSyncedLocal,
-        shouldApplyState: () => epoch == _mutationEpoch,
+        shouldApplyState: () =>
+            epoch == _mutationEpoch && _isMountedOnWorkspace(workspace.id),
       );
-      if (!ref.mounted) {
+      if (!_isMountedOnWorkspace(workspace.id)) {
         return;
       }
       if (existingBoard != null && board != existingBoard) {
@@ -1635,7 +1624,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _lastSelfWipeDigest = null;
       if (epoch == _mutationEpoch) {
         if (state.asData?.value != board) {
-          state = AsyncData(board);
+          _setEvaluatedState(board);
         }
         _recordSyncedLocalBoard(state.asData?.value ?? board, config);
       } else if (AppLogger.shouldLog(LogLevel.debug)) {
@@ -1650,14 +1639,14 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         );
       }
     } on TdfSyncOutcomeException catch (error, stackTrace) {
-      if (!ref.mounted) {
+      if (!_isMountedOnWorkspace(workspace.id)) {
         return;
       }
       if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
         _clearUndoStack('sync_generation_rollback');
       }
       await _recordConflictWatchDigestIfLocal(config);
-      if (!ref.mounted) {
+      if (!_isMountedOnWorkspace(workspace.id)) {
         return;
       }
       if (epoch == _mutationEpoch) {
@@ -1667,11 +1656,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             : AsyncError(error, stackTrace);
       }
     } on UnsupportedTdfVersionException catch (error, stackTrace) {
-      if (!ref.mounted) {
+      if (!_isMountedOnWorkspace(workspace.id)) {
         return;
       }
       await _recordConflictWatchDigestIfLocal(config);
-      if (!ref.mounted) {
+      if (!_isMountedOnWorkspace(workspace.id)) {
         return;
       }
       if (epoch == _mutationEpoch) {
@@ -1681,7 +1670,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
             : AsyncError(error, stackTrace);
       }
     } on Object catch (error, stackTrace) {
-      if (!ref.mounted) {
+      if (!_isMountedOnWorkspace(workspace.id)) {
         return;
       }
       if (epoch == _mutationEpoch && existingBoard == null && !state.hasValue) {
@@ -1690,7 +1679,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
-  /// Executes a serialized [testConnectionAndSync] pass for [config].
+  /// Executes a serialized [testConnectionAndSync] pass for [config] before persisting changed credentials.
   Future<void> _executeTestConnectionAndSync(WebDavConfig config) async {
     final localizations = lookupAppLocalizations(ref.read(appLocaleProvider));
     if (!config.storageMode.usesWebDav || !config.isWebDavConfigured) {
@@ -1699,15 +1688,32 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       throw exception;
     }
 
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    if (!ref.mounted) {
+      return;
+    }
+    final startingWorkspaceId = workspace.id;
     final existingBoard = state.asData?.value;
-    await ref.read(webDavConfigProvider.notifier).updateConfig(config);
+    final localRepo = _resolveLocalRepositoryForConfig(config);
+    final currentWebDavRepo = ref.read(webDavRepositoryProvider);
+    final webDavRepo = _resolveWebDavRepositoryForConfig(
+      config,
+      current: currentWebDavRepo,
+    );
+    final ownsTemporaryWebDavRepo = !identical(webDavRepo, currentWebDavRepo);
     try {
       final board = await _runSyncWithStatus(
         config,
+        workspaceId: startingWorkspaceId,
+        localRepository: localRepo,
+        webDavRepository: webDavRepo,
         candidateBoard: existingBoard,
         candidateOriginBoard: _pendingConflictOriginBoard,
         requireTargets: true,
       );
+      if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+        return;
+      }
       if (existingBoard != null && board != existingBoard) {
         _pruneInvalidatedUndoEntries(existingBoard, board);
       }
@@ -1715,14 +1721,24 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
       _lastSelfWipeDigest = null;
-      state = AsyncData(board);
+      _setEvaluatedState(board, config: config);
       _recordSyncedLocalBoard(board, config);
+      if (readCurrentConfig(ref) != config) {
+        await ref.read(webDavConfigProvider.notifier).updateConfig(config);
+      }
     } on TdfSyncOutcomeException catch (error) {
+      if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+        rethrow;
+      }
       if (error.kind == TdfSyncOutcomeKind.syncGenerationRollback) {
         _clearUndoStack('sync_generation_rollback');
       }
       await _recordConflictWatchDigestIfLocal(config);
       rethrow;
+    } finally {
+      if (ownsTemporaryWebDavRepo) {
+        webDavRepo.close();
+      }
     }
   }
 
@@ -1731,9 +1747,16 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     WebDavConfig config, {
     required bool isRemote,
     required bool createBackup,
-    required Future<void> Function() wipeTarget,
+    required Future<void> Function(
+      LocalFileRepository localRepo,
+      WebDavRepository webDavRepo,
+    )
+    wipeTarget,
   }) async {
     await _awaitInFlightSync();
+    if (!ref.mounted) {
+      return;
+    }
     final operation = _performWipe(
       config,
       isRemote: isRemote,
@@ -1753,6 +1776,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Awaits any in-flight sync and flushes the populated outgoing [TaskBoard] to local storage.
   Future<void> _flushOutgoingWorkspaceBoard() async {
     await _awaitInFlightSync();
+    if (!ref.mounted) {
+      return;
+    }
     final currentWorkspace = ref.read(activeWorkspaceProvider).asData?.value;
     final currentBoard = state.asData?.value;
     if (currentWorkspace != null &&
@@ -1788,7 +1814,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         timeZone: _resolveTimeZone(utcNow),
         dueLeadWindow: next.duration,
       );
-      state = AsyncData(reevaluated);
+      _setEvaluatedState(
+        reevaluated,
+        evaluatedUtc: utcNow,
+        config: readCurrentConfig(ref).copyWith(dueLeadWindow: next),
+      );
       if (AppLogger.shouldLog(LogLevel.debug)) {
         AppLogger.event(
           LogLevel.debug,
@@ -1836,6 +1866,17 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       config.storageMode.usesLocal &&
       config.isLocalConfigured;
 
+  /// Returns `true` when this notifier is mounted and [workspaceId] remains the active workspace.
+  bool _isMountedOnWorkspace(String? workspaceId) {
+    if (!ref.mounted) {
+      return false;
+    }
+    if (workspaceId == null) {
+      return true;
+    }
+    return ref.read(activeWorkspaceProvider).asData?.value.id == workspaceId;
+  }
+
   /// Returns `true` when [workspaceId] and [initialConfig]'s local watch target remain active after an asynchronous gap.
   bool _isSameActiveWatchTarget(
     String workspaceId,
@@ -1849,52 +1890,6 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     return _isExternalWatchActiveForConfig(latestConfig) &&
         latestConfig.storageMode == initialConfig.storageMode &&
         latestConfig.localFilePath.trim() == initialConfig.localFilePath.trim();
-  }
-
-  /// Returns `true` when [entry]'s target task, tombstone, queue placement, or blocked dependents changed between [previousBoard] and [nextBoard].
-  bool _isUndoEntryInvalidated(
-    TaskUndoEntry entry,
-    TaskBoard previousBoard,
-    TaskBoard nextBoard, {
-    required Map<String, TaskItem> nextLiveTasksById,
-    required Set<String> nextDeletedTaskIds,
-    required DateTime nowUtc,
-  }) {
-    final taskId = entry.snapshotTask.id;
-    if (_didTaskChangeModuloBlockCleanup(
-      taskId,
-      previousBoard,
-      nextBoard,
-      nextLiveTasksById: nextLiveTasksById,
-      nextDeletedTaskIds: nextDeletedTaskIds,
-      nowUtc: nowUtc,
-    )) {
-      return true;
-    }
-    if (previousBoard.deletedBlock.findTaskRecord(taskId) !=
-        nextBoard.deletedBlock.findTaskRecord(taskId)) {
-      return true;
-    }
-    if (entry.kind == TaskUndoActionKind.downgrade &&
-        _didTaskQueuePlacementChange(
-          taskId,
-          previousBoard.queueBlock.taskIds,
-          nextBoard.queueBlock.taskIds,
-        )) {
-      return true;
-    }
-    final trackedDependents = <String>{
-      ...entry.previouslyBlockedDependentIds,
-      ...entry.previouslyBlockedDependencies.keys,
-    };
-    return _didAnyDependentChange(
-      trackedDependents,
-      previousBoard,
-      nextBoard,
-      nextLiveTasksById: nextLiveTasksById,
-      nextDeletedTaskIds: nextDeletedTaskIds,
-      nowUtc: nowUtc,
-    );
   }
 
   /// Logs a `sync.watch.error` diagnostic event for [workspaceId] and [mode].
@@ -1972,7 +1967,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           }
           if (ref.read(activeWorkspaceProvider).asData?.value.id ==
               workspace.id) {
-            state = AsyncData(
+            _setEvaluatedState(
               _alignBoardWithCurrentLeadWindow(
                 mergedBoard,
                 config.dueLeadWindow,
@@ -1994,7 +1989,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         config.dueLeadWindow,
       );
       if (ref.read(activeWorkspaceProvider).asData?.value.id == workspace.id) {
-        state = AsyncData(aligned);
+        _setEvaluatedState(aligned);
         _recordSyncedLocalBoard(aligned, config);
       }
       return aligned;
@@ -2015,17 +2010,37 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     WebDavConfig config, {
     required bool isRemote,
     required bool createBackup,
-    required Future<void> Function() wipeTarget,
+    required Future<void> Function(
+      LocalFileRepository localRepo,
+      WebDavRepository webDavRepo,
+    )
+    wipeTarget,
   }) async {
-    await ref.read(webDavConfigProvider.notifier).updateConfig(config);
+    final workspace = await ref.read(activeWorkspaceProvider.future);
+    if (!ref.mounted) {
+      return;
+    }
+    final startingWorkspaceId = workspace.id;
+    final localRepo = _resolveLocalRepositoryForConfig(config);
+    final currentWebDavRepo = ref.read(webDavRepositoryProvider);
+    final webDavRepo = _resolveWebDavRepositoryForConfig(
+      config,
+      current: currentWebDavRepo,
+    );
+    final ownsTemporaryWebDavRepo = !identical(webDavRepo, currentWebDavRepo);
+    final settingsRepo = ref.read(settingsRepositoryProvider);
     ref.read(syncStateProvider.notifier).setSyncing();
     try {
-      await wipeTarget();
-      final workspace = await ref.read(activeWorkspaceProvider.future);
-      final settingsRepo = ref.read(settingsRepositoryProvider);
+      await wipeTarget(localRepo, webDavRepo);
+      if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+        return;
+      }
       final currentSyncState = await settingsRepo.loadWorkspaceSyncState(
-        workspace.id,
+        startingWorkspaceId,
       );
+      if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+        return;
+      }
       _pendingConflictOriginBoard = null;
       _conflictWatchDigest = null;
       _lastFailedWatchDigest = null;
@@ -2036,9 +2051,11 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       if (!isRemote) {
         final wipedDigest =
             config.storageMode.usesLocal && config.isLocalConfigured
-            ? (await ref.read(localFileRepositoryProvider).readTdfWithDigest())
-                  .digest
+            ? (await localRepo.readTdfWithDigest()).digest
             : null;
+        if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+          return;
+        }
         _lastSelfWipeDigest = wipedDigest;
         updatedSyncState = currentSyncState.copyWith(
           clearLastSyncedLocalTdf: true,
@@ -2054,20 +2071,35 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           clearRemoteLastModified: true,
         );
       }
-      await settingsRepo.saveWorkspaceSyncState(workspace.id, updatedSyncState);
+      await settingsRepo.saveWorkspaceSyncState(
+        startingWorkspaceId,
+        updatedSyncState,
+      );
+      if (!_isMountedOnWorkspace(startingWorkspaceId)) {
+        return;
+      }
       if (!isRemote || !config.storageMode.usesLocal) {
-        state = AsyncData(TaskBoard.empty());
+        _setEvaluatedState(TaskBoard.empty());
       }
       ref
           .read(syncStateProvider.notifier)
           .setSuccess(ref.read(clockProvider)().toUtc());
       AppLogger.info(
         LogTag.sync,
-        'Wiped ${isRemote ? 'remote WebDAV' : 'local'} TDF file workspace=${workspace.id} backup=$createBackup',
+        'Wiped ${isRemote ? 'remote WebDAV' : 'local'} TDF file workspace=$startingWorkspaceId backup=$createBackup',
       );
+      if (readCurrentConfig(ref) != config) {
+        await ref.read(webDavConfigProvider.notifier).updateConfig(config);
+      }
     } on Object catch (error) {
-      ref.read(syncStateProvider.notifier).setError(error.toString());
+      if (_isMountedOnWorkspace(startingWorkspaceId)) {
+        ref.read(syncStateProvider.notifier).setError(error.toString());
+      }
       rethrow;
+    } finally {
+      if (ownsTemporaryWebDavRepo) {
+        webDavRepo.close();
+      }
     }
   }
 
@@ -2080,39 +2112,24 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
       return;
     }
     final (nowUtc, _) = _resolveTimestamps(null);
-    final nextLiveTasksById = <String, TaskItem>{
-      for (final task in nextBoard.allTasks) task.id: task,
-    };
-    final nextDeletedTaskIds = <String>{
-      for (final record in nextBoard.deletedBlock.tasks) record.taskId,
-    };
-    final currentNotice = ref.read(taskUndoStateProvider).latestNotice;
-    var noticePruned = false;
-    final retained = <TaskUndoEntry>[];
-    var prunedCount = 0;
-    for (final entry in _undoStack) {
-      if (_isUndoEntryInvalidated(
-        entry,
-        previousBoard,
-        nextBoard,
-        nextLiveTasksById: nextLiveTasksById,
-        nextDeletedTaskIds: nextDeletedTaskIds,
-        nowUtc: nowUtc,
-      )) {
-        prunedCount++;
-        if (currentNotice?.sequence == entry.sequence) {
-          noticePruned = true;
-        }
-      } else {
-        retained.add(entry);
-      }
-    }
-    if (prunedCount == 0) {
+    final partition = TaskBoardUndo.pruneInvalidatedEntries(
+      _undoStack,
+      previousBoard: previousBoard,
+      nextBoard: nextBoard,
+      nowUtc: nowUtc,
+    );
+    if (partition.pruned.isEmpty) {
       return;
     }
+    final currentNotice = ref.read(taskUndoStateProvider).latestNotice;
+    final noticePruned =
+        currentNotice != null &&
+        partition.pruned.any(
+          (entry) => entry.sequence == currentNotice.sequence,
+        );
     _undoStack
       ..clear()
-      ..addAll(retained);
+      ..addAll(partition.retained);
     ref
         .read(taskUndoStateProvider.notifier)
         .update(
@@ -2127,7 +2144,7 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
         LogTag.domain,
         'task.undo.prune',
         fields: <String, Object?>{
-          'pruned': prunedCount,
+          'pruned': partition.pruned.length,
           'remaining': _undoStack.length,
         },
       );
@@ -2234,6 +2251,21 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     }
   }
 
+  /// Returns the DI [LocalFileRepository] when its local binding matches [config], or constructs one bound to [config].
+  LocalFileRepository _resolveLocalRepositoryForConfig(WebDavConfig config) {
+    final current = ref.read(localFileRepositoryProvider);
+    if (current.config.localFilePath == config.localFilePath &&
+        current.config.storageMode == config.storageMode) {
+      return current;
+    }
+    return LocalFileRepository(
+      config: config,
+      baseDirectoryPath: ref.read(localStorageDirectoryPathProvider),
+      buildProfile: ref.read(appBuildProfileProvider),
+      inMemoryStore: ref.read(inMemoryLocalStoreProvider),
+    );
+  }
+
   /// Resolves the active workspace [TdfTimeZoneContext] at [utcNow].
   TdfTimeZoneContext _resolveTimeZone(DateTime utcNow) =>
       TaskSyncPipeline.resolveWorkspaceTimeZone(readCurrentConfig(ref), utcNow);
@@ -2242,6 +2274,21 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   (DateTime utcNow, DateTime localNow) _resolveTimestamps(
     DateTime? currentDate,
   ) => TaskSyncPipeline.resolveTimestamps(ref, currentDate);
+
+  /// Returns [current] when its remote binding matches [config], or constructs a temporary [WebDavRepository] bound to [config].
+  WebDavRepository _resolveWebDavRepositoryForConfig(
+    WebDavConfig config, {
+    required WebDavRepository current,
+  }) {
+    if (current.config.serverUrl == config.serverUrl &&
+        current.config.username == config.username &&
+        current.config.password == config.password &&
+        current.config.filePath == config.filePath &&
+        current.config.storageMode == config.storageMode) {
+      return current;
+    }
+    return WebDavRepository(config: config);
+  }
 
   /// Removes [undoEntry] after a local persistence rollback and restores [evictedEntry] if applicable.
   void _rollbackOptimisticUndoEntry(
@@ -2388,6 +2435,9 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
   /// Wraps [TaskSyncPipeline.runSyncWithStatus] for [config].
   Future<TaskBoard> _runSyncWithStatus(
     WebDavConfig config, {
+    String? workspaceId,
+    LocalFileRepository? localRepository,
+    WebDavRepository? webDavRepository,
     TaskBoard? candidateBoard,
     TaskBoard? candidateOriginBoard,
     bool candidateMatchesLastSyncedLocal = false,
@@ -2398,13 +2448,16 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
     final board = await TaskSyncPipeline.runSyncWithStatus(
       ref,
       config,
+      workspaceId: workspaceId,
+      localRepository: localRepository,
+      webDavRepository: webDavRepository,
       candidateBoard: candidateBoard,
       candidateOriginBoard: candidateOriginBoard,
       candidateMatchesLastSyncedLocal: candidateMatchesLastSyncedLocal,
       isInitialLoad: isInitialLoad,
       requireTargets: requireTargets,
       onLocalStageMerged: (mergedBoard) {
-        if (!ref.mounted) {
+        if (!_isMountedOnWorkspace(workspaceId)) {
           return;
         }
         if (shouldApplyState != null && !shouldApplyState()) {
@@ -2415,15 +2468,62 @@ class TaskNotifier extends AsyncNotifier<TaskBoard> {
           config.dueLeadWindow,
         );
         if (state.asData?.value != aligned) {
-          state = AsyncData(aligned);
+          _setEvaluatedState(aligned);
         }
       },
     );
-    if (!ref.mounted) {
+    if (!_isMountedOnWorkspace(workspaceId)) {
       return board;
     }
     return _alignBoardWithCurrentLeadWindow(board, config.dueLeadWindow);
   }
+
+  /// Publishes [board] into [state] and stamps its evaluation context for [evaluatedBoardProvider] reuse.
+  void _setEvaluatedState(
+    TaskBoard board, {
+    DateTime? evaluatedUtc,
+    WebDavConfig? config,
+  }) {
+    _stampEvaluatedBoard(
+      board,
+      evaluatedUtc: evaluatedUtc ?? ref.read(clockProvider)(),
+      config: config ?? readCurrentConfig(ref),
+    );
+    state = AsyncData(board);
+  }
+
+  /// Records [board]'s evaluation timestamp and configuration context for safe zero-copy reuse.
+  void _stampEvaluatedBoard(
+    TaskBoard board, {
+    required DateTime evaluatedUtc,
+    required WebDavConfig config,
+  }) {
+    _lastEvaluationStamp = (
+      board: board,
+      evaluatedUtc: TaskItem.normalizeTimestamp(evaluatedUtc.toUtc()),
+      dueLeadWindow: config.dueLeadWindow,
+      timeZoneMode: config.timeZoneMode,
+      manualTimeZoneOffsetMinutes: config.manualTimeZoneOffsetMinutes,
+    );
+  }
+
+  /// Extracts the storage-binding tuple watched by [build] from [config].
+  static ({
+    String filePath,
+    String localFilePath,
+    String password,
+    String serverUrl,
+    StorageMode storageMode,
+    String username,
+  })
+  _storageBindingOf(WebDavConfig config) => (
+    filePath: config.filePath,
+    localFilePath: config.localFilePath,
+    password: config.password,
+    serverUrl: config.serverUrl,
+    storageMode: config.storageMode,
+    username: config.username,
+  );
 
   /// Synchronizes [_undoWorkspaceId] during [build] and clears [_undoStack] when switching workspaces.
   void _syncUndoWorkspaceId(String? workspaceId) {
@@ -2519,3 +2619,12 @@ class TaskUndoStateNotifier extends Notifier<TaskUndoState> {
     state = next;
   }
 }
+
+/// Evaluation context snapshot captured when [TaskNotifier] publishes an already-evaluated [TaskBoard].
+typedef TaskBoardEvaluationStamp = ({
+  TaskBoard board,
+  DateTime evaluatedUtc,
+  DueLeadWindow dueLeadWindow,
+  AppTimeZoneMode timeZoneMode,
+  int manualTimeZoneOffsetMinutes,
+});

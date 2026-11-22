@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -34,6 +35,8 @@ void main() {
     var forcedPutStatus = HttpStatus.noContent;
     var responseDelay = Duration.zero;
     var putCount = 0;
+    final getPaths = <String>[];
+    final headPaths = <String>[];
 
     setUp(() async {
       HttpOverrides.global = null;
@@ -46,6 +49,8 @@ void main() {
       forcedPutStatus = HttpStatus.noContent;
       responseDelay = Duration.zero;
       putCount = 0;
+      getPaths.clear();
+      headPaths.clear();
       AppLogger.resetForTesting(sink: const LocalFileLogSink());
 
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
@@ -60,6 +65,7 @@ void main() {
         }
         final path = request.uri.path;
         if (request.method == 'GET') {
+          getPaths.add(path);
           if (forcedGetStatus != HttpStatus.ok) {
             request.response.statusCode = forcedGetStatus;
             await request.response.close();
@@ -71,6 +77,17 @@ void main() {
           } else {
             request.response.statusCode = HttpStatus.notFound;
           }
+          await request.response.close();
+        } else if (request.method == 'HEAD') {
+          headPaths.add(path);
+          if (forcedGetStatus != HttpStatus.ok) {
+            request.response.statusCode = forcedGetStatus;
+            await request.response.close();
+            return;
+          }
+          request.response.statusCode = remoteFiles.containsKey(path)
+              ? HttpStatus.ok
+              : HttpStatus.notFound;
           await request.response.close();
         } else if (request.method == 'PUT') {
           putCount++;
@@ -280,6 +297,8 @@ void main() {
       expect(remoteFiles[remotePath], equals('tdf 0.8.0\n'));
 
       // Second wipe with createBackup: true writes .bak.001 without overwriting .bak.
+      getPaths.clear();
+      headPaths.clear();
       remoteFiles[remotePath] = 'tdf 0.8.0\n# state 2\n';
       await repository.wipeTdf(createBackup: true);
       expect(
@@ -288,6 +307,16 @@ void main() {
       );
       expect(remoteFiles['$remotePath.bak'], equals('tdf 0.8.0\n# state 1\n'));
       expect(remoteFiles[remotePath], equals('tdf 0.8.0\n'));
+      expect(
+        headPaths,
+        equals(<String>['$remotePath.bak', '$remotePath.bak.001']),
+        reason: 'Remote backup slot probing must use lightweight HTTP HEAD requests',
+      );
+      expect(
+        getPaths,
+        equals(<String>[remotePath]),
+        reason: 'Backup slot probing must never download .bak files via GET',
+      );
     });
 
     test('validates WebDAV configuration and endpoint URIs and emits sanitized [STORAGE] logs to AppLogger', () async {
@@ -337,7 +366,6 @@ void main() {
           serverUrl: invalidServerUrl,
           username: 'stefan',
           password: secret,
-          filePath: 'tasks.tdf',
         );
         expect(
           invalidConfig.resolveEndpointUri(),
@@ -351,7 +379,6 @@ void main() {
           serverUrl: 'starknet.one',
           username: 'stefan',
           password: secret,
-          filePath: 'tasks.tdf',
         ).resolveEndpointUri()?.toString(),
         equals('https://starknet.one/remote.php/dav/files/stefan/tasks.tdf'),
         reason: 'Scheme-less serverUrl must resolve with implicit https://',
@@ -575,7 +602,6 @@ void main() {
         serverUrl: 'http://${etagServer.address.host}:${etagServer.port}',
         username: 'stefan',
         password: 'secret',
-        filePath: 'tasks.tdf',
         language: AppLanguage.english,
       );
       final repository = WebDavRepository(config: config);
@@ -681,7 +707,6 @@ void main() {
       repository.clearCache();
       expect(repository.cachedExists, isNull);
       repository.seedCacheIfEmpty(
-        etag: null,
         lastModified: 'Mon, 09 Nov 2026 22:10:00 GMT',
         content: 'tdf 0.8.0\n# v6-lastmod-only\n',
       );
@@ -872,7 +897,7 @@ void main() {
       expect(freshRepo.cachedEtag, equals('"seeded"'));
 
       responsePutEtag = null;
-      await freshRepo.wipeTdf(createBackup: false);
+      await freshRepo.wipeTdf();
       expect(
         freshRepo.cachedExists,
         isNull,
@@ -881,5 +906,831 @@ void main() {
       expect(freshRepo.cachedEtag, isNull);
       expect(freshRepo.cachedLastModified, isNull);
     });
+
+    test('preserves multi-workspace secret redaction, attaches exception cause without leaking raw error text, and logs WARN on deleteLog HTTP 500', () async {
+      AppLogger.setEnabled(true, persistToDisk: false);
+
+      const firstSecret = 'FirstWorkspaceSecret#111';
+      const secondSecret = 'SecondWorkspaceSecret#222';
+      final firstRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl: 'http://${server.address.host}:${server.port}',
+          username: 'alice',
+          password: firstSecret,
+          filePath: 'one.tdf',
+          language: AppLanguage.english,
+        ),
+      );
+      final secondRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl: 'http://${server.address.host}:${server.port}',
+          username: 'bob',
+          password: secondSecret,
+          filePath: 'two.tdf',
+          language: AppLanguage.english,
+        ),
+      );
+      expect(firstRepo.config.password, equals(firstSecret));
+      expect(secondRepo.config.password, equals(secondSecret));
+
+      final sanitized = AppLogger.sanitize(
+        'leak check: $firstSecret and $secondSecret',
+      );
+      expect(
+        sanitized,
+        isNot(contains(firstSecret)),
+        reason: 'Constructing a second WebDavRepository must keep first workspace password redacted',
+      );
+      expect(
+        sanitized,
+        isNot(contains(secondSecret)),
+        reason: 'Second WebDavRepository password must also be redacted',
+      );
+
+      // Verify WebDavException exposes cause on SocketException and TimeoutException.
+      final deadServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final deadPort = deadServer.port;
+      await deadServer.close(force: true);
+      final unreachableRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl: 'http://127.0.0.1:$deadPort',
+          username: 'alice',
+          password: firstSecret,
+          filePath: 'one.tdf',
+          language: AppLanguage.english,
+        ),
+      );
+      await expectLater(
+        unreachableRepo.fetchTdf,
+        throwsA(
+          isA<WebDavException>().having(
+            (e) => e.cause,
+            'cause',
+            isA<SocketException>(),
+          ),
+        ),
+        reason: 'SocketException must be preserved as WebDavException.cause',
+      );
+
+      // Verify malformed HTTP response produces sanitized message without leaking raw exception text, while preserving cause.
+      final malformedServer = await ServerSocket.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(malformedServer.close);
+      malformedServer.listen((socket) {
+        socket.write('INVALID_HTTP_GARBAGE_TOKEN_98765\r\n\r\n');
+        socket.destroy();
+      });
+      final malformedRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl:
+              'http://${malformedServer.address.host}:${malformedServer.port}',
+          username: 'alice',
+          password: firstSecret,
+          filePath: 'broken.tdf',
+          language: AppLanguage.english,
+        ),
+      );
+      await expectLater(
+        malformedRepo.fetchTdf,
+        throwsA(
+          isA<WebDavException>()
+              .having((e) => e.cause, 'cause', isNotNull)
+              .having(
+                (e) => e.message,
+                'message',
+                allOf(
+                  isNot(contains('HttpException')),
+                  isNot(contains('INVALID_HTTP_GARBAGE_TOKEN_98765')),
+                ),
+              ),
+        ),
+        reason: 'Unexpected GET failure must preserve cause and avoid raw error.toString() in user message',
+      );
+      await expectLater(
+        () => malformedRepo.saveTdf('tdf 0.8.0\n'),
+        throwsA(
+          isA<WebDavException>()
+              .having((e) => e.cause, 'cause', isNotNull)
+              .having(
+                (e) => e.message,
+                'message',
+                allOf(
+                  isNot(contains('HttpException')),
+                  isNot(contains('INVALID_HTTP_GARBAGE_TOKEN_98765')),
+                ),
+              ),
+        ),
+        reason: 'Unexpected PUT failure must preserve cause and avoid raw error.toString() in user message',
+      );
+
+      // Verify deleteLog stays best-effort on HTTP 500 and emits a structured WARN event with status=500.
+      final errorDeleteServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => errorDeleteServer.close(force: true));
+      errorDeleteServer.listen((request) async {
+        request.response.statusCode = HttpStatus.internalServerError;
+        await request.response.close();
+      });
+      final deleteLogRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl:
+              'http://${errorDeleteServer.address.host}:${errorDeleteServer.port}',
+          username: 'alice',
+          password: firstSecret,
+          language: AppLanguage.english,
+        ),
+      );
+      await deleteLogRepo.deleteLog('tiertask_2026-11-03_linux_tasks.log');
+      expect(
+        AppLogger.fullLogText,
+        contains('[WARN ] [STORAGE  ] webdav.log_delete |'),
+        reason: 'deleteLog HTTP 500 must emit a WARN diagnostic event',
+      );
+      expect(
+        AppLogger.fullLogText,
+        contains('status=500'),
+        reason: 'deleteLog HTTP 500 WARN event must include structured status=500 field',
+      );
+    });
+
+    test('pools HttpClient across healthy requests, resets on timeout or oversized abort, supports close(), and logs UTF-8 byte counts on GET', () async {
+      AppLogger.setEnabled(true, persistToDisk: false);
+      const remotePath = '/remote.php/dav/files/stefan/pooled.tdf';
+      const utf8Payload = 'tdf 0.8.0\n# Ümlaut 🚀\n';
+      final expectedUtf8Bytes = utf8.encode(utf8Payload).length;
+      expect(expectedUtf8Bytes, greaterThan(utf8Payload.length));
+      remoteFiles[remotePath] = utf8Payload;
+
+      var clientCreateCount = 0;
+      final config = WebDavConfig(
+        serverUrl: 'http://${server.address.host}:${server.port}',
+        username: 'stefan',
+        password: 'secret',
+        filePath: 'pooled.tdf',
+        language: AppLanguage.english,
+      );
+      final repository = WebDavRepository(
+        config: config,
+        maxFileBytes: 64,
+        timeout: const Duration(milliseconds: 100),
+        clientFactory: () {
+          clientCreateCount++;
+          return HttpClient();
+        },
+      );
+      addTearDown(() => repository.close(force: true));
+
+      // Multiple healthy operations reuse one pooled HttpClient.
+      expect(await repository.fetchTdf(), equals(utf8Payload));
+      expect(
+        AppLogger.fullLogText,
+        contains('bytes=$expectedUtf8Bytes'),
+        reason:
+            'GET log must record UTF-8 byte count rather than UTF-16 length',
+      );
+      await repository.saveTdf(utf8Payload);
+      forcedGetStatus = HttpStatus.internalServerError;
+      await expectLater(repository.fetchTdf, throwsA(isA<WebDavException>()));
+      forcedGetStatus = HttpStatus.ok;
+      await repository.deleteLog('tiertask_2026-11-03_linux_tasks.log');
+      expect(
+        clientCreateCount,
+        equals(1),
+        reason: 'Healthy requests and drained error responses must reuse one pooled HttpClient',
+      );
+
+      // Explicit close() releases the pool so the next request creates a new client.
+      repository.close();
+      expect(await repository.fetchTdf(), equals(utf8Payload));
+      expect(clientCreateCount, equals(2));
+
+      // Oversized response resets the pooled client so subsequent valid calls recover cleanly.
+      remoteFiles[remotePath] = 'x' * 80;
+      await expectLater(repository.fetchTdf, throwsA(isA<WebDavException>()));
+      remoteFiles[remotePath] = utf8Payload;
+      expect(await repository.fetchTdf(), equals(utf8Payload));
+      expect(
+        clientCreateCount,
+        equals(3),
+        reason: 'Oversized abort must reset the pooled HttpClient',
+      );
+
+      // Timeout resets the pooled client cleanly.
+      responseDelay = const Duration(milliseconds: 220);
+      await expectLater(repository.fetchTdf, throwsA(isA<WebDavException>()));
+      responseDelay = Duration.zero;
+      expect(await repository.fetchTdf(), equals(utf8Payload));
+      expect(
+        clientCreateCount,
+        equals(4),
+        reason: 'Timeout must tear down stalled client and recreate pool on next call',
+      );
+    });
+
+    test('enforces single overall wall-clock deadline against Slowloris trickles and handles redirects safely', () async {
+      // 1. Slowloris trickle server: sends 1 byte every 35ms (less than timeout=110ms per chunk, but total > 110ms).
+      final slowServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => slowServer.close(force: true));
+      slowServer.listen((HttpRequest request) async {
+        request.response.statusCode = HttpStatus.ok;
+        request.response.bufferOutput = false;
+        try {
+          for (var i = 0; i < 20; i++) {
+            request.response.add(const <int>[0x61]);
+            await request.response.flush();
+            await Future<void>.delayed(const Duration(milliseconds: 35));
+          }
+          await request.response.close();
+        } on Object {
+          // Client aborted stalled connection as expected.
+        }
+      });
+
+      final slowRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl: 'http://${slowServer.address.host}:${slowServer.port}',
+          username: 'stefan',
+          password: 'secret',
+          filePath: 'slow.tdf',
+          language: AppLanguage.english,
+        ),
+        timeout: const Duration(milliseconds: 110),
+      );
+      addTearDown(() => slowRepo.close(force: true));
+      final watch = Stopwatch()..start();
+      await expectLater(
+        slowRepo.fetchTdf,
+        throwsA(
+          isA<WebDavException>().having(
+            (error) => error.message,
+            'message',
+            contains('timed out'),
+          ),
+        ),
+        reason: 'Slowloris trickle must be aborted by single overall wall-clock deadline',
+      );
+      expect(
+        watch.elapsedMilliseconds,
+        lessThan(450),
+        reason: 'Slowloris abort must not wait for all 20 chunks (700ms+)',
+      );
+
+      // 2. Redirects: same-origin keeps Authorization, cross-origin strips Authorization, >5 hops rejected.
+      final targetServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => targetServer.close(force: true));
+      String? crossOriginReceivedAuth;
+      targetServer.listen((HttpRequest request) async {
+        crossOriginReceivedAuth = request.headers.value(
+          HttpHeaders.authorizationHeader,
+        );
+        request.response.statusCode = HttpStatus.ok;
+        request.response.write('tdf 0.8.0\n# cross-origin\n');
+        await request.response.close();
+      });
+
+      final redirectServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => redirectServer.close(force: true));
+      String? sameOriginTargetAuth;
+      redirectServer.listen((HttpRequest request) async {
+        final path = request.uri.path;
+        if (path.endsWith('/same.tdf')) {
+          request.response.statusCode = HttpStatus.found;
+          request.response.headers.set(
+            HttpHeaders.locationHeader,
+            '/same-target.tdf',
+          );
+          await request.response.close();
+          return;
+        }
+        if (path == '/same-target.tdf') {
+          sameOriginTargetAuth = request.headers.value(
+            HttpHeaders.authorizationHeader,
+          );
+          request.response.statusCode = HttpStatus.ok;
+          request.response.write('tdf 0.8.0\n# same-origin\n');
+          await request.response.close();
+          return;
+        }
+        if (path.endsWith('/cross.tdf')) {
+          request.response.statusCode = HttpStatus.found;
+          request.response.headers.set(
+            HttpHeaders.locationHeader,
+            'http://${targetServer.address.host}:${targetServer.port}/final.tdf',
+          );
+          await request.response.close();
+          return;
+        }
+        if (path.endsWith('/loop.tdf') || path.startsWith('/hop-')) {
+          final currentHop = path.startsWith('/hop-')
+              ? int.parse(path.substring(5))
+              : 0;
+          request.response.statusCode = HttpStatus.found;
+          request.response.headers.set(
+            HttpHeaders.locationHeader,
+            '/hop-${currentHop + 1}',
+          );
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+      });
+
+      final sameOriginRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl:
+              'http://${redirectServer.address.host}:${redirectServer.port}',
+          username: 'stefan',
+          password: 'secret',
+          filePath: 'same.tdf',
+          language: AppLanguage.english,
+        ),
+      );
+      addTearDown(() => sameOriginRepo.close(force: true));
+      expect(
+        await sameOriginRepo.fetchTdf(),
+        equals('tdf 0.8.0\n# same-origin\n'),
+      );
+      expect(
+        sameOriginTargetAuth,
+        startsWith('Basic '),
+        reason: 'Same-origin redirect must preserve Basic Authorization header',
+      );
+
+      final crossOriginRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl:
+              'http://${redirectServer.address.host}:${redirectServer.port}',
+          username: 'stefan',
+          password: 'secret',
+          filePath: 'cross.tdf',
+          language: AppLanguage.english,
+        ),
+      );
+      addTearDown(() => crossOriginRepo.close(force: true));
+      expect(
+        await crossOriginRepo.fetchTdf(),
+        equals('tdf 0.8.0\n# cross-origin\n'),
+      );
+      expect(
+        crossOriginReceivedAuth,
+        isNull,
+        reason: 'Cross-origin redirect must strip Authorization header',
+      );
+
+      final loopRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl:
+              'http://${redirectServer.address.host}:${redirectServer.port}',
+          username: 'stefan',
+          password: 'secret',
+          filePath: 'loop.tdf',
+          language: AppLanguage.english,
+        ),
+      );
+      addTearDown(() => loopRepo.close(force: true));
+      await expectLater(
+        loopRepo.fetchTdf,
+        throwsA(isA<WebDavException>()),
+        reason: 'Redirect chains exceeding 5 hops must be rejected',
+      );
+
+      // 3. HTTPS -> HTTP cleartext downgrade redirect must be rejected before touching HTTP host.
+      final visitedUris = <Uri>[];
+      var sawFollowRedirectsFalse = false;
+      final downgradeRepo = WebDavRepository(
+        config: const WebDavConfig(
+          serverUrl: 'https://secure.example.com',
+          username: 'stefan',
+          password: 'secret',
+          language: AppLanguage.english,
+        ),
+        clientFactory: () => _RedirectDowngradeStubHttpClient(
+          onRequest: (uri, followRedirects) {
+            visitedUris.add(uri);
+            sawFollowRedirectsFalse = !followRedirects;
+          },
+          redirectLocation: 'http://insecure.example.com/tasks.tdf',
+        ),
+      );
+      addTearDown(() => downgradeRepo.close(force: true));
+      await expectLater(
+        downgradeRepo.fetchTdf,
+        throwsA(isA<WebDavException>()),
+        reason: 'HTTPS-to-HTTP cleartext redirect downgrade must be rejected',
+      );
+      expect(
+        sawFollowRedirectsFalse,
+        isTrue,
+        reason: 'GET requests must disable automatic followRedirects',
+      );
+      expect(
+        visitedUris,
+        hasLength(1),
+        reason: 'Client must never issue an HTTP request after rejecting downgrade redirect',
+      );
+    });
+
+    test('re-acquires fresh pooled HttpClient after oversized redirect body triggers pool reset', () async {
+      final bigRedirectServer = await HttpServer.bind(
+        InternetAddress.loopbackIPv4,
+        0,
+      );
+      addTearDown(() => bigRedirectServer.close(force: true));
+
+      bigRedirectServer.listen((HttpRequest request) async {
+        if (request.uri.path.endsWith('/big-redirect.tdf')) {
+          request.response.statusCode = HttpStatus.found;
+          request.response.headers.set(
+            HttpHeaders.locationHeader,
+            '/final-after-big-redirect.tdf',
+          );
+          // Body > 64 KiB (_maxDrainBytes) forces _drainResponseSafely to close the pooled client.
+          request.response.write('X' * 70000);
+          await request.response.close();
+          return;
+        }
+        if (request.uri.path == '/final-after-big-redirect.tdf') {
+          request.response.statusCode = HttpStatus.ok;
+          request.response.write('tdf 0.8.0\n# recovered-hop\n');
+          await request.response.close();
+          return;
+        }
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+      });
+
+      var clientCreateCount = 0;
+      final repository = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl:
+              'http://${bigRedirectServer.address.host}:${bigRedirectServer.port}',
+          username: 'stefan',
+          password: 'secret',
+          filePath: 'big-redirect.tdf',
+          language: AppLanguage.english,
+        ),
+        clientFactory: () {
+          clientCreateCount++;
+          return HttpClient();
+        },
+      );
+      addTearDown(() => repository.close(force: true));
+
+      final body = await repository.fetchTdf();
+      expect(
+        body,
+        equals('tdf 0.8.0\n# recovered-hop\n'),
+        reason: 'Redirect hop after pool reset must succeed with a fresh HttpClient',
+      );
+      expect(
+        clientCreateCount,
+        equals(2),
+        reason: 'Oversized redirect body must reset pool and acquire a second HttpClient for hop 1',
+      );
+    });
+
+    test('rejects poisoned header values in _normalizeHeaderValue and aborts unclosed requests on pre-close exceptions', () async {
+      const poisonedValues = <String>[
+        '"etag"\r\nX-Injected: 1',
+        '"etag"\n',
+        '\r"etag"',
+        '"etag\x00null"',
+        '"etag\tcontrol"',
+        '"etag\x7Fdel"',
+        '"etag\u0085nel"',
+        '"etag\u009Fc1"',
+        '"etag\u0100non-latin1"',
+        '"etag🚀"',
+      ];
+
+      for (final poisoned in poisonedValues) {
+        expect(
+          WebDavRepository.isStrongEtag(poisoned),
+          isFalse,
+          reason: 'Poisoned ETag "$poisoned" must be rejected by isStrongEtag',
+        );
+      }
+
+      final seededRepo = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl: 'http://${server.address.host}:${server.port}',
+          username: 'stefan',
+          password: 'secret',
+          filePath: 'poison.tdf',
+          language: AppLanguage.english,
+        ),
+      );
+      for (final poisoned in poisonedValues) {
+        seededRepo.seedCacheIfEmpty(
+          etag: poisoned,
+          lastModified: poisoned,
+          content: 'tdf 0.8.0\n',
+        );
+        expect(
+          seededRepo.cachedEtag,
+          isNull,
+          reason: 'seedCacheIfEmpty must drop poisoned ETag "$poisoned"',
+        );
+        expect(
+          seededRepo.cachedLastModified,
+          isNull,
+          reason:
+              'seedCacheIfEmpty must drop poisoned Last-Modified "$poisoned"',
+        );
+      }
+
+      // Exception raised between openUrl/putUrl and request.close() must abort request and force-close client.
+      var abortedCount = 0;
+      var clientForceClosedCount = 0;
+      final abortRepo = WebDavRepository(
+        config: const WebDavConfig(
+          serverUrl: 'https://secure.example.com',
+          username: 'stefan',
+          password: 'secret',
+          language: AppLanguage.english,
+        ),
+        clientFactory: () => _ThrowingHeaderStubHttpClient(
+          onAbort: () => abortedCount++,
+          onForceClose: () => clientForceClosedCount++,
+        ),
+      );
+
+      await expectLater(abortRepo.fetchTdf, throwsA(isA<WebDavException>()));
+      expect(
+        abortedCount,
+        equals(1),
+        reason: 'GET error before request.close() must abort the open request',
+      );
+      expect(
+        clientForceClosedCount,
+        equals(1),
+        reason: 'GET error before request.close() must reset the pooled client',
+      );
+
+      await expectLater(
+        () => abortRepo.saveTdf('tdf 0.8.0\n'),
+        throwsA(isA<WebDavException>()),
+      );
+      expect(
+        abortedCount,
+        equals(2),
+        reason: 'PUT error before request.close() must abort the open request',
+      );
+      expect(
+        clientForceClosedCount,
+        equals(2),
+        reason: 'PUT error before request.close() must reset the pooled client',
+      );
+    });
+
+    test('enforces maxFileBytes on saveTdf BEFORE encoding, sending PUT, or updating conditional cache', () async {
+      const remotePath = '/remote.php/dav/files/stefan/bounded_put.tdf';
+      final repository = WebDavRepository(
+        config: WebDavConfig(
+          serverUrl: 'http://${server.address.host}:${server.port}',
+          username: 'stefan',
+          password: 'secret',
+          filePath: 'bounded_put.tdf',
+          language: AppLanguage.english,
+        ),
+        maxFileBytes: 64,
+      );
+      addTearDown(() => repository.close(force: true));
+
+      // Exact 64 ASCII bytes and exact 64 UTF-8 bytes (16 x 4-byte scalar) succeed.
+      final exactAscii = 'a' * 64;
+      await repository.saveTdf(exactAscii);
+      expect(putCount, equals(1));
+      expect(remoteFiles[remotePath], equals(exactAscii));
+
+      final exactEmoji = '🚀' * 16;
+      expect(utf8.encode(exactEmoji).length, equals(64));
+      await repository.saveTdf(exactEmoji);
+      expect(putCount, equals(2));
+
+      // 65 ASCII bytes, 66 UTF-8 bytes ('€' * 22 -> length 22 <= 64), and 68 UTF-8 bytes ('🚀' * 17) must fail BEFORE HTTP PUT.
+      putCount = 0;
+      for (final oversized in <String>['a' * 65, '€' * 22, '🚀' * 17]) {
+        await expectLater(
+          () => repository.saveTdf(oversized),
+          throwsA(
+            isA<WebDavException>().having(
+              (error) => error.message,
+              'message',
+              contains('maximum allowed size'),
+            ),
+          ),
+          reason:
+              'Oversized PUT payload (${utf8.encode(oversized).length} bytes) must throw before sending',
+        );
+      }
+      expect(
+        putCount,
+        equals(0),
+        reason: 'Oversized saveTdf must never issue an HTTP PUT request',
+      );
+      expect(
+        remoteFiles[remotePath],
+        equals(exactEmoji),
+        reason: 'Oversized saveTdf must leave remote file and cache untouched',
+      );
+    });
   });
+}
+
+class _ThrowingHeaderStubHttpClient implements HttpClient {
+  _ThrowingHeaderStubHttpClient({
+    required this.onAbort,
+    required this.onForceClose,
+  });
+
+  final void Function() onAbort;
+  final void Function() onForceClose;
+
+  @override
+  Duration? connectionTimeout;
+
+  @override
+  void close({bool force = false}) {
+    if (force) {
+      onForceClose();
+    }
+  }
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) async =>
+      _ThrowingHeaderStubRequest(uri: url, onAbort: onAbort);
+
+  @override
+  Future<HttpClientRequest> putUrl(Uri url) async =>
+      _ThrowingHeaderStubRequest(uri: url, onAbort: onAbort);
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+class _ThrowingHeaderStubRequest implements HttpClientRequest {
+  _ThrowingHeaderStubRequest({required this.uri, required this.onAbort});
+
+  @override
+  bool followRedirects = true;
+
+  @override
+  final HttpHeaders headers = _ThrowingHttpHeaders();
+
+  final void Function() onAbort;
+
+  @override
+  final Uri uri;
+
+  @override
+  void abort([Object? exception, StackTrace? stackTrace]) {
+    onAbort();
+  }
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+class _ThrowingHttpHeaders implements HttpHeaders {
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) {
+    throw const FormatException('Simulated header failure before close');
+  }
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+class _RedirectDowngradeStubHttpClient implements HttpClient {
+  _RedirectDowngradeStubHttpClient({
+    required this.onRequest,
+    required this.redirectLocation,
+  });
+
+  final void Function(Uri uri, bool followRedirects) onRequest;
+  final String redirectLocation;
+
+  @override
+  Duration? connectionTimeout;
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) async {
+    return _StubHttpClientRequest(
+      uri: url,
+      onClose: (followRedirects) => onRequest(url, followRedirects),
+      redirectLocation: redirectLocation,
+    );
+  }
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+class _StubHttpClientRequest implements HttpClientRequest {
+  _StubHttpClientRequest({
+    required this.uri,
+    required this.onClose,
+    required this.redirectLocation,
+  });
+
+  @override
+  bool followRedirects = true;
+
+  @override
+  final HttpHeaders headers = _StubHttpHeaders();
+
+  final void Function(bool followRedirects) onClose;
+  final String redirectLocation;
+
+  @override
+  final Uri uri;
+
+  @override
+  Future<HttpClientResponse> close() async {
+    onClose(followRedirects);
+    return _StubRedirectHttpClientResponse(redirectLocation);
+  }
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+class _StubRedirectHttpClientResponse extends Stream<List<int>>
+    implements HttpClientResponse {
+  _StubRedirectHttpClientResponse(String location)
+    : headers = _StubHttpHeaders(
+        initial: <String, String>{HttpHeaders.locationHeader: location},
+      );
+
+  @override
+  final HttpHeaders headers;
+
+  @override
+  int get contentLength => 0;
+
+  @override
+  bool get isRedirect => true;
+
+  @override
+  int get statusCode => HttpStatus.found;
+
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int> event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => const Stream<List<int>>.empty().listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+class _StubHttpHeaders implements HttpHeaders {
+  _StubHttpHeaders({Map<String, String>? initial})
+    : _values = <String, String>{
+        if (initial != null)
+          for (final entry in initial.entries)
+            entry.key.toLowerCase(): entry.value,
+      };
+
+  final Map<String, String> _values;
+
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) {
+    _values[name.toLowerCase()] = value.toString();
+  }
+
+  @override
+  String? value(String name) => _values[name.toLowerCase()];
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
 }

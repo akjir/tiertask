@@ -13,12 +13,14 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/location_state.dart';
 import 'package:tiertask/repositories/location_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -47,9 +49,13 @@ void main() {
     Map<String, Object?>? channelResponse;
     String? lastSearchQueryParam;
     String? lastWifiRequestBody;
+    String? lastUserAgentHeader;
+    int? lastWifiContentLength;
+    final nominatimEventLog = <String>[];
 
     setUp(() async {
       HttpOverrides.global = null;
+      AppLogger.resetForTesting();
       reverseGeocodeRequests = 0;
       searchGeocodeRequests = 0;
       geoIpRequests = 0;
@@ -69,6 +75,9 @@ void main() {
       channelResponse = <String, Object?>{'status': 'unavailable'};
       lastSearchQueryParam = null;
       lastWifiRequestBody = null;
+      lastUserAgentHeader = null;
+      lastWifiContentLength = null;
+      nominatimEventLog.clear();
 
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(
@@ -84,15 +93,20 @@ void main() {
       server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       baseUri = Uri.parse('http://${server.address.host}:${server.port}');
       server.listen((request) async {
+        lastUserAgentHeader = request.headers.value(
+          HttpHeaders.userAgentHeader,
+        );
         request.response.headers.contentType = ContentType.json;
         if (request.uri.path == '/reverse') {
           request.response.statusCode = responseStatusCode;
           reverseGeocodeRequests++;
+          nominatimEventLog.add('reverse');
           request.response.write(reverseGeocodeResponseBody);
         } else if (request.uri.path == '/search') {
           request.response.statusCode = searchStatusCode;
           searchGeocodeRequests++;
           lastSearchQueryParam = request.uri.queryParameters['q'];
+          nominatimEventLog.add('search:${lastSearchQueryParam ?? ''}');
           request.response.write(searchGeocodeResponseBody);
         } else if (request.uri.path == '/geoip') {
           request.response.statusCode = responseStatusCode;
@@ -103,6 +117,7 @@ void main() {
           fallbackGeoIpRequests++;
           request.response.write(fallbackGeoIpResponseBody);
         } else if (request.uri.path == '/wifi') {
+          lastWifiContentLength = request.headers.contentLength;
           lastWifiRequestBody = await utf8.decoder.bind(request).join();
           request.response.statusCode = wifiStatusCode;
           wifiGeolocateRequests++;
@@ -113,6 +128,7 @@ void main() {
     });
 
     tearDown(() async {
+      AppLogger.resetForTesting();
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(
             PlatformLocationRepository.locationChannel,
@@ -248,7 +264,7 @@ void main() {
     });
 
     test('falls back to GeoIP when native channel is unavailable and caches GeoIP result for 30 minutes', () async {
-      var now = DateTime.utc(2026, 3, 29, 12, 0);
+      var now = DateTime.utc(2026, 3, 29, 12);
       channelResponse = <String, Object?>{'status': 'unavailable'};
       final repository = PlatformLocationRepository(
         clock: () => now,
@@ -672,6 +688,329 @@ void main() {
         reason: 'HTTP 500 on search endpoint must return empty list',
       );
     });
+
+    test('pools HttpClient, enforces User-Agent, explicit POST Content-Length, WARN log on POST failure, Slowloris deadline, and HTTPS downgrade rejection', () async {
+      expect(
+        PlatformLocationRepository.userAgentHeader,
+        equals('TierTask/0.5.0 (+https://github.com/akjir/tiertask)'),
+        reason: 'User-Agent must include app version and repository URL',
+      );
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.warn,
+        persistToDisk: false,
+      );
+
+      var createdClients = 0;
+      channelResponse = <String, Object?>{
+        'status': 'unavailable',
+        'wifiAccessPoints': <Map<String, Object?>>[
+          <String, Object?>{
+            'macAddress': 'aa:bb:cc:dd:ee:01',
+            'signalStrength': -55,
+          },
+          <String, Object?>{
+            'macAddress': 'aa:bb:cc:dd:ee:02',
+            'signalStrength': -65,
+          },
+        ],
+      };
+      final repository = PlatformLocationRepository(
+        clientFactory: () {
+          createdClients++;
+          return HttpClient();
+        },
+        minSearchInterval: Duration.zero,
+        maxResponseBytes: 128,
+        reverseGeocodeUriBuilder: (latitude, longitude) =>
+            baseUri.replace(path: '/reverse'),
+        searchGeocodeUriBuilder: (query) => baseUri.replace(
+          path: '/search',
+          queryParameters: <String, String>{'q': query},
+        ),
+        geoIpUri: baseUri.replace(path: '/geoip'),
+        fallbackGeoIpUri: baseUri.replace(path: '/geoip-fallback'),
+        wifiGeolocateUri: baseUri.replace(path: '/wifi'),
+      );
+      addTearDown(() => repository.close(force: true));
+
+      final wifiFix = await repository.determineLocation();
+      expect(wifiFix, isNotNull);
+      expect(
+        lastUserAgentHeader,
+        equals('TierTask/0.5.0 (+https://github.com/akjir/tiertask)'),
+      );
+      expect(
+        lastWifiContentLength,
+        equals(utf8.encode(lastWifiRequestBody ?? '').length),
+        reason: '_postJsonMap must set explicit Content-Length header',
+      );
+
+      // Non-200 error response is drained cleanly and keeps the same pooled client.
+      wifiStatusCode = HttpStatus.serviceUnavailable;
+      await repository.determineLocation(forceRefresh: true);
+      expect(
+        AppLogger.lines.any(
+          (line) =>
+              line.contains('[WARN ]') && line.contains('location.post_failed'),
+        ),
+        isTrue,
+        reason: '_postJsonMap failure must emit a WARN diagnostic event',
+      );
+      expect(
+        createdClients,
+        equals(1),
+        reason: 'Healthy GET/POST and drained error responses must share one pooled HttpClient',
+      );
+
+      // Oversized response resets pooled client so next call creates a fresh client.
+      searchGeocodeResponseBody = jsonEncode(<String>['X' * 256]);
+      expect(await repository.searchLocations('Big'), isEmpty);
+      searchGeocodeResponseBody = '[]';
+      expect(await repository.searchLocations('Small'), isEmpty);
+      expect(
+        createdClients,
+        equals(2),
+        reason: 'Oversized response abort must reset the pooled HttpClient',
+      );
+
+      // Explicit close() releases pooled client.
+      repository.close();
+      expect(await repository.searchLocations('AfterClose'), isEmpty);
+      expect(createdClients, equals(3));
+
+      // Slowloris trickle response must abort at overall connectionTimeout deadline.
+      final slowServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => slowServer.close(force: true));
+      slowServer.listen((HttpRequest request) async {
+        request.response.statusCode = HttpStatus.ok;
+        request.response.bufferOutput = false;
+        try {
+          for (var i = 0; i < 20; i++) {
+            request.response.add(const <int>[0x20]);
+            await request.response.flush();
+            await Future<void>.delayed(const Duration(milliseconds: 35));
+          }
+          await request.response.close();
+        } on Object {
+          // Aborted by client deadline.
+        }
+      });
+      final slowRepo = PlatformLocationRepository(
+        connectionTimeout: const Duration(milliseconds: 110),
+        minSearchInterval: Duration.zero,
+        searchGeocodeUriBuilder: (_) => Uri.parse(
+          'http://${slowServer.address.host}:${slowServer.port}/slow',
+        ),
+      );
+      addTearDown(() => slowRepo.close(force: true));
+      final watch = Stopwatch()..start();
+      expect(await slowRepo.searchLocations('Slow'), isEmpty);
+      expect(
+        watch.elapsedMilliseconds,
+        lessThan(450),
+        reason: 'Slowloris trickle must abort within overall connectionTimeout',
+      );
+
+      // HTTPS -> HTTP cleartext downgrade redirect must be rejected.
+      final requestedUris = <Uri>[];
+      final downgradeRepo = PlatformLocationRepository(
+        minSearchInterval: Duration.zero,
+        searchGeocodeUriBuilder: (_) =>
+            Uri.parse('https://nominatim.openstreetmap.org/search?q=test'),
+        clientFactory: () => _LocationRedirectStubClient(
+          redirectLocation: 'http://insecure.example.com/search',
+          onRequest: requestedUris.add,
+        ),
+      );
+      addTearDown(() => downgradeRepo.close(force: true));
+      expect(await downgradeRepo.searchLocations('Erfurt'), isEmpty);
+      expect(
+        requestedUris,
+        hasLength(1),
+        reason: 'HTTPS-to-HTTP downgrade redirect must be aborted before contacting HTTP host',
+      );
+    });
+
+    test('caches Wi-Fi MLS results by sorted BSSID set for 15 minutes and caches GeoIP failures for 5 minutes', () async {
+      var now = DateTime.utc(2026, 11, 22, 10);
+      channelResponse = <String, Object?>{
+        'status': 'unavailable',
+        'wifiAccessPoints': <Map<String, Object?>>[
+          <String, Object?>{
+            'macAddress': 'BB:CC:DD:EE:FF:02',
+            'signalStrength': -61,
+          },
+          <String, Object?>{
+            'macAddress': 'aa:bb:cc:dd:ee:01',
+            'signalStrength': -54,
+          },
+        ],
+      };
+      final repository = PlatformLocationRepository(
+        clock: () => now,
+        minSearchInterval: Duration.zero,
+        reverseGeocodeUriBuilder: (latitude, longitude) =>
+            baseUri.replace(path: '/reverse'),
+        geoIpUri: baseUri.replace(path: '/geoip'),
+        fallbackGeoIpUri: baseUri.replace(path: '/geoip-fallback'),
+        wifiGeolocateUri: baseUri.replace(path: '/wifi'),
+      );
+      addTearDown(() => repository.close(force: true));
+
+      final firstWifi = await repository.determineLocation();
+      expect(firstWifi, isNotNull);
+      expect(wifiGeolocateRequests, equals(1));
+
+      // Same BSSIDs in different order & letter case within 15-minute TTL hit cache.
+      now = now.add(const Duration(minutes: 14));
+      channelResponse = <String, Object?>{
+        'status': 'unavailable',
+        'wifiAccessPoints': <Map<String, Object?>>[
+          <String, Object?>{
+            'macAddress': 'AA:BB:CC:DD:EE:01',
+            'signalStrength': -50,
+          },
+          <String, Object?>{
+            'macAddress': 'bb:cc:dd:ee:ff:02',
+            'signalStrength': -68,
+          },
+        ],
+      };
+      final cachedWifi = await repository.determineLocation();
+      expect(cachedWifi, equals(firstWifi));
+      expect(
+        wifiGeolocateRequests,
+        equals(1),
+        reason: 'Identical sorted BSSID set within 15-minute TTL must reuse cached Wi-Fi fix',
+      );
+
+      // Past 15-minute TTL re-queries Wi-Fi MLS endpoint.
+      now = now.add(const Duration(minutes: 1));
+      await repository.determineLocation();
+      expect(
+        wifiGeolocateRequests,
+        equals(2),
+        reason: 'Expired 15-minute Wi-Fi MLS cache must refresh',
+      );
+
+      // Different BSSID set immediately queries Wi-Fi MLS endpoint.
+      channelResponse = <String, Object?>{
+        'status': 'unavailable',
+        'wifiAccessPoints': <Map<String, Object?>>[
+          <String, Object?>{'macAddress': '11:22:33:44:55:01'},
+          <String, Object?>{'macAddress': '11:22:33:44:55:02'},
+        ],
+      };
+      await repository.determineLocation();
+      expect(wifiGeolocateRequests, equals(3));
+
+      // GeoIP negative backoff caching: when both endpoints fail, retry is suppressed for 5 minutes unless forceRefresh is true.
+      channelResponse = <String, Object?>{'status': 'unavailable'};
+      responseStatusCode = HttpStatus.internalServerError;
+      fallbackGeoIpStatusCode = HttpStatus.internalServerError;
+
+      expect(await repository.determineLocation(), isNull);
+      expect(geoIpRequests, equals(1));
+      expect(fallbackGeoIpRequests, equals(1));
+
+      now = now.add(const Duration(minutes: 4));
+      expect(await repository.determineLocation(), isNull);
+      expect(
+        geoIpRequests,
+        equals(1),
+        reason: 'Negative GeoIP backoff must suppress retries within 5 minutes',
+      );
+      expect(fallbackGeoIpRequests, equals(1));
+
+      // forceRefresh bypasses negative backoff cache.
+      responseStatusCode = HttpStatus.ok;
+      final forcedRecovered = await repository.determineLocation(
+        forceRefresh: true,
+      );
+      expect(forcedRecovered, isNotNull);
+      expect(geoIpRequests, equals(2));
+
+      // After 5-minute backoff expires without forceRefresh, retries resume cleanly.
+      now = now.add(const Duration(minutes: 31));
+      responseStatusCode = HttpStatus.internalServerError;
+      fallbackGeoIpStatusCode = HttpStatus.internalServerError;
+      expect(await repository.determineLocation(), isNull);
+      expect(geoIpRequests, equals(3));
+      expect(fallbackGeoIpRequests, equals(2));
+
+      now = now.add(const Duration(minutes: 5));
+      responseStatusCode = HttpStatus.ok;
+      final recoveredAfterBackoff = await repository.determineLocation();
+      expect(recoveredAfterBackoff, isNotNull);
+      expect(geoIpRequests, equals(4));
+    });
+
+    test('serializes concurrent Nominatim /search and /reverse calls through a unified FIFO rate-limiting queue without dropping searches', () async {
+      searchGeocodeResponseBody = jsonEncode(<Map<String, Object?>>[
+        <String, Object?>{
+          'lat': '50.9787',
+          'lon': '11.0328',
+          'display_name': 'Erfurt, Germany',
+        },
+      ]);
+      channelResponse = <String, Object?>{
+        'status': 'found',
+        'latitude': 50.9787,
+        'longitude': 11.0328,
+      };
+      final repository = PlatformLocationRepository(
+        minSearchInterval: const Duration(milliseconds: 60),
+        reverseGeocodeUriBuilder: (latitude, longitude) =>
+            baseUri.replace(path: '/reverse'),
+        searchGeocodeUriBuilder: (query) => baseUri.replace(
+          path: '/search',
+          queryParameters: <String, String>{'q': query},
+        ),
+      );
+      addTearDown(() => repository.close(force: true));
+
+      final watch = Stopwatch()..start();
+      final reverseFuture = repository.determineLocation();
+      final firstSearchFuture = repository.searchLocations('First');
+      final secondSearchFuture = repository.searchLocations('Second');
+      await reverseFuture;
+      final firstSearch = await firstSearchFuture;
+      final secondSearch = await secondSearchFuture;
+      final elapsedMs = watch.elapsedMilliseconds;
+
+      expect(
+        firstSearch,
+        hasLength(1),
+        reason: 'First concurrent search must not be dropped',
+      );
+      expect(
+        secondSearch,
+        hasLength(1),
+        reason: 'Second concurrent search must wait in FIFO queue instead of returning empty',
+      );
+      expect(
+        nominatimEventLog,
+        hasLength(3),
+        reason:
+            'All three Nominatim requests must complete without dropping any',
+      );
+      expect(
+        nominatimEventLog.toSet(),
+        equals(const <String>{'reverse', 'search:First', 'search:Second'}),
+        reason: 'Unified Nominatim queue must execute /reverse and both /search calls',
+      );
+      expect(
+        nominatimEventLog.indexOf('search:First'),
+        lessThan(nominatimEventLog.indexOf('search:Second')),
+        reason: 'Concurrent searchLocations calls must execute strictly in FIFO order',
+      );
+      expect(
+        elapsedMs,
+        greaterThanOrEqualTo(100),
+        reason: 'Three serialized Nominatim requests at 60ms interval must span at least ~120ms',
+      );
+    });
   });
 
   group('FakeLocationRepository', () {
@@ -710,4 +1049,123 @@ void main() {
       expect(fake.lastSearchQuery, equals('Bahnhofstraße 1'));
     });
   });
+}
+
+class _LocationRedirectStubClient implements HttpClient {
+  _LocationRedirectStubClient({
+    required this.redirectLocation,
+    required this.onRequest,
+  });
+
+  final void Function(Uri uri) onRequest;
+  final String redirectLocation;
+
+  @override
+  Duration? connectionTimeout;
+
+  @override
+  void close({bool force = false}) {}
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) async {
+    return _LocationStubRequest(
+      uri: url,
+      redirectLocation: redirectLocation,
+      onClose: () => onRequest(url),
+    );
+  }
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+class _LocationStubRequest implements HttpClientRequest {
+  _LocationStubRequest({
+    required this.uri,
+    required this.redirectLocation,
+    required this.onClose,
+  });
+
+  @override
+  bool followRedirects = true;
+
+  @override
+  final HttpHeaders headers = _LocationStubHeaders();
+
+  final void Function() onClose;
+  final String redirectLocation;
+
+  @override
+  final Uri uri;
+
+  @override
+  Future<HttpClientResponse> close() async {
+    onClose();
+    return _LocationStubRedirectResponse(redirectLocation);
+  }
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+class _LocationStubRedirectResponse extends Stream<List<int>>
+    implements HttpClientResponse {
+  _LocationStubRedirectResponse(String location)
+    : headers = _LocationStubHeaders(
+        initial: <String, String>{HttpHeaders.locationHeader: location},
+      );
+
+  @override
+  final HttpHeaders headers;
+
+  @override
+  int get contentLength => 0;
+
+  @override
+  bool get isRedirect => true;
+
+  @override
+  int get statusCode => HttpStatus.found;
+
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int> event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) => const Stream<List<int>>.empty().listen(
+    onData,
+    onError: onError,
+    onDone: onDone,
+    cancelOnError: cancelOnError,
+  );
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
+}
+
+class _LocationStubHeaders implements HttpHeaders {
+  _LocationStubHeaders({Map<String, String>? initial})
+    : _values = <String, String>{
+        if (initial != null)
+          for (final entry in initial.entries)
+            entry.key.toLowerCase(): entry.value,
+      };
+
+  final Map<String, String> _values;
+
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) {
+    _values[name.toLowerCase()] = value.toString();
+  }
+
+  @override
+  String? value(String name) => _values[name.toLowerCase()];
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError(invocation.memberName.toString());
 }

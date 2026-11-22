@@ -16,6 +16,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:material_ui/material_ui.dart';
@@ -133,14 +134,40 @@ class _RawTdfCodeBlock extends StatefulWidget {
   State<_RawTdfCodeBlock> createState() => _RawTdfCodeBlockState();
 }
 
-/// Manages horizontal and vertical [ScrollController]s for [_RawTdfCodeBlock].
+/// Manages line splitting, cached text metrics, scroll controllers, and selection for [_RawTdfCodeBlock].
 class _RawTdfCodeBlockState extends State<_RawTdfCodeBlock> {
   final ScrollController _horizontalController = ScrollController();
+  final _RawTdfSelectionDelegate _selectionDelegate =
+      _RawTdfSelectionDelegate();
   final ScrollController _verticalController = ScrollController();
+
+  double _cachedLineExtent = 20.0;
+  double _cachedMeasuredWidth = 0.0;
+  int _cachedMetricsVersion = -1;
+  TextStyle? _cachedStyle;
+  TextScaler? _cachedTextScaler;
+  int _contentVersion = 0;
+  List<String> _lines = const <String>[];
+  String _longestLine = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _syncParsedLines(widget.content);
+  }
+
+  @override
+  void didUpdateWidget(covariant _RawTdfCodeBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.content != widget.content) {
+      _syncParsedLines(widget.content);
+    }
+  }
 
   @override
   void dispose() {
     _horizontalController.dispose();
+    _selectionDelegate.dispose();
     _verticalController.dispose();
     super.dispose();
   }
@@ -150,23 +177,72 @@ class _RawTdfCodeBlockState extends State<_RawTdfCodeBlock> {
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
     final codeStyle = tokens.typography.rawCode.copyWith(color: colors.ink);
+    final metrics = _resolveMetrics(
+      codeStyle,
+      MediaQuery.textScalerOf(context),
+    );
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: colors.panel,
-        borderRadius: BorderRadius.circular(tokens.radii.card),
-        border: Border.all(color: colors.line, width: tokens.radii.borderWidth),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(tokens.radii.card),
-        child: _RawTdfScrollableCode(
-          content: widget.content,
-          codeStyle: codeStyle,
-          horizontalController: _horizontalController,
-          verticalController: _verticalController,
+    return RepaintBoundary(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: colors.panel,
+          borderRadius: BorderRadius.circular(tokens.radii.card),
+          border: Border.all(
+            color: colors.line,
+            width: tokens.radii.borderWidth,
+          ),
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(tokens.radii.card),
+          child: _RawTdfScrollableCode(
+            lines: _lines,
+            codeStyle: codeStyle,
+            measuredWidth: metrics.measuredWidth,
+            lineExtent: metrics.lineExtent,
+            horizontalController: _horizontalController,
+            verticalController: _verticalController,
+            selectionDelegate: _selectionDelegate,
+          ),
         ),
       ),
     );
+  }
+
+  /// Resolves cached horizontal canvas width and fixed line extent for [style] and [textScaler].
+  ({double measuredWidth, double lineExtent}) _resolveMetrics(
+    TextStyle style,
+    TextScaler textScaler,
+  ) {
+    if (_cachedMetricsVersion == _contentVersion &&
+        _cachedStyle == style &&
+        _cachedTextScaler == textScaler) {
+      return (
+        measuredWidth: _cachedMeasuredWidth,
+        lineExtent: _cachedLineExtent,
+      );
+    }
+    final sampleText = _longestLine.isEmpty ? 'M' : _longestLine;
+    final painter = TextPainter(
+      text: TextSpan(text: sampleText, style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: textScaler,
+      maxLines: 1,
+    )..layout();
+    _cachedMeasuredWidth = _longestLine.isEmpty ? 0.0 : painter.width + 44.0;
+    _cachedLineExtent = painter.height.ceilToDouble();
+    painter.dispose();
+    _cachedMetricsVersion = _contentVersion;
+    _cachedStyle = style;
+    _cachedTextScaler = textScaler;
+    return (measuredWidth: _cachedMeasuredWidth, lineExtent: _cachedLineExtent);
+  }
+
+  /// Splits [content] into lines and records the longest line in one single O(N) pass.
+  void _syncParsedLines(String content) {
+    final parsed = _parseLinesAndLongest(content);
+    _lines = parsed.lines;
+    _longestLine = parsed.longestLine;
+    _contentVersion++;
   }
 }
 
@@ -265,28 +341,101 @@ class _RawTdfLayout extends StatelessWidget {
   }
 }
 
-/// Dual-axis scrollable [SelectableText] canvas sized to [contentWidth].
-class _RawTdfScrollCanvas extends StatelessWidget {
-  /// Creates a [_RawTdfScrollCanvas].
-  const _RawTdfScrollCanvas({
-    required this.content,
+/// Single virtualized monospace source line participating in newline-preserving [SelectionArea] copy.
+class _RawTdfLineRow extends StatefulWidget {
+  /// Creates a [_RawTdfLineRow].
+  const _RawTdfLineRow({
+    super.key,
+    required this.text,
     required this.codeStyle,
-    required this.contentWidth,
-    required this.horizontalController,
-    required this.verticalController,
   });
 
   /// Monospace code text style (`tokens.typography.rawCode`).
   final TextStyle codeStyle;
 
-  /// Canonical serialized `.tdf` document text.
-  final String content;
+  /// Single line of canonical TDF text without trailing newline.
+  final String text;
 
-  /// Measured finite horizontal canvas width for [SelectableText].
+  @override
+  State<_RawTdfLineRow> createState() => _RawTdfLineRowState();
+}
+
+/// Row-level selection delegate appending a newline when selection reaches the end of a source line.
+final class _RawTdfLineRowSelectionDelegate
+    extends StaticSelectionContainerDelegate {
+  @override
+  SelectedContent? getSelectedContent() {
+    final content = super.getSelectedContent();
+    if (content == null || content.plainText.isEmpty) {
+      return null;
+    }
+    final range = getSelection();
+    if (range != null &&
+        math.max(range.startOffset, range.endOffset) >= contentLength) {
+      return SelectedContent(plainText: '${content.plainText}\n');
+    }
+    return content;
+  }
+}
+
+/// Owns the per-row selection delegate for [_RawTdfLineRow].
+class _RawTdfLineRowState extends State<_RawTdfLineRow> {
+  final _RawTdfLineRowSelectionDelegate _selectionDelegate =
+      _RawTdfLineRowSelectionDelegate();
+
+  @override
+  void dispose() {
+    _selectionDelegate.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SelectionContainer(
+      delegate: _selectionDelegate,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          widget.text,
+          softWrap: false,
+          maxLines: 1,
+          style: widget.codeStyle,
+        ),
+      ),
+    );
+  }
+}
+
+/// Dual-axis scrollable virtualized [ListView.builder] canvas inside [SelectionArea].
+class _RawTdfScrollCanvas extends StatelessWidget {
+  /// Creates a [_RawTdfScrollCanvas].
+  const _RawTdfScrollCanvas({
+    required this.lines,
+    required this.codeStyle,
+    required this.contentWidth,
+    required this.lineExtent,
+    required this.horizontalController,
+    required this.verticalController,
+    required this.selectionDelegate,
+  });
+
+  /// Monospace code text style (`tokens.typography.rawCode`).
+  final TextStyle codeStyle;
+
+  /// Measured finite horizontal canvas width.
   final double contentWidth;
 
   /// Horizontal scroll controller.
   final ScrollController horizontalController;
+
+  /// Fixed vertical extent per line enabling O(1) virtualized scrolling.
+  final double lineExtent;
+
+  /// Pre-split canonical `.tdf` source lines.
+  final List<String> lines;
+
+  /// Container delegate trimming stray trailing newlines from completed selections.
+  final SelectionContainerDelegate selectionDelegate;
 
   /// Vertical scroll controller.
   final ScrollController verticalController;
@@ -301,19 +450,28 @@ class _RawTdfScrollCanvas extends StatelessWidget {
         controller: horizontalController,
         notificationPredicate: (notification) =>
             notification.metrics.axis == Axis.horizontal,
-        child: SingleChildScrollView(
-          controller: verticalController,
+        child: SelectionArea(
           child: SingleChildScrollView(
             controller: horizontalController,
             scrollDirection: Axis.horizontal,
             child: SizedBox(
               width: contentWidth,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16.0,
-                  vertical: 14.0,
+              child: SelectionContainer(
+                delegate: selectionDelegate,
+                child: ListView.builder(
+                  controller: verticalController,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16.0,
+                    vertical: 14.0,
+                  ),
+                  itemExtent: lineExtent,
+                  itemCount: lines.length,
+                  itemBuilder: (context, index) => _RawTdfLineRow(
+                    key: ValueKey<String>('raw_tdf_line_$index'),
+                    text: lines[index],
+                    codeStyle: codeStyle,
+                  ),
                 ),
-                child: SelectableText(content, style: codeStyle),
               ),
             ),
           ),
@@ -323,49 +481,72 @@ class _RawTdfScrollCanvas extends StatelessWidget {
   }
 }
 
-/// Bidirectionally scrollable [SelectableText] canvas inside [_RawTdfCodeBlock].
+/// Bidirectionally scrollable virtualized code viewport inside [_RawTdfCodeBlock].
 class _RawTdfScrollableCode extends StatelessWidget {
   /// Creates a [_RawTdfScrollableCode].
   const _RawTdfScrollableCode({
-    required this.content,
+    required this.lines,
     required this.codeStyle,
+    required this.measuredWidth,
+    required this.lineExtent,
     required this.horizontalController,
     required this.verticalController,
+    required this.selectionDelegate,
   });
 
   /// Monospace code text style (`tokens.typography.rawCode`).
   final TextStyle codeStyle;
 
-  /// Canonical serialized `.tdf` document text.
-  final String content;
-
   /// Horizontal scroll controller.
   final ScrollController horizontalController;
+
+  /// Fixed vertical extent per source line.
+  final double lineExtent;
+
+  /// Pre-split canonical `.tdf` source lines.
+  final List<String> lines;
+
+  /// Pre-measured minimum horizontal width required by the longest source line.
+  final double measuredWidth;
+
+  /// Container delegate joining multi-line selections cleanly.
+  final SelectionContainerDelegate selectionDelegate;
 
   /// Vertical scroll controller.
   final ScrollController verticalController;
 
   @override
   Widget build(BuildContext context) {
-    final textScaler = MediaQuery.textScalerOf(context);
-
     return LayoutBuilder(
       builder: (context, constraints) {
-        final contentWidth = _computeRawTdfContentWidth(
-          content: content,
-          style: codeStyle,
-          textScaler: textScaler,
-          viewportWidth: constraints.maxWidth,
-        );
+        final contentWidth = math.max(constraints.maxWidth, measuredWidth);
         return _RawTdfScrollCanvas(
-          content: content,
+          lines: lines,
           codeStyle: codeStyle,
           contentWidth: contentWidth,
+          lineExtent: lineExtent,
           horizontalController: horizontalController,
           verticalController: verticalController,
+          selectionDelegate: selectionDelegate,
         );
       },
     );
+  }
+}
+
+/// Document-level selection delegate trimming a stray trailing newline from completed source selections.
+final class _RawTdfSelectionDelegate extends StaticSelectionContainerDelegate {
+  @override
+  SelectedContent? getSelectedContent() {
+    final content = super.getSelectedContent();
+    if (content == null || content.plainText.isEmpty) {
+      return null;
+    }
+    final text = content.plainText;
+    if (text.endsWith('\n')) {
+      return SelectedContent(plainText: text.substring(0, text.length - 1));
+    }
+    return content;
   }
 }
 
@@ -394,28 +575,6 @@ class _RawTdfStatsStrip extends StatelessWidget {
   }
 }
 
-/// Measures a finite horizontal canvas width for [SelectableText] from the longest line in [content].
-double _computeRawTdfContentWidth({
-  required String content,
-  required TextStyle style,
-  required TextScaler textScaler,
-  required double viewportWidth,
-}) {
-  final longestLine = _findLongestLine(content);
-  if (longestLine.isEmpty) {
-    return viewportWidth;
-  }
-  final painter = TextPainter(
-    text: TextSpan(text: longestLine, style: style),
-    textDirection: TextDirection.ltr,
-    textScaler: textScaler,
-    maxLines: 1,
-  )..layout();
-  final measuredWidth = painter.width + 44.0;
-  painter.dispose();
-  return math.max(viewportWidth, measuredWidth);
-}
-
 /// Copies serialized TDF [content] to the clipboard and emits [copiedNotice].
 Future<void> _copyRawTdf(
   BuildContext context,
@@ -432,31 +591,6 @@ Future<void> _copyRawTdf(
       .showNotice(copiedNotice, tone: FloatingNoticeTone.success);
 }
 
-/// Returns the single longest `\n`-delimited line slice in [text] in one zero-split $O(N)$ pass.
-String _findLongestLine(String text) {
-  var start = 0;
-  var bestStart = 0;
-  var bestLength = 0;
-  final length = text.length;
-  while (start <= length) {
-    final newlineIndex = text.indexOf('\n', start);
-    final end = newlineIndex < 0 ? length : newlineIndex;
-    final lineLength = end - start;
-    if (lineLength > bestLength) {
-      bestStart = start;
-      bestLength = lineLength;
-    }
-    if (newlineIndex < 0) {
-      break;
-    }
-    start = newlineIndex + 1;
-  }
-  if (bestLength == 0) {
-    return '';
-  }
-  return text.substring(bestStart, bestStart + bestLength);
-}
-
 /// Formats localized byte and line telemetry for [preview], showing overflow sentinel bounds on early `TdfException` aborts.
 String _formatRawTdfStatsLabel(
   RawTdfPreview preview,
@@ -469,4 +603,29 @@ String _formatRawTdfStatsLabel(
   final byteCount = hasMeasuredCounts ? preview.byteCount : maxTdfFileBytes + 1;
   final lineCount = hasMeasuredCounts ? preview.lineCount : maxTdfLineCount + 1;
   return localizations.rawTdfStatsSummary('$byteCount', '$lineCount');
+}
+
+/// Splits LF-delimited [text] into lines and locates its longest line in one single O(N) pass.
+({List<String> lines, String longestLine}) _parseLinesAndLongest(String text) {
+  if (text.isEmpty) {
+    return (lines: const <String>[], longestLine: '');
+  }
+  final lines = <String>[];
+  var longestLine = '';
+  var start = 0;
+  final length = text.length;
+  while (start < length) {
+    final newlineIndex = text.indexOf('\n', start);
+    final end = newlineIndex < 0 ? length : newlineIndex;
+    final line = text.substring(start, end);
+    lines.add(line);
+    if (line.length > longestLine.length) {
+      longestLine = line;
+    }
+    if (newlineIndex < 0) {
+      break;
+    }
+    start = newlineIndex + 1;
+  }
+  return (lines: List<String>.unmodifiable(lines), longestLine: longestLine);
 }

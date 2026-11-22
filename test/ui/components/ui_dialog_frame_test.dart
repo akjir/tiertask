@@ -84,7 +84,6 @@ void main() {
                 );
               },
             ),
-            surfaceSize: const Size(1280, 800),
           );
 
           triggerFocus.requestFocus();

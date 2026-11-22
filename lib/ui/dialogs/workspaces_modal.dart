@@ -80,7 +80,6 @@ class _WorkspaceCreateContent extends StatelessWidget {
               label: localizations.actionAdd,
               leadingIcon: Icons.add_rounded,
               variant: UiButtonVariant.primary,
-              density: UiButtonDensity.standard,
               tooltip: localizations.tooltipCreateWorkspace,
               isLoading: isBusy,
               onPressed: (canCreateMore && !isBusy && hasInput)
@@ -569,6 +568,7 @@ class _WorkspaceModalFooter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -577,9 +577,14 @@ class _WorkspaceModalFooter extends StatelessWidget {
           errorMessage: errorMessage,
           onDismiss: onDismissError,
         ),
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 12.0),
-          child: Divider(height: 1.0),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12.0),
+          child: SizedBox(
+            height: tokens.radii.borderWidth,
+            child: DecoratedBox(
+              decoration: BoxDecoration(color: tokens.colors.line),
+            ),
+          ),
         ),
         _WorkspaceCreateSection(
           controller: createController,
@@ -737,7 +742,6 @@ class _WorkspaceRowDetails extends StatelessWidget {
             if (isActive)
               UiPill(
                 label: localizations.workspaceActiveBadge,
-                variant: UiPillVariant.badge,
                 tone: UiPillTone.accent,
               ),
           ],
@@ -1071,7 +1075,7 @@ class _WorkspacesModalState extends ConsumerState<_WorkspacesModal> {
     _clearError();
     final result = await ref
         .read(workspaceActionsProvider.notifier)
-        .createWorkspace(_createController.text, activate: true);
+        .createWorkspace(_createController.text);
     if (!mounted) {
       return;
     }

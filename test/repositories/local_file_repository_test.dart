@@ -14,15 +14,19 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/l10n/app_localizations_de.dart';
+import 'package:tiertask/l10n/app_localizations_en.dart';
 import 'package:tiertask/models/app_build_profile.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/repositories/local_file_operations.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
+import 'package:tiertask/services/sha256_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -56,13 +60,13 @@ void main() {
       );
 
       final rootRepository = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         baseDirectoryPath: '/',
       );
       expect(rootRepository.resolveFilePath(), equals('/tasks.tdf'));
 
       final relativeRepository = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         baseDirectoryPath: tempDirectory.path,
       );
       expect(relativeRepository.extractFileName(), equals('tasks.tdf'));
@@ -132,7 +136,7 @@ void main() {
       });
 
       final repository = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         baseDirectoryPath: tempDirectory.path,
       );
       final selectedDirectory = await repository.pickDirectory(
@@ -206,7 +210,7 @@ void main() {
         baseDirectoryPath: tempDirectory.path,
       );
       expect(newRepository.fileExists(), isFalse);
-      await newRepository.initializeTdfIfNeeded();
+      await newRepository.initializeIfMissing();
       expect(newRepository.fileExists(), isTrue);
       final createdPath =
           '${tempDirectory.path}${Platform.pathSeparator}newly_created.tdf';
@@ -293,7 +297,7 @@ void main() {
         '${tempDirectory.path}/bad\x00dir',
       ]) {
         final invalidBaseRepository = LocalFileRepository(
-          config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+          config: const WebDavConfig(),
           baseDirectoryPath: invalidBase,
         );
         expect(
@@ -355,7 +359,7 @@ void main() {
       expect(await backupFile.exists(), isFalse);
 
       await mainFile.writeAsString('corrupted tdf content 1', flush: true);
-      await repository.wipeTdf(createBackup: false);
+      await repository.wipeTdf();
       expect(await mainFile.readAsString(), equals('tdf 0.8.0\n'));
       expect(await backupFile.exists(), isFalse);
 
@@ -501,8 +505,6 @@ void main() {
         platform: 'linux',
         workspaceId: 'work',
         utcNow: nowUtc,
-        maxRetainedDays: 7,
-        maxRetainedFiles: 5,
       );
       expect(
         prunedCount,
@@ -689,10 +691,7 @@ void main() {
 
     test('maps OS error codes across Linux and Windows and probes target directory writability', () async {
       final repository = LocalFileRepository(
-        config: const WebDavConfig(
-          localFilePath: 'tasks.tdf',
-          language: AppLanguage.english,
-        ),
+        config: const WebDavConfig(language: AppLanguage.english),
         baseDirectoryPath: sourceDirectory.path,
       );
       expect(
@@ -703,28 +702,21 @@ void main() {
       for (final (code, message, expectedSubstring) in <(int, String, String)>[
         (13, 'Permission denied', 'Permission denied'),
         (1, 'Operation not permitted', 'Permission denied'),
-        (5, 'Access is denied.', 'Permission denied'),
-        (1314, 'Privilege not held', 'Permission denied'),
         (30, 'Read-only file system', 'read-only'),
-        (19, 'The media is write protected.', 'read-only'),
         (28, 'No space left on device', 'Not enough free disk space'),
         (122, 'Disk quota exceeded', 'Not enough free disk space'),
-        (112, 'Not enough space', 'Not enough free disk space'),
-        (39, 'The disk is full.', 'Not enough free disk space'),
         (16, 'Device or resource busy', 'locked or in use'),
         (26, 'Text file busy', 'locked or in use'),
-        (32, 'Sharing violation', 'locked or in use'),
-        (33, 'Lock violation', 'locked or in use'),
         (17, 'File exists', 'A file already exists'),
-        (80, 'The file exists.', 'A file already exists'),
-        (183, 'Already exists.', 'A file already exists'),
         (21, 'Is a directory', 'A directory with this name'),
+        (39, 'Directory not empty', 'A directory with this name'),
         (20, 'Not a directory', 'not a directory'),
-        (267, 'Invalid directory.', 'not a directory'),
         (2, 'No such file or directory', 'does not exist'),
-        (3, 'Path not found.', 'does not exist'),
         (36, 'File name too long', 'too long'),
-        (206, 'Filename is too long.', 'too long'),
+        (18, 'Invalid cross-device link', 'Invalid cross-device link'),
+        (5, 'Input/output error', 'Input/output error'),
+        (19, 'No such device', 'No such device'),
+        (32, 'Broken pipe', 'Broken pipe'),
         (999, 'Custom hardware I/O fault', 'Custom hardware I/O fault'),
       ]) {
         final fileSystemException = FileSystemException(
@@ -735,11 +727,46 @@ void main() {
         final mapped = repository.mapMoveFileSystemException(
           fileSystemException,
           fallbackPath: '/target/tasks.tdf',
+          isWindows: false,
         );
         expect(
           mapped.message,
           contains(expectedSubstring),
-          reason: 'OS error code $code must map to "$expectedSubstring"',
+          reason: 'POSIX errno $code must map to "$expectedSubstring"',
+        );
+      }
+
+      for (final (code, message, expectedSubstring) in <(int, String, String)>[
+        (5, 'Access is denied.', 'Permission denied'),
+        (1314, 'Privilege not held', 'Permission denied'),
+        (19, 'The media is write protected.', 'read-only'),
+        (112, 'Not enough space', 'Not enough free disk space'),
+        (39, 'The disk is full.', 'Not enough free disk space'),
+        (32, 'Sharing violation', 'locked or in use'),
+        (33, 'Lock violation', 'locked or in use'),
+        (80, 'The file exists.', 'A file already exists'),
+        (183, 'Already exists.', 'A file already exists'),
+        (267, 'Invalid directory.', 'not a directory'),
+        (2, 'File not found.', 'does not exist'),
+        (3, 'Path not found.', 'does not exist'),
+        (206, 'Filename is too long.', 'too long'),
+        (17, 'Not same device.', 'Not same device.'),
+        (21, 'Device not ready.', 'Device not ready.'),
+      ]) {
+        final fileSystemException = FileSystemException(
+          'Move failed',
+          r'C:\target\tasks.tdf',
+          OSError(message, code),
+        );
+        final mapped = repository.mapMoveFileSystemException(
+          fileSystemException,
+          fallbackPath: r'C:\target\tasks.tdf',
+          isWindows: true,
+        );
+        expect(
+          mapped.message,
+          contains(expectedSubstring),
+          reason: 'Win32 error $code must map to "$expectedSubstring"',
         );
       }
 
@@ -1014,7 +1041,7 @@ void main() {
 
     test('guards in-memory fallback, traversal paths, and missing directories, and emits events for direct write, same-dir atomic swap, and cross-dir rename', () async {
       final inMemoryRepo = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         inMemoryStore: <String, String>{},
       );
       expect(inMemoryRepo.canWatchDirectory, isFalse);
@@ -1030,7 +1057,7 @@ void main() {
 
       final missingDirPath = '${watchTempRoot.path}/not_created_yet';
       final missingDirRepo = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         baseDirectoryPath: missingDirPath,
       );
       expect(missingDirRepo.directoryExists(), isFalse);
@@ -1045,7 +1072,7 @@ void main() {
       final externalStagingDir = Directory('${watchTempRoot.path}/staging')
         ..createSync(recursive: true);
       final repo = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         baseDirectoryPath: watchedDir.path,
       );
       expect(repo.canWatchDirectory, isTrue);
@@ -1167,13 +1194,13 @@ void main() {
       final customLockDir = Directory('${lockTempRoot.path}/host_locks');
 
       final repositoryA = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         baseDirectoryPath: workspaceDir.path,
         hostLockDirectoryOverride: customLockDir.path,
         lockAcquireTimeout: const Duration(seconds: 2),
       );
       final repositoryB = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         baseDirectoryPath: workspaceDir.path,
         hostLockDirectoryOverride: customLockDir.path,
         lockAcquireTimeout: const Duration(seconds: 2),
@@ -1368,11 +1395,11 @@ void main() {
 
     test('isolates relative .tdf and log paths by buildProfile', () {
       final releaseRepo = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         buildProfile: AppBuildProfile.release,
       );
       final devRepo = LocalFileRepository(
-        config: const WebDavConfig(localFilePath: 'tasks.tdf'),
+        config: const WebDavConfig(),
         buildProfile: AppBuildProfile.dev,
       );
       expect(
@@ -1400,6 +1427,692 @@ void main() {
         devLog,
         contains('tiertask-dev'),
         reason: 'Dev log file must resolve inside tiertask-dev',
+      );
+    });
+  });
+
+  group('LocalFileRepository Hardening, Locking & Android Context.filesDir', () {
+    late Directory tempRoot;
+
+    setUp(() async {
+      tempRoot = await Directory.systemTemp.createTemp(
+        'tiertask_hardening_test_',
+      );
+      AppLogger.resetForTesting();
+      LocalFileRepository.resetAndroidFilesDirectoryCacheForTesting();
+    });
+
+    tearDown(() async {
+      AppLogger.resetForTesting();
+      LocalFileRepository.resetAndroidFilesDirectoryCacheForTesting();
+      if (await tempRoot.exists()) {
+        await tempRoot.delete(recursive: true);
+      }
+    });
+
+    test('caches HostFileLockManager instance and rejects symlinks, directories, sockets, and oversized reads via bounded RandomAccessFile', () async {
+      final workDir = Directory('${tempRoot.path}/read_checks')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/locks');
+
+      final repo = LocalFileRepository(
+        config: const WebDavConfig(),
+        baseDirectoryPath: workDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+        maxFileBytes: 32,
+      );
+      expect(
+        identical(repo.lockManagerForTesting, repo.lockManagerForTesting),
+        isTrue,
+        reason: '_lockManager must be cached as a single final instance',
+      );
+
+      // Exact boundary (32 bytes) succeeds, 33 bytes fails cleanly.
+      final targetPath = repo.resolveFilePath();
+      File(targetPath).writeAsStringSync('A' * 32, flush: true);
+      final exactSnapshot = await repo.readTdfWithDigest();
+      expect(exactSnapshot.exists, isTrue);
+      expect(exactSnapshot.content.length, equals(32));
+
+      File(targetPath).writeAsStringSync('A' * 33, flush: true);
+      await expectLater(
+        repo.readTdfWithDigest,
+        throwsA(isA<LocalFileException>()),
+        reason: 'Payload of maxFileBytes + 1 must be rejected by bounded read',
+      );
+
+      // Symlink at targetPath must be rejected without reading target.
+      File(targetPath).deleteSync();
+      final secretFile = File('${tempRoot.path}/secret.txt')
+        ..writeAsStringSync('top-secret', flush: true);
+      Link(targetPath).createSync(secretFile.path);
+      await expectLater(
+        repo.loadTdf,
+        throwsA(isA<LocalFileException>()),
+        reason: 'loadTdf must reject symlinks without following them',
+      );
+      Link(targetPath).deleteSync();
+
+      // Directory at targetPath must be rejected.
+      Directory(targetPath).createSync();
+      await expectLater(
+        repo.readTdfWithDigest,
+        throwsA(isA<LocalFileException>()),
+        reason: 'readTdfWithDigest must reject directory targets',
+      );
+      Directory(targetPath).deleteSync();
+
+      // Unix domain socket must be rejected on Linux.
+      if (Platform.isLinux) {
+        final serverSocket = await ServerSocket.bind(
+          InternetAddress(targetPath, type: InternetAddressType.unix),
+          0,
+        );
+        addTearDown(serverSocket.close);
+        await expectLater(
+          repo.loadTdf,
+          throwsA(isA<LocalFileException>()),
+          reason: 'loadTdf must reject Unix domain sockets',
+        );
+      }
+    });
+
+    test('serializes deleteTdf, renameTdf, and moveTdfFile under _lockManager.withExclusiveLock', () async {
+      final workDir = Directory('${tempRoot.path}/lock_ops')
+        ..createSync(recursive: true);
+      final moveDir = Directory('${tempRoot.path}/move_ops')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/op_locks');
+
+      final repo = LocalFileRepository(
+        config: const WebDavConfig(),
+        baseDirectoryPath: workDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      await repo.saveTdf('tdf 0.8.0\n# locked\n');
+
+      // 1. renameTdf waits while target lock is held.
+      final renameGate = Completer<void>();
+      final renameHolderEntered = Completer<void>();
+      var renameFinished = false;
+      final holder1 = repo.withExclusiveTargetLock(() async {
+        renameHolderEntered.complete();
+        await renameGate.future;
+      });
+      await renameHolderEntered.future;
+      final renameFuture = repo.renameTdf('renamed').then((value) {
+        renameFinished = true;
+        return value;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(
+        renameFinished,
+        isFalse,
+        reason: 'renameTdf must wait for exclusive lock on source file',
+      );
+      renameGate.complete();
+      await holder1;
+      final renamedPath = await renameFuture;
+      expect(File(renamedPath).existsSync(), isTrue);
+
+      // 2. moveTdfFile waits while source lock is held.
+      final renamedRepo = LocalFileRepository(
+        config: WebDavConfig(localFilePath: renamedPath),
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      final movedTargetRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'moved.tdf'),
+        baseDirectoryPath: moveDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      final moveGate = Completer<void>();
+      final moveHolderEntered = Completer<void>();
+      var moveFinished = false;
+      final holder2 = renamedRepo.withExclusiveTargetLock(() async {
+        moveHolderEntered.complete();
+        await moveGate.future;
+      });
+      await moveHolderEntered.future;
+      final moveFuture = renamedRepo.moveTdfFile(movedTargetRepo).then((_) {
+        moveFinished = true;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(
+        moveFinished,
+        isFalse,
+        reason: 'moveTdfFile must wait for exclusive lock',
+      );
+      moveGate.complete();
+      await holder2;
+      await moveFuture;
+      expect(File(movedTargetRepo.resolveFilePath()).existsSync(), isTrue);
+
+      // 3. deleteTdf waits while target lock is held.
+      final deleteGate = Completer<void>();
+      final deleteHolderEntered = Completer<void>();
+      var deleteFinished = false;
+      final holder3 = movedTargetRepo.withExclusiveTargetLock(() async {
+        deleteHolderEntered.complete();
+        await deleteGate.future;
+      });
+      await deleteHolderEntered.future;
+      final deleteFuture = movedTargetRepo.deleteTdf().then((_) {
+        deleteFinished = true;
+      });
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(
+        deleteFinished,
+        isFalse,
+        reason: 'deleteTdf must wait for exclusive lock',
+      );
+      deleteGate.complete();
+      await holder3;
+      await deleteFuture;
+      expect(File(movedTargetRepo.resolveFilePath()).existsSync(), isFalse);
+    });
+
+    test('resolves Android Context.filesDir for .tdf and diagnostic logs, migrates legacy cacheDir regular files safely once, and skips symlinks or existing files', () async {
+      AppLogger.setEnabled(true, persistToDisk: false);
+
+      final androidFilesDir = Directory('${tempRoot.path}/android_files')
+        ..createSync(recursive: true);
+      final legacyCacheDir = Directory('${tempRoot.path}/android_cache')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/android_locks');
+
+      // 1. Static Android cache populates default directory & diagnostic log paths.
+      final initialized =
+          await LocalFileRepository.ensureAndroidFilesDirectoryInitialized(
+            resolver: () async => androidFilesDir.path,
+          );
+      expect(initialized, equals(androidFilesDir.path));
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.release,
+        ),
+        equals('${androidFilesDir.path}${Platform.pathSeparator}tiertask'),
+        reason:
+            'Android default directory must resolve inside persistent filesDir',
+      );
+      expect(
+        LocalFileRepository.defaultLogFilePath(
+          buildProfile: AppBuildProfile.release,
+        ),
+        equals(
+          '${androidFilesDir.path}${Platform.pathSeparator}tiertask'
+          '${Platform.pathSeparator}tiertask.log',
+        ),
+        reason:
+            'Android diagnostic logs must resolve inside persistent filesDir',
+      );
+
+      // 2. Release legacy file in cacheDir migrates atomically into filesDir/tiertask and logs storage.android_cache_migrated.
+      const legacyContent =
+          'tdf 0.8.0\n\ntask 000001OkD2 {\n    name "Migrated Android Task"\n    created 2026-11-01 08:00\n}\n';
+      final legacyReleaseFile = File(
+        '${legacyCacheDir.path}${Platform.pathSeparator}tasks.tdf',
+      )..writeAsStringSync(legacyContent, flush: true);
+
+      final releaseRepo = LocalFileRepository(
+        config: const WebDavConfig(),
+        buildProfile: AppBuildProfile.release,
+        hostLockDirectoryOverride: lockDir.path,
+        androidFilesDirectoryResolver: () async => androidFilesDir.path,
+        legacyAndroidCacheDirectoryOverride: legacyCacheDir.path,
+      );
+      final loaded = await releaseRepo.loadTdf();
+      expect(loaded, equals(legacyContent));
+      final migratedPath =
+          '${androidFilesDir.path}${Platform.pathSeparator}tiertask'
+          '${Platform.pathSeparator}tasks.tdf';
+      expect(
+        File(migratedPath).readAsStringSync(),
+        equals(legacyContent),
+        reason: 'Legacy Android cacheDir .tdf must be migrated into persistent filesDir',
+      );
+      expect(
+        legacyReleaseFile.existsSync(),
+        isFalse,
+        reason:
+            'Legacy cacheDir file must be cleaned up after durable migration',
+      );
+      expect(
+        AppLogger.fullLogText,
+        contains('storage.android_cache_migrated'),
+        reason: 'Migration must emit storage.android_cache_migrated diagnostic event',
+      );
+
+      // 3. Existing target in filesDir must NEVER be overwritten by a stale legacy cacheDir file.
+      final staleLegacyFile = File(
+        '${legacyCacheDir.path}${Platform.pathSeparator}tasks.tdf',
+      )..writeAsStringSync('tdf 0.8.0\n# stale\n', flush: true);
+      final secondReleaseRepo = LocalFileRepository(
+        config: const WebDavConfig(),
+        buildProfile: AppBuildProfile.release,
+        hostLockDirectoryOverride: lockDir.path,
+        androidFilesDirectoryResolver: () async => androidFilesDir.path,
+        legacyAndroidCacheDirectoryOverride: legacyCacheDir.path,
+      );
+      expect(await secondReleaseRepo.loadTdf(), equals(legacyContent));
+      expect(staleLegacyFile.existsSync(), isTrue);
+
+      // 4. Dev profile migrates from <cacheDir>/tiertask-dev/<file> to <filesDir>/tiertask-dev/<file>.
+      final legacyDevDir = Directory(
+        '${legacyCacheDir.path}${Platform.pathSeparator}tiertask-dev',
+      )..createSync(recursive: true);
+      final legacyDevFile = File(
+        '${legacyDevDir.path}${Platform.pathSeparator}dev_board.tdf',
+      )..writeAsStringSync('tdf 0.8.0\n# dev-migrated\n', flush: true);
+      final devRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'dev_board.tdf'),
+        buildProfile: AppBuildProfile.dev,
+        hostLockDirectoryOverride: lockDir.path,
+        androidFilesDirectoryResolver: () async => androidFilesDir.path,
+        legacyAndroidCacheDirectoryOverride: legacyCacheDir.path,
+      );
+      expect(await devRepo.loadTdf(), equals('tdf 0.8.0\n# dev-migrated\n'));
+      expect(legacyDevFile.existsSync(), isFalse);
+
+      // 5. Symlink in legacy cacheDir must NEVER be followed or migrated.
+      final secretOutside = File('${tempRoot.path}/outside_secret.txt')
+        ..writeAsStringSync('do-not-migrate', flush: true);
+      final legacySymlink = Link(
+        '${legacyCacheDir.path}${Platform.pathSeparator}symlink_board.tdf',
+      )..createSync(secretOutside.path);
+      final symlinkRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'symlink_board.tdf'),
+        buildProfile: AppBuildProfile.release,
+        hostLockDirectoryOverride: lockDir.path,
+        androidFilesDirectoryResolver: () async => androidFilesDir.path,
+        legacyAndroidCacheDirectoryOverride: legacyCacheDir.path,
+      );
+      expect(await symlinkRepo.loadTdf(), isEmpty);
+      expect(
+        File(
+          '${androidFilesDir.path}${Platform.pathSeparator}tiertask'
+          '${Platform.pathSeparator}symlink_board.tdf',
+        ).existsSync(),
+        isFalse,
+        reason: 'Symlink at legacy cacheDir path must never be migrated',
+      );
+      expect(legacySymlink.existsSync(), isTrue);
+
+      // 6. Broken Android resolver fails with LocalFileException instead of silently falling back to cacheDir.
+      final brokenRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'broken.tdf'),
+        buildProfile: AppBuildProfile.release,
+        hostLockDirectoryOverride: lockDir.path,
+        androidFilesDirectoryResolver: () async => null,
+      );
+      await expectLater(
+        brokenRepo.loadTdf,
+        throwsA(isA<LocalFileException>()),
+        reason: 'Missing Android filesDir must fail rather than falling back to volatile cacheDir',
+      );
+    });
+
+    test('readBoundedRegularFileBytes reads asynchronously within maxBytes and rejects oversized files and symlinks', () async {
+      const operations = LocalFileOperations<LocalFileException>(
+        LocalFileException.new,
+      );
+      final messages = AppLocalizationsEn();
+      final validFile = File('${tempRoot.path}/async_bounded.tdf')
+        ..writeAsStringSync('tdf 0.8.0\n', flush: true);
+
+      final Future<List<int>> readFuture = operations
+          .readBoundedRegularFileBytes(validFile.path, 10, messages);
+      final bytes = await readFuture;
+      expect(bytes.length, equals(10));
+
+      await expectLater(
+        () =>
+            operations.readBoundedRegularFileBytes(validFile.path, 9, messages),
+        throwsA(isA<LocalFileException>()),
+        reason: 'Async bounded reader must reject files larger than maxBytes',
+      );
+
+      final linkPath = '${tempRoot.path}/async_link.tdf';
+      Link(linkPath).createSync(validFile.path);
+      await expectLater(
+        () => operations.readBoundedRegularFileBytes(linkPath, 64, messages),
+        throwsA(isA<LocalFileException>()),
+        reason:
+            'Async bounded reader must keep followLinks:false symlink guard',
+      );
+    });
+
+    test('readBoundedRegularFileBytes and readTdfWithDigest enforce bounds across the 32 KiB sync/async offload threshold', () async {
+      const threshold = LocalFileOperations.asyncReadThresholdBytes;
+      expect(threshold, equals(32768));
+
+      const operations = LocalFileOperations<LocalFileException>(
+        LocalFileException.new,
+      );
+      final messages = AppLocalizationsEn();
+
+      final belowThresholdText = 'tdf 0.8.0\n# ${'a' * (threshold - 14)}\n';
+      expect(utf8.encode(belowThresholdText).length, equals(threshold - 1));
+      final belowFile = File('${tempRoot.path}/below_threshold.tdf')
+        ..writeAsStringSync(belowThresholdText, flush: true);
+
+      final belowBytes = await operations.readBoundedRegularFileBytes(
+        belowFile.path,
+        threshold - 1,
+        messages,
+      );
+      expect(belowBytes.length, equals(threshold - 1));
+      await expectLater(
+        () => operations.readBoundedRegularFileBytes(
+          belowFile.path,
+          threshold - 2,
+          messages,
+        ),
+        throwsA(isA<LocalFileException>()),
+        reason: 'Small sync-read path must still enforce exact maxBytes bound',
+      );
+
+      final atThresholdText = 'tdf 0.8.0\n# ${'b' * (threshold - 13)}\n';
+      expect(utf8.encode(atThresholdText).length, equals(threshold));
+      final atThresholdFile = File('${tempRoot.path}/at_threshold.tdf')
+        ..writeAsStringSync(atThresholdText, flush: true);
+
+      final atThresholdBytes = await operations.readBoundedRegularFileBytes(
+        atThresholdFile.path,
+        threshold,
+        messages,
+      );
+      expect(atThresholdBytes.length, equals(threshold));
+      await expectLater(
+        () => operations.readBoundedRegularFileBytes(
+          atThresholdFile.path,
+          threshold - 1,
+          messages,
+        ),
+        throwsA(isA<LocalFileException>()),
+        reason: 'Large async-read path must still enforce exact maxBytes bound',
+      );
+
+      final largeRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'at_threshold.tdf'),
+        baseDirectoryPath: tempRoot.path,
+      );
+      final largeSnapshot = await largeRepo.readTdfWithDigest();
+      expect(largeSnapshot.exists, isTrue);
+      expect(largeSnapshot.content, equals(atThresholdText));
+      expect(
+        largeSnapshot.digest,
+        equals(Sha256Service.hashHex(utf8.encode(atThresholdText))),
+        reason: 'Large >= 32 KiB readTdfWithDigest must compute exact SHA-256 digest via Isolate.run',
+      );
+    });
+
+    testWidgets(
+      'readTdfWithDigest completes small disk-backed reads inside FakeAsync without stalling',
+      (tester) async {
+        final smallFile = File('${tempRoot.path}/fake_async_small.tdf')
+          ..writeAsStringSync('tdf 0.8.0\n', flush: true);
+        final repository = LocalFileRepository(
+          config: WebDavConfig(localFilePath: smallFile.path),
+        );
+
+        ({String content, String? digest, bool exists})? snapshot;
+        await repository.readTdfWithDigest().then((value) {
+          snapshot = value;
+        });
+        await tester.pumpAndSettle();
+
+        expect(snapshot?.exists, isTrue);
+        expect(snapshot?.content, equals('tdf 0.8.0\n'));
+        expect(
+          snapshot?.digest,
+          equals(Sha256Service.hashHex(utf8.encode('tdf 0.8.0\n'))),
+        );
+      },
+    );
+
+    test('languageResolver dynamically updates LocalFileRepository error localization without recreating the repository', () {
+      var activeLanguage = AppLanguage.english;
+      final repository = LocalFileRepository(
+        config: const WebDavConfig(
+          localFilePath: '../escape.tdf',
+          language: AppLanguage.english,
+        ),
+        baseDirectoryPath: tempRoot.path,
+        languageResolver: () => activeLanguage,
+      );
+
+      expect(
+        repository.resolveFilePath,
+        throwsA(
+          isA<LocalFileException>().having(
+            (error) => error.message,
+            'message',
+            equals(AppLocalizationsEn().errorInvalidLocalFilePath),
+          ),
+        ),
+      );
+
+      activeLanguage = AppLanguage.german;
+      expect(
+        repository.resolveFilePath,
+        throwsA(
+          isA<LocalFileException>().having(
+            (error) => error.message,
+            'message',
+            equals(AppLocalizationsDe().errorInvalidLocalFilePath),
+          ),
+        ),
+        reason: 'Dynamic languageResolver must localize errors in German without recreating LocalFileRepository',
+      );
+    });
+
+    test('wipeTdf and initializeIfMissing reject Unix domain sockets and FIFO pipes, and wipeTdf backup enforces maxFileBytes with atomic 0600 write', () async {
+      final workDir = Directory('${tempRoot.path}/wipe_init_hardening')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/wipe_init_locks');
+
+      final repo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'target.tdf'),
+        baseDirectoryPath: workDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+        maxFileBytes: 64,
+      );
+      final targetPath = repo.resolveFilePath();
+
+      if (Platform.isLinux) {
+        // 1. Unix domain socket must be rejected by both initializeIfMissing and wipeTdf.
+        final unixSocket = await ServerSocket.bind(
+          InternetAddress(targetPath, type: InternetAddressType.unix),
+          0,
+        );
+        try {
+          await expectLater(
+            repo.initializeIfMissing,
+            throwsA(isA<LocalFileException>()),
+            reason: 'initializeIfMissing must reject Unix domain sockets',
+          );
+          await expectLater(
+            () => repo.wipeTdf(createBackup: true),
+            throwsA(isA<LocalFileException>()),
+            reason: 'wipeTdf must reject Unix domain sockets',
+          );
+        } finally {
+          await unixSocket.close();
+          if (FileSystemEntity.typeSync(targetPath, followLinks: false) !=
+              FileSystemEntityType.notFound) {
+            File(targetPath).deleteSync();
+          }
+        }
+
+        // 2. FIFO named pipe must be rejected by both initializeIfMissing and wipeTdf.
+        final mkfifoResult = Process.runSync('mkfifo', <String>[targetPath]);
+        if (mkfifoResult.exitCode == 0) {
+          try {
+            await expectLater(
+              repo.initializeIfMissing,
+              throwsA(isA<LocalFileException>()),
+              reason: 'initializeIfMissing must reject FIFO pipes',
+            );
+            await expectLater(
+              () => repo.wipeTdf(createBackup: true),
+              throwsA(isA<LocalFileException>()),
+              reason: 'wipeTdf must reject FIFO pipes',
+            );
+          } finally {
+            if (FileSystemEntity.typeSync(targetPath, followLinks: false) !=
+                FileSystemEntityType.notFound) {
+              File(targetPath).deleteSync();
+            }
+          }
+        }
+      }
+
+      // 3. Oversized file (> maxFileBytes) must fail bounded wipe backup instead of unbounded copySync.
+      File(targetPath).writeAsStringSync('X' * 65, flush: true);
+      await expectLater(
+        () => repo.wipeTdf(createBackup: true),
+        throwsA(
+          isA<LocalFileException>().having(
+            (error) => error.message,
+            'message',
+            equals(AppLocalizationsEn().errorLocalFileTooLarge),
+          ),
+        ),
+        reason: 'wipeTdf backup must enforce maxFileBytes via bounded read',
+      );
+      expect(
+        File('$targetPath.bak').existsSync(),
+        isFalse,
+        reason: 'Rejected oversized backup must not create partial .bak file',
+      );
+
+      // 4. Valid file within maxFileBytes writes .bak atomically with 0600 mode on POSIX.
+      File(targetPath)
+          .writeAsStringSync('tdf 0.8.0\n# backup-me\n', flush: true);
+      if (Platform.isLinux) {
+        Process.runSync('chmod', <String>['0644', targetPath]);
+      }
+      await repo.wipeTdf(createBackup: true);
+      final backupFile = File('$targetPath.bak');
+      expect(backupFile.existsSync(), isTrue);
+      expect(backupFile.readAsStringSync(), equals('tdf 0.8.0\n# backup-me\n'));
+      if (Platform.isLinux) {
+        expect(
+          backupFile.statSync().mode & 0x1FF,
+          equals(0x180),
+          reason: 'Atomic wipe backup must enforce 0600 permissions on POSIX',
+        );
+      }
+    });
+
+    test('loadTdf, saveTdf, and wipeTdf use static safe summaries instead of raw error.toString() while preserving cause', () async {
+      final workDir = Directory('${tempRoot.path}/safe_errors')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/safe_error_locks');
+
+      final diskRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'invalid_utf8.tdf'),
+        baseDirectoryPath: workDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      File(diskRepo.resolveFilePath())
+          .writeAsBytesSync(const <int>[0xFF, 0xFE, 0xFD], flush: true);
+
+      await expectLater(
+        diskRepo.loadTdf,
+        throwsA(
+          isA<LocalFileException>()
+              .having((error) => error.cause, 'cause', isA<FormatException>())
+              .having(
+                (error) => error.message,
+                'message',
+                allOf(
+                  contains('Invalid UTF-8 encoding'),
+                  isNot(contains('FormatException')),
+                  isNot(contains('Unexpected extension byte')),
+                ),
+              ),
+        ),
+        reason: 'loadTdf must not leak raw FormatException.toString() into user-facing message',
+      );
+
+      // Trigger non-FileSystemException runtime error in saveTdf and wipeTdf via unmodifiable inMemoryStore.
+      final readOnlyMemoryRepo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'unmodifiable.tdf'),
+        inMemoryStore: const <String, String>{},
+      );
+      await expectLater(
+        () => readOnlyMemoryRepo.saveTdf('tdf 0.8.0\n'),
+        throwsA(
+          isA<LocalFileException>()
+              .having((error) => error.cause, 'cause', isA<UnsupportedError>())
+              .having(
+                (error) => error.message,
+                'message',
+                allOf(
+                  contains('Unexpected storage error'),
+                  isNot(contains('UnsupportedError')),
+                  isNot(contains('unmodifiable')),
+                ),
+              ),
+        ),
+        reason: 'saveTdf must not leak raw runtime error.toString() into user-facing message',
+      );
+      await expectLater(
+        () => readOnlyMemoryRepo.wipeTdf(),
+        throwsA(
+          isA<LocalFileException>()
+              .having((error) => error.cause, 'cause', isA<UnsupportedError>())
+              .having(
+                (error) => error.message,
+                'message',
+                allOf(
+                  contains('Unexpected storage error'),
+                  isNot(contains('UnsupportedError')),
+                  isNot(contains('unmodifiable')),
+                ),
+              ),
+        ),
+        reason: 'wipeTdf must not leak raw runtime error.toString() into user-facing message',
+      );
+    });
+
+    test('LocalFileRepository async entrypoints initialize process-wide Android Context.filesDir cache before resolving relative paths', () async {
+      LocalFileRepository.resetAndroidFilesDirectoryCacheForTesting();
+      final androidFilesDir = Directory('${tempRoot.path}/first_boot_android')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/first_boot_locks');
+
+      final repo = LocalFileRepository(
+        config: const WebDavConfig(localFilePath: 'first_boot.tdf'),
+        buildProfile: AppBuildProfile.release,
+        hostLockDirectoryOverride: lockDir.path,
+        androidFilesDirectoryResolver: () async => androidFilesDir.path,
+      );
+
+      await repo.initializeIfMissing();
+      expect(
+        File(
+          '${androidFilesDir.path}${Platform.pathSeparator}tiertask'
+          '${Platform.pathSeparator}first_boot.tdf',
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: AppBuildProfile.release,
+        ),
+        equals('${androidFilesDir.path}${Platform.pathSeparator}tiertask'),
+        reason: 'LocalFileRepository async entrypoints must initialize the process-wide Android Context.filesDir cache even when run before SecureSettingsRepository',
+      );
+      expect(
+        LocalFileRepository.defaultLogFilePath(
+          buildProfile: AppBuildProfile.release,
+        ),
+        equals(
+          '${androidFilesDir.path}${Platform.pathSeparator}tiertask'
+          '${Platform.pathSeparator}tiertask.log',
+        ),
       );
     });
   });

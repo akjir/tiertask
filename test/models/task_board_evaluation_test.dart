@@ -17,18 +17,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/task_board.dart';
 import 'package:tiertask/models/task_board_evaluator.dart';
 import 'package:tiertask/models/task_item.dart';
-import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_error.dart';
 import 'package:tiertask/models/tdf_location.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 import 'package:tiertask/models/webdav_config.dart';
+import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
   const tdfService = TdfService();
-  final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
+  final fixedDate = DateTime.utc(2026, 11, 1, 12);
 
   group('TDF Section 4.3 & Section 5 Dynamic 6-Tier Derivation, Condition Inheritance & Context Filtering', () {
     test('evaluates blocking conditions, group-level label condition inheritance, task overrides, group resets, global resets, Haversine GPS, and cohesive per-label OR logic', () {
@@ -134,7 +134,7 @@ task offstrOkD2 {
 }
 ''';
 
-      final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
+      final sundayNoon = DateTime.utc(2026, 11, 1, 12);
       final boardAtNoon = tdfService.parse(
         tdfWithConditions,
         evaluationTime: sundayNoon,
@@ -171,7 +171,7 @@ task offstrOkD2 {
         reason: 'At Sunday 09:30, office time (09:00..17:00) is satisfied when day is overridden or reset',
       );
 
-      final sundayLate = DateTime.utc(2026, 11, 1, 22, 0);
+      final sundayLate = DateTime.utc(2026, 11, 1, 22);
       final boardAtLate = tdfService.parse(
         tdfWithConditions,
         evaluationTime: sundayLate,
@@ -278,7 +278,7 @@ task donunmOkD2 priority {
 }
 ''';
 
-      final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
+      final sundayNoon = DateTime.utc(2026, 11, 1, 12);
       final board = tdfService.parse(
         completedWithUnmetConditionsTdf,
         evaluationTime: sundayNoon,
@@ -320,10 +320,9 @@ task donunmOkD2 priority {
         reason: 'Section 5.1 active label pre-filtering must still filter Completed tasks by label membership',
       );
 
-      final restoredTime = DateTime.utc(2026, 11, 1, 16, 0);
+      final restoredTime = DateTime.utc(2026, 11, 1, 16);
       final restoredBoard = board.restoreTask(
         'donunmOkD2',
-        targetTier: TaskTier.planned,
         currentDate: restoredTime,
       );
       expect(
@@ -488,7 +487,7 @@ task itdoneOkD2 {
 }
 ''';
 
-      final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
+      final sundayNoon = DateTime.utc(2026, 11, 1, 12);
       final globalBoard = tdfService.parse(
         multiLabelTdf,
         evaluationTime: sundayNoon,
@@ -559,8 +558,8 @@ task itdoneOkD2 {
         reason: 'localWallClockToUtc must invert toLocalWallClock in manual timezone mode',
       );
       expect(
-        manualMinusFive.toLocalWallClock(DateTime.utc(2026, 11, 1, 2, 0)),
-        equals(DateTime.utc(2026, 10, 31, 21, 0)),
+        manualMinusFive.toLocalWallClock(DateTime.utc(2026, 11, 1, 2)),
+        equals(DateTime.utc(2026, 10, 31, 21)),
       );
 
       const wallClockTdf = '''
@@ -654,7 +653,7 @@ task suslocOkD2 {
         ],
       );
 
-      final sundayNoon = DateTime.utc(2026, 11, 1, 12, 0);
+      final sundayNoon = DateTime.utc(2026, 11, 1, 12);
       final tasks = <TaskItem>[
         TaskItem(
           id: 'tScopedOnl',
@@ -782,7 +781,7 @@ task suslocOkD2 {
         TaskBoardEvaluator.defaultDueLeadWindow,
         equals(const Duration(hours: 24)),
       );
-      final now = DateTime.utc(2026, 11, 1, 12, 0, 0);
+      final now = DateTime.utc(2026, 11, 1, 12);
       const scopedLabel = TdfLabel(
         id: 'lblScoped1',
         name: 'Private',
@@ -966,7 +965,7 @@ task suslocOkD2 {
     });
 
     test('cleans expired suspended and resolved non-recurring-to-recurring blocked directives in cleanupResolvedTaskBlocks while preserving recurring pipelines and conditions', () {
-      final now = DateTime.utc(2026, 11, 1, 12, 0, 0);
+      final now = DateTime.utc(2026, 11, 1, 12);
       final doneNonRec = TaskItem(
         id: 'preNonRec1',
         title: 'Completed Non-Recurring Prereq',
@@ -990,10 +989,10 @@ task suslocOkD2 {
         suspendedAt: now,
         suspendedNote: 'Expired at exact now',
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'preNonRec1', requiredCompletion: 1),
-          TdfTaskDependency(taskId: 'preRec0001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'preNonRec1'),
+          TdfTaskDependency(taskId: 'preRec0001'),
           TdfTaskDependency(taskId: 'delPrereq1', requiredCompletion: 5),
-          TdfTaskDependency(taskId: 'fwdUnknown', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'fwdUnknown'),
         ],
         conditions: <TaskCondition>[
           DayTaskCondition.fromWeekdays(const <int>[1]),
@@ -1006,7 +1005,7 @@ task suslocOkD2 {
         modifiedAt: now.subtract(const Duration(minutes: 10)),
         suspendedAt: now.subtract(const Duration(seconds: 1)),
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'preRec0001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'preRec0001'),
         ],
         repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
       );
@@ -1033,7 +1032,6 @@ task suslocOkD2 {
           TdfDeletedTaskRecord(
             taskId: 'delPrereq1',
             deletedAt: now.subtract(const Duration(minutes: 5)),
-            completionsCheckpoint: 0,
           ),
         ],
       );
@@ -1080,7 +1078,7 @@ task suslocOkD2 {
       expect(
         cleanedDep.dependencies,
         equals(const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'fwdUnknown', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'fwdUnknown'),
         ]),
         reason: 'Must strip satisfied non-rec, satisfied rec->non-rec, and tombstoned deps while keeping unknown forward ref',
       );
@@ -1100,7 +1098,7 @@ task suslocOkD2 {
       expect(
         cleanedRecDep.dependencies,
         equals(const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'preRec0001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'preRec0001'),
         ]),
         reason: 'Recurring-to-recurring dependency must be preserved across cleanup',
       );
@@ -1147,7 +1145,7 @@ task suslocOkD2 {
 
   group('TDF 0.8.0 TimeZoneContextRequired (TDF-CTX-001) & Condition Context Resolution', () {
     test('throws TdfContextException(timeZoneContextRequired) on queued open tasks reaching day/time conditions when timeZone is unavailable while allowing non-reaching tasks', () {
-      final nowUtc = DateTime.utc(2026, 11, 2, 10, 0);
+      final nowUtc = DateTime.utc(2026, 11, 2, 10);
       const missingZone = TdfTimeZoneContext.missing('Mars/Phobos');
       final unknownNamedZone = TdfTimeZoneContext.named('Unknown/Zone');
       expect(unknownNamedZone.isAvailable, isFalse);
@@ -1276,7 +1274,7 @@ task suslocOkD2 {
         title: 'Prerequisite-Blocked With Time',
         createdAt: nowUtc,
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'preOpen001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'preOpen001'),
         ],
         conditions: <TaskCondition>[timeRule],
       );
@@ -1379,7 +1377,7 @@ task suslocOkD2 {
 
   group('Dependency cycle reverse-reachability index', () {
     test('collectCycleCreatingPrerequisiteIds matches wouldCreateDependencyCycle across chains, diamonds, completed nodes, dangling IDs, and blank input', () {
-      final now = DateTime.utc(2026, 11, 10, 12, 0);
+      final now = DateTime.utc(2026, 11, 10, 12);
       final root = TaskItem(
         id: 'tskRoot001',
         title: 'Root',
@@ -1486,7 +1484,7 @@ task suslocOkD2 {
     test(
       'collectCycleCreatingPrerequisiteIds scales linearly on a 400-task chain',
       () {
-        final now = DateTime.utc(2026, 11, 10, 12, 0);
+        final now = DateTime.utc(2026, 11, 10, 12);
         final tasks = <TaskItem>[
           for (var i = 0; i < 400; i++)
             TaskItem(
@@ -1517,5 +1515,381 @@ task suslocOkD2 {
         );
       },
     );
+
+    test('eval.blocked debug logging resolves locationIds via locationMap and omits metrics for unknown location IDs without leaking coordinates', () {
+      final now = DateTime.utc(2026, 11, 10, 12);
+      AppLogger.resetForTesting(clock: () => now);
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.debug,
+        persistToDisk: false,
+      );
+      addTearDown(AppLogger.resetForTesting);
+
+      const munich = TdfLocation(
+        id: 'locMun0001',
+        name: 'Munich Office',
+        latitude: 48.137154,
+        longitude: 11.576124,
+        radius: 250.0,
+      );
+      const currentLat = 48.146154;
+      const currentLon = 11.576124;
+      final expectedDistance = LocationTaskCondition.haversineDistanceMeters(
+        currentLat,
+        currentLon,
+        munich.latitude,
+        munich.longitude,
+      ).round();
+
+      TaskBoard.evaluate(
+        locations: const <TdfLocation>[munich],
+        tasks: <TaskItem>[
+          TaskItem(
+            id: 'tskMun0001',
+            title: 'Secret Munich Task',
+            createdAt: now,
+            conditions: const <TaskCondition>[
+              LocationTaskCondition(locationIds: <String>['locMun0001']),
+            ],
+          ),
+          TaskItem(
+            id: 'tskMis0001',
+            title: 'Task With Missing Location ID',
+            createdAt: now,
+            conditions: const <TaskCondition>[
+              LocationTaskCondition(locationIds: <String>['locMiss001']),
+            ],
+          ),
+        ],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now,
+          taskIds: const <String>['tskMun0001', 'tskMis0001'],
+        ),
+        evaluationTime: now,
+        currentLatitude: currentLat,
+        currentLongitude: currentLon,
+      );
+
+      final munichLine = AppLogger.lines.firstWhere(
+        (line) =>
+            line.contains('eval.blocked |') && line.contains('id=tskMun0001'),
+      );
+      expect(
+        munichLine,
+        contains('distance_m=$expectedDistance'),
+        reason: 'eval.blocked must log Haversine distance against resolved TdfLocation rather than (0, 0)',
+      );
+      expect(
+        munichLine,
+        contains('radius_m=250'),
+        reason: 'eval.blocked must log resolved TdfLocation radius',
+      );
+      expect(
+        munichLine,
+        isNot(contains('48.137154')),
+        reason: 'eval.blocked must never log raw coordinates',
+      );
+
+      final missingLine = AppLogger.lines.firstWhere(
+        (line) =>
+            line.contains('eval.blocked |') && line.contains('id=tskMis0001'),
+      );
+      expect(
+        missingLine,
+        contains('reason=condition'),
+        reason:
+            'Missing location ID must still log eval.blocked without crashing',
+      );
+      expect(
+        missingLine,
+        isNot(contains('distance_m=')),
+        reason: 'Missing location ID must omit distance_m',
+      );
+      expect(
+        missingLine,
+        isNot(contains('radius_m=')),
+        reason: 'Missing location ID must omit radius_m',
+      );
+    });
+
+    test('domain mutation logs emit canonical event names directly and never leak task titles or label names', () {
+      final now = DateTime.utc(2026, 11, 10, 12);
+      AppLogger.resetForTesting(clock: () => now);
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.info,
+        persistToDisk: false,
+      );
+      addTearDown(AppLogger.resetForTesting);
+
+      var board = TaskBoard.empty()
+          .addLabel(
+            'ConfidentialLabelAlpha',
+            currentDate: now,
+            id: 'lblSec0001',
+          )
+          .updateLabel(
+            'lblSec0001',
+            name: 'ConfidentialLabelBeta',
+            currentDate: now.add(const Duration(seconds: 5)),
+          )
+          .addTask(
+            'ConfidentialTaskTitleOne',
+            currentDate: now.add(const Duration(seconds: 10)),
+            id: 'tskSec0001',
+          )
+          .updateTask(
+            'tskSec0001',
+            title: 'ConfidentialTaskTitleTwo',
+            currentDate: now.add(const Duration(seconds: 15)),
+          );
+
+      expect(board.labels.single.name, equals('ConfidentialLabelBeta'));
+      expect(board.allTasks.single.title, equals('ConfidentialTaskTitleTwo'));
+
+      final logText = AppLogger.fullLogText;
+      expect(
+        logText,
+        contains('[INFO ] [DOMAIN   ] label.add | id=lblSec0001 '),
+        reason: 'addLabel must emit canonical label.add event',
+      );
+      expect(
+        logText,
+        contains('[INFO ] [DOMAIN   ] label.update | id=lblSec0001 '),
+        reason: 'updateLabel must emit canonical label.update event',
+      );
+      expect(
+        logText,
+        contains('[INFO ] [DOMAIN   ] task.add | id=tskSec0001 '),
+        reason: 'addTask must emit canonical task.add event',
+      );
+      expect(
+        logText,
+        contains('[INFO ] [DOMAIN   ] task.update | id=tskSec0001 '),
+        reason: 'updateTask must emit canonical task.update event',
+      );
+      for (final sensitive in const <String>[
+        'ConfidentialLabelAlpha',
+        'ConfidentialLabelBeta',
+        'ConfidentialTaskTitleOne',
+        'ConfidentialTaskTitleTwo',
+      ]) {
+        expect(
+          logText,
+          isNot(contains(sensitive)),
+          reason: 'Domain mutation logs must never leak "$sensitive"',
+        );
+      }
+    });
+  });
+
+  group('Wave 2B Structural Equality, Batch Tombstone Recording & Zero-Copy Normalization', () {
+    test('TaskBoard implements structural operator == and hashCode across all slices and unevaluated boards', () {
+      final now = DateTime.utc(2026, 11, 15, 12);
+      const label = TdfLabel(id: 'lblEq00001', name: 'Work');
+      const location = TdfLocation(
+        id: 'locEq00001',
+        name: 'Office',
+        latitude: 48.137154,
+        longitude: 11.576124,
+        radius: 150,
+      );
+      final task = TaskItem(
+        id: 'tskEq00001',
+        title: 'Task Alpha',
+        createdAt: now,
+        labelIds: const <String>['lblEq00001'],
+      );
+      final queue = TdfQueueBlock(
+        modifiedAt: now,
+        taskIds: const <String>['tskEq00001'],
+      );
+      final deleted = TdfDeletedBlock(
+        generation: 1,
+        tasks: <TdfDeletedTaskRecord>[
+          TdfDeletedTaskRecord(taskId: 'delEq00001', deletedAt: now),
+        ],
+      );
+
+      final boardA = TaskBoard.evaluate(
+        tasks: <TaskItem>[task],
+        labels: const <TdfLabel>[label],
+        locations: const <TdfLocation>[location],
+        queueBlock: queue,
+        deletedBlock: deleted,
+        evaluationTime: now,
+      );
+      final boardB = TaskBoard.evaluate(
+        tasks: <TaskItem>[task],
+        labels: const <TdfLabel>[label],
+        locations: const <TdfLocation>[location],
+        queueBlock: queue,
+        deletedBlock: deleted,
+        evaluationTime: now,
+      );
+
+      expect(boardA, equals(boardB));
+      expect(boardA.hashCode, equals(boardB.hashCode));
+      expect(
+        boardA,
+        isNot(equals(boardA.copyWith(deletedBlock: TdfDeletedBlock.empty))),
+      );
+      expect(
+        boardA,
+        isNot(equals(boardA.copyWith(labels: const <TdfLabel>[]))),
+      );
+      expect(
+        boardA,
+        isNot(equals(boardA.copyWith(locations: const <TdfLocation>[]))),
+      );
+
+      final unevaluatedA = TaskBoard.unevaluated(tasks: <TaskItem>[task]);
+      final unevaluatedB = TaskBoard.unevaluated(tasks: <TaskItem>[task]);
+      final unevaluatedEmpty = TaskBoard.unevaluated(tasks: const <TaskItem>[]);
+      expect(unevaluatedA, equals(unevaluatedB));
+      expect(unevaluatedA.hashCode, equals(unevaluatedB.hashCode));
+      expect(unevaluatedA, isNot(equals(unevaluatedEmpty)));
+    });
+
+    test('TaskBoardEvaluator.recordTaskDeletions merges batches in one pass and enforces maxTdfDeletedRecords', () {
+      final now = DateTime.utc(2026, 11, 15, 12);
+      final initial = TdfDeletedBlock(
+        generation: 2,
+        tasks: <TdfDeletedTaskRecord>[
+          TdfDeletedTaskRecord(
+            taskId: 'tskBatch02',
+            deletedAt: now,
+            completionsCheckpoint: 1,
+          ),
+        ],
+      );
+
+      expect(
+        identical(
+          TaskBoardEvaluator.recordTaskDeletions(
+            initial,
+            const <TdfDeletedTaskRecord>[],
+          ),
+          initial,
+        ),
+        isTrue,
+        reason: 'Empty batch must return identical TdfDeletedBlock',
+      );
+
+      final merged = TaskBoardEvaluator.recordTaskDeletions(
+        initial,
+        <TdfDeletedTaskRecord>[
+          TdfDeletedTaskRecord(
+            taskId: 'tskBatch03',
+            deletedAt: now.add(const Duration(seconds: 5)),
+          ),
+          TdfDeletedTaskRecord(
+            taskId: 'tskBatch02',
+            deletedAt: now.add(const Duration(seconds: 10)),
+            completionsCheckpoint: 3,
+          ),
+          TdfDeletedTaskRecord(
+            taskId: 'tskBatch01',
+            deletedAt: now.add(const Duration(seconds: 1)),
+          ),
+        ],
+      );
+      expect(merged.generation, equals(2));
+      expect(
+        merged.tasks.map((record) => record.taskId).toList(),
+        equals(const <String>['tskBatch01', 'tskBatch02', 'tskBatch03']),
+      );
+      expect(
+        merged.findTaskRecord('tskBatch02')?.completionsCheckpoint,
+        equals(3),
+      );
+
+      final fullBlock = TdfDeletedBlock(
+        generation: 1,
+        tasks: <TdfDeletedTaskRecord>[
+          for (var i = 0; i < maxTdfDeletedRecords; i++)
+            TdfDeletedTaskRecord(
+              taskId: 'DEL${i.toString().padLeft(7, '0')}',
+              deletedAt: now,
+            ),
+        ],
+      );
+      expect(
+        () => TaskBoardEvaluator.recordTaskDeletions(
+          fullBlock,
+          <TdfDeletedTaskRecord>[
+            TdfDeletedTaskRecord(taskId: 'OVR0000001', deletedAt: now),
+          ],
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+    });
+
+    test('TaskBoardEvaluator.evaluate and normalizeTierSlices preserve identical instances for already-normalized tasks', () {
+      final now = DateTime.utc(2026, 11, 15, 12);
+      const scopedLabel = TdfLabel(
+        id: 'lblScp0001',
+        name: 'Scoped',
+        isScoped: true,
+      );
+      final focusTask = TaskItem(
+        id: 'tskFoc0001',
+        title: 'Focus task',
+        createdAt: now,
+      );
+      final blockedTask = TaskItem(
+        id: 'tskBlk0001',
+        title: 'Blocked task',
+        createdAt: now,
+        isSuspendedForever: true,
+      );
+      final somedayTask = TaskItem(
+        id: 'tskSom0001',
+        title: 'Someday task',
+        createdAt: now,
+      );
+      final completedTask = TaskItem(
+        id: 'tskCmp0001',
+        title: 'Completed task',
+        createdAt: now,
+        isCompleted: true,
+        completedAt: now,
+      );
+      final hiddenOpenTask = TaskItem(
+        id: 'tskHid0001',
+        title: 'Hidden open task',
+        createdAt: now,
+        labelIds: const <String>['lblScp0001'],
+      );
+
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          focusTask,
+          blockedTask,
+          somedayTask,
+          completedTask,
+          hiddenOpenTask,
+        ],
+        labels: const <TdfLabel>[scopedLabel],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: now,
+          taskIds: const <String>['tskFoc0001', 'tskBlk0001'],
+        ),
+        evaluationTime: now,
+      );
+
+      expect(identical(board.focus.single, focusTask), isTrue);
+      expect(identical(board.blocked.single, blockedTask), isTrue);
+      expect(identical(board.someday.single, somedayTask), isTrue);
+      expect(identical(board.completed.single, completedTask), isTrue);
+      expect(identical(board.findTask('tskHid0001'), hiddenOpenTask), isTrue);
+    });
   });
 }

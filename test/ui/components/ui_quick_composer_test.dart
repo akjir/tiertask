@@ -279,7 +279,6 @@ void main() {
                 compactTriggerLabel: '+ New task',
                 compactCloseTooltip: 'Close composer',
                 modeHint: 'Append at the end of the active queue.',
-                isCollapsibleOnCompact: true,
                 onSubmit: () {},
               ),
             ],
@@ -320,6 +319,140 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('+ New task'), findsOneWidget);
         expect(find.text('New task...'), findsNothing);
+      },
+    );
+
+    testWidgets(
+      'defers internal FocusNode disposal when external focusNode attaches after mount',
+      (tester) async {
+        final controller = TextEditingController();
+        final externalFocusNode = FocusNode();
+        addTearDown(() {
+          controller.dispose();
+          externalFocusNode.dispose();
+        });
+
+        var useExternalFocus = false;
+        late StateSetter rebuildHost;
+
+        await pumpUiWidget(
+          tester,
+          StatefulBuilder(
+            builder: (context, setState) {
+              rebuildHost = setState;
+              return UiQuickComposer(
+                controller: controller,
+                focusNode: useExternalFocus ? externalFocusNode : null,
+                placeholder: 'New task...',
+                submitLabel: 'Add',
+                onSubmit: () {},
+              );
+            },
+          ),
+          surfaceSize: const Size(1024, 800),
+        );
+
+        await tester.tap(find.byType(TextField));
+        await tester.enterText(find.byType(TextField), 'Draft title');
+        await tester.pump();
+
+        rebuildHost(() => useExternalFocus = true);
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Attaching an external FocusNode must defer disposal of the previous internal FocusNode',
+        );
+        externalFocusNode.requestFocus();
+        await tester.pump();
+        expect(externalFocusNode.hasFocus, isTrue);
+      },
+    );
+
+    testWidgets(
+      'guards OverlayPortalController on compact collapsed mount and across desktop-compact resizes',
+      (tester) async {
+        final controller = TextEditingController();
+        addTearDown(() {
+          controller.dispose();
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        var popoverOpen = true;
+        late StateSetter rebuildHost;
+
+        tester.view.devicePixelRatio = 1.0;
+        tester.view.physicalSize = const Size(390, 800);
+
+        await pumpUiWidget(
+          tester,
+          StatefulBuilder(
+            builder: (context, setState) {
+              rebuildHost = setState;
+              return Align(
+                alignment: Alignment.bottomCenter,
+                child: UiQuickComposer(
+                  controller: controller,
+                  placeholder: 'New task...',
+                  submitLabel: 'Add',
+                  compactTriggerLabel: '+ New task',
+                  isPopoverOpen: popoverOpen,
+                  popoverContent: const Padding(
+                    padding: EdgeInsets.all(12.0),
+                    child: Text('Popover Picker Body'),
+                  ),
+                  onSubmit: () {},
+                ),
+              );
+            },
+          ),
+          surfaceSize: const Size(390, 800),
+        );
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Mounting compact collapsed with isPopoverOpen=true must not call show() on unmounted OverlayPortal',
+        );
+        expect(find.text('+ New task'), findsOneWidget);
+        expect(find.text('Popover Picker Body'), findsNothing);
+
+        // Resize to desktop while popover remains open: OverlayPortal mounts and shows popover.
+        tester.view.physicalSize = const Size(1280, 800);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(
+          find.text('Popover Picker Body'),
+          findsOneWidget,
+          reason: 'Resizing from compact collapsed to desktop with isPopoverOpen=true must show popover',
+        );
+
+        // Resize back to compact collapsed: OverlayPortal unmounts cleanly without assertion.
+        tester.view.physicalSize = const Size(390, 800);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('+ New task'), findsOneWidget);
+        expect(find.text('Popover Picker Body'), findsNothing);
+
+        // Resize back to desktop again while popover remains open: OverlayPortal re-syncs cleanly.
+        tester.view.physicalSize = const Size(1280, 800);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(
+          find.text('Popover Picker Body'),
+          findsOneWidget,
+          reason: 'Resizing desktop -> compact collapsed -> desktop with isPopoverOpen=true must re-show popover cleanly',
+        );
+
+        // Return to compact collapsed and close popover while unmounted.
+        tester.view.physicalSize = const Size(390, 800);
+        await tester.pumpAndSettle();
+        rebuildHost(() => popoverOpen = false);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
       },
     );
   });

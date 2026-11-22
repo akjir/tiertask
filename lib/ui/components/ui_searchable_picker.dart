@@ -22,6 +22,12 @@ import '../primitives/ui_pill.dart';
 import '../tokens/ui_theme_tokens.dart';
 import '../tokens/ui_typography_tokens.dart';
 
+/// Minimum desktop picker row height (`36px`) used to switch bounded lists into lazy virtualization.
+const double _desktopMinRowHeight = 36.0;
+
+/// Combined top and bottom padding inside the picker `ListView.builder`.
+const double _listVerticalPadding = 8.0;
+
 /// Selection behavior for [UiSearchablePicker].
 enum UiPickerSelectionMode {
   /// Multi-select listbox with `16x16px` checkboxes (Labels, Prerequisites).
@@ -346,9 +352,16 @@ class _UiSearchablePickerState<T> extends State<UiSearchablePicker<T>> {
       );
     }
 
+    final maxListHeight = widget.maxListHeight;
+    final virtualizeDesktop =
+        !widget.isCompactSheet &&
+        maxListHeight != null &&
+        totalRows * _desktopMinRowHeight + _listVerticalPadding >=
+            maxListHeight;
+
     final listView = ListView.builder(
       controller: widget.scrollController,
-      shrinkWrap: !widget.isCompactSheet,
+      shrinkWrap: !widget.isCompactSheet && !virtualizeDesktop,
       padding: const EdgeInsets.all(4.0),
       itemCount: totalRows,
       itemBuilder: (context, index) {
@@ -379,9 +392,12 @@ class _UiSearchablePickerState<T> extends State<UiSearchablePicker<T>> {
       },
     );
 
-    if (!widget.isCompactSheet && widget.maxListHeight != null) {
+    if (!widget.isCompactSheet && maxListHeight != null) {
+      if (virtualizeDesktop) {
+        return SizedBox(height: maxListHeight, child: listView);
+      }
       return ConstrainedBox(
-        constraints: BoxConstraints(maxHeight: widget.maxListHeight ?? 224.0),
+        constraints: BoxConstraints(maxHeight: maxListHeight),
         child: listView,
       );
     }
@@ -647,7 +663,7 @@ class _UiPickerOptionRow<T> extends StatelessWidget {
             ),
             if (option.badgeLabel case final badge?) ...<Widget>[
               const SizedBox(width: 6.0),
-              UiPill(label: badge, variant: UiPillVariant.badge),
+              UiPill(label: badge),
             ],
             if (option.countLabel case final count?) ...<Widget>[
               const SizedBox(width: 6.0),

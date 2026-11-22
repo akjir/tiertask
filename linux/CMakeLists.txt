@@ -40,10 +40,24 @@ endif()
 # default. In most cases, you should add new options to specific targets instead
 # of modifying this function.
 function(APPLY_STANDARD_SETTINGS TARGET)
-  target_compile_features(${TARGET} PUBLIC cxx_std_14)
+  target_compile_features(${TARGET} PUBLIC cxx_std_17)
   target_compile_options(${TARGET} PRIVATE -Wall -Werror)
-  target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
+  target_compile_options(${TARGET} PRIVATE
+    "$<$<NOT:$<CONFIG:Debug>>:-O3>"
+    "$<$<NOT:$<CONFIG:Debug>>:-fstack-protector-strong>"
+    "$<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>"
+    "$<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=2>"
+  )
   target_compile_definitions(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:NDEBUG>")
+  target_link_options(${TARGET} PRIVATE
+    "$<$<NOT:$<CONFIG:Debug>>:-Wl,-z,relro,-z,now>"
+    "$<$<NOT:$<CONFIG:Debug>>:-Wl,-z,noexecstack>"
+  )
+  get_target_property(_target_type ${TARGET} TYPE)
+  if(_target_type STREQUAL "EXECUTABLE")
+    target_compile_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-fPIE>")
+    target_link_options(${TARGET} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-pie>")
+  endif()
 endfunction()
 
 # Flutter library and tool build rules.

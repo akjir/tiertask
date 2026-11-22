@@ -15,7 +15,7 @@
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/services.dart';
@@ -39,8 +39,8 @@ class _TrackingFakeSecureStorage extends FlutterSecureStorage {
   final List<String> writeKeys = <String>[];
   final List<String> deleteKeys = <String>[];
 
-  Object? Function(String key)? readErrorForKey;
-  Object? Function(String key, String? value)? writeErrorForKey;
+  Exception? Function(String key)? readErrorForKey;
+  Exception? Function(String key, String? value)? writeErrorForKey;
 
   void resetCounts() {
     readKeys.clear();
@@ -92,91 +92,6 @@ class _TrackingFakeSecureStorage extends FlutterSecureStorage {
       store[key] = value;
     }
   }
-}
-
-/// Test-only TTW v2 encoder for legacy migration fixtures.
-Uint8List _encodeLegacyTtwV2(
-  List<AppWorkspace> workspaces, {
-  required String activeId,
-  int versionByte = 0x02,
-}) {
-  var activeIndex = 0;
-  final builder = BytesBuilder(copy: false)
-    ..add(<int>[0x54, 0x54, 0x57, versionByte, workspaces.length, 0]);
-  for (var i = 0; i < workspaces.length; i++) {
-    final workspace = workspaces[i];
-    if (workspace.id == activeId) {
-      activeIndex = i;
-    }
-    final config = workspace.config;
-    final storageId = switch (config.storageMode) {
-      StorageMode.local => 0,
-      StorageMode.webdav => 1,
-      StorageMode.both => 2,
-    };
-    final langId = switch (config.language) {
-      AppLanguage.system => 0,
-      AppLanguage.english => 1,
-      AppLanguage.german => 2,
-    };
-    final themeId = switch (config.themeMode) {
-      AppThemeMode.system => 0,
-      AppThemeMode.light => 1,
-      AppThemeMode.dark => 2,
-    };
-    final paletteId = switch (config.themePalette) {
-      AppThemePalette.calm => 0,
-      AppThemePalette.plumUmber => 1,
-    };
-    final dueLeadId = switch (config.dueLeadWindow) {
-      DueLeadWindow.off => 0,
-      DueLeadWindow.atDue => 1,
-      DueLeadWindow.hours12 => 2,
-      DueLeadWindow.hours24 => 3,
-      DueLeadWindow.hours48 => 4,
-      DueLeadWindow.days7 => 5,
-    };
-    final remoteLog = config.logStorageMode == StorageMode.local ? 0 : 1;
-    final flags =
-        (storageId & 0x03) |
-        ((langId & 0x03) << 2) |
-        ((themeId & 0x03) << 4) |
-        ((paletteId & 0x01) << 6) |
-        (remoteLog << 7);
-    builder.addByte(flags);
-    for (final field in <String>[
-      workspace.id,
-      workspace.name,
-      config.serverUrl,
-      config.username,
-      config.password,
-      config.filePath,
-      config.localFilePath,
-    ]) {
-      final encoded = utf8.encode(field);
-      builder
-        ..addByte((encoded.length >> 8) & 0xFF)
-        ..addByte(encoded.length & 0xFF)
-        ..add(encoded);
-    }
-    final tzMode = config.timeZoneMode == AppTimeZoneMode.manual ? 1 : 0;
-    final offsetField =
-        config.manualTimeZoneOffsetMinutes - WebDavConfig.minUtcOffsetMinutes;
-    final tzWord =
-        (tzMode << 15) |
-        ((config.locationEnabled ? 1 : 0) << 14) |
-        ((config.diagnosticsEnabled ? 1 : 0) << 13) |
-        (offsetField & 0x07FF);
-    builder
-      ..addByte((tzWord >> 8) & 0xFF)
-      ..addByte(tzWord & 0xFF);
-    if (versionByte == 0x02) {
-      builder.addByte(dueLeadId);
-    }
-  }
-  final result = builder.toBytes();
-  result[5] = activeIndex;
-  return result;
 }
 
 void main() {
@@ -344,10 +259,7 @@ void main() {
       await repository.createWorkspace('Arbeit');
       await expectLater(
         () => repository.saveConfig(
-          const WebDavConfig(
-            localFilePath: 'arbeit.tdf',
-            filePath: 'tasks.tdf',
-          ),
+          const WebDavConfig(localFilePath: 'arbeit.tdf'),
         ),
         throwsA(
           isA<WorkspaceException>().having(
@@ -406,8 +318,6 @@ void main() {
           serverUrl: 'https://cloud.example.com',
           username: 'alice',
           password: secretPassword,
-          filePath: 'tasks.tdf',
-          localFilePath: 'tasks.tdf',
           storageMode: StorageMode.both,
           language: AppLanguage.german,
           themeMode: AppThemeMode.dark,
@@ -442,8 +352,15 @@ void main() {
       // Inject unknown root and workspace fields into settings.json to verify lossless preservation:
       final decodedMap = jsonDecode(rawJson) as Map<String, Object?>;
       decodedMap['futureRootMeta'] = <String, Object?>{'v': 2};
-      final wsList = decodedMap['workspaces'] as List<Object?>;
-      (wsList.first as Map<String, Object?>)['futureWorkspaceMeta'] = 'keep-me';
+      final rawWsList = decodedMap['workspaces'];
+      expect(rawWsList, isA<List<Object?>>());
+      if (rawWsList is List<Object?>) {
+        final rawFirstWs = rawWsList.first;
+        expect(rawFirstWs, isA<Map<String, Object?>>());
+        if (rawFirstWs is Map<String, Object?>) {
+          rawFirstWs['futureWorkspaceMeta'] = 'keep-me';
+        }
+      }
       settingsFile.writeAsStringSync('${jsonEncode(decodedMap)}\n');
 
       final reloadedRepository = SecureSettingsRepository(
@@ -466,10 +383,15 @@ void main() {
         afterRenameJson['futureRootMeta'],
         equals(<String, Object?>{'v': 2}),
       );
-      final afterRenameWs =
-          (afterRenameJson['workspaces'] as List<Object?>).first
-              as Map<String, Object?>;
-      expect(afterRenameWs['futureWorkspaceMeta'], equals('keep-me'));
+      final rawAfterRenameWorkspaces = afterRenameJson['workspaces'];
+      expect(rawAfterRenameWorkspaces, isA<List<Object?>>());
+      if (rawAfterRenameWorkspaces is List<Object?>) {
+        final rawFirstAfterRename = rawAfterRenameWorkspaces.first;
+        expect(rawFirstAfterRename, isA<Map<String, Object?>>());
+        if (rawFirstAfterRename is Map<String, Object?>) {
+          expect(rawFirstAfterRename['futureWorkspaceMeta'], equals('keep-me'));
+        }
+      }
 
       // Create second workspace with password, then delete it and verify password + sync cleanup:
       await reloadedRepository.createWorkspace(
@@ -750,30 +672,17 @@ void main() {
       expect(recoveryRepo.takeLastRecoveryNotice(), isNull);
     });
 
-    test('quarantines corrupt primary and backup, writes initial settings.json without triggering legacy migration, and handles missing primary with valid backup', () async {
+    test('quarantines corrupt primary and backup, writes initial settings.json without reading keyring, and handles missing primary with valid backup', () async {
       final settingsDir = Directory('${tempRoot.path}/double_corrupt')
         ..createSync(recursive: true);
       final lockDir = Directory('${tempRoot.path}/locks')
         ..createSync(recursive: true);
-      // Seed a legacy TTW v2 key that MUST NOT be invoked when settings files existed:
-      final legacyV2 = _encodeLegacyTtwV2(const <AppWorkspace>[
-        AppWorkspace(
-          id: 'legacy_ws',
-          name: 'Legacy',
-          config: WebDavConfig(
-            localFilePath: 'legacy.tdf',
-            filePath: 'legacy.tdf',
-          ),
-        ),
-      ], activeId: 'legacy_ws');
-      final fakeStorage = _TrackingFakeSecureStorage(<String, String>{
-        't2_settings_v1': const Base64Service().encodeBytes(legacyV2),
-      });
+      final fakeStorage = _TrackingFakeSecureStorage();
       final primaryFile = File('${settingsDir.path}/settings.json')
         ..writeAsStringSync('not-json-primary');
       final backupFile = File('${settingsDir.path}/settings.json.bak')
         ..writeAsStringSync('not-json-backup');
-      final fixedUtc = DateTime.utc(2026, 11, 20, 15, 0, 0);
+      final fixedUtc = DateTime.utc(2026, 11, 20, 15);
 
       final repository = SecureSettingsRepository(
         storage: fakeStorage,
@@ -786,7 +695,7 @@ void main() {
       expect(
         workspace,
         equals(AppWorkspace.defaultWorkspace),
-        reason: 'Double-corrupt recovery must reset to default workspace without invoking legacy migration',
+        reason: 'Double-corrupt recovery must reset to default workspace',
       );
       expect(
         primaryFile.existsSync(),
@@ -806,8 +715,7 @@ void main() {
       expect(
         fakeStorage.readKeys,
         isEmpty,
-        reason:
-            'Legacy TTW v2 key must not be read when settings files existed',
+        reason: 'Double-corrupt recovery must not query secure storage',
       );
       expect(
         repository.takeLastRecoveryNotice()?.kind,
@@ -989,168 +897,7 @@ void main() {
     });
   });
 
-  group('SecureSettingsRepository Legacy TTW v2 Migration, Android filesDir & Sync State', () {
-    test('migrates TTW\\x02 once with password split and verified readback, rejects TTW\\x01, and handles cleanup/keyring errors', () async {
-      final settingsDir = Directory('${tempRoot.path}/migration_ok')
-        ..createSync(recursive: true);
-      final lockDir = Directory('${tempRoot.path}/locks')
-        ..createSync(recursive: true);
-      final legacyWorkspaces = <AppWorkspace>[
-        const AppWorkspace(
-          id: 'tasks',
-          name: 'Tasks',
-          config: WebDavConfig(
-            serverUrl: 'https://cloud.example.com',
-            username: 'alice',
-            password: 'migrated-secret-password',
-            filePath: 'tasks.tdf',
-            localFilePath: 'tasks.tdf',
-            storageMode: StorageMode.both,
-            language: AppLanguage.german,
-            dueLeadWindow: DueLeadWindow.hours48,
-          ),
-        ),
-        const AppWorkspace(
-          id: 'privat',
-          name: 'Privat',
-          config: WebDavConfig(
-            filePath: 'privat.tdf',
-            localFilePath: 'privat.tdf',
-            storageMode: StorageMode.local,
-          ),
-        ),
-      ];
-      final v2Encoded = const Base64Service().encodeBytes(
-        _encodeLegacyTtwV2(legacyWorkspaces, activeId: 'tasks'),
-      );
-      final fakeStorage = _TrackingFakeSecureStorage(<String, String>{
-        't2_settings_v1': v2Encoded,
-      });
-
-      final repository = SecureSettingsRepository(
-        storage: fakeStorage,
-        buildProfile: AppBuildProfile.release,
-        settingsDirectoryPath: settingsDir.path,
-        hostLockDirectoryOverride: lockDir.path,
-      );
-      final migrated = await repository.loadActiveWorkspace();
-      expect(migrated, equals(legacyWorkspaces.first));
-      expect(
-        fakeStorage.store['t2_webdav_pw_tasks'],
-        equals('migrated-secret-password'),
-      );
-      expect(
-        fakeStorage.store.containsKey('t2_webdav_pw_privat'),
-        isFalse,
-        reason: 'Workspace without password must not create a keyring entry',
-      );
-      expect(
-        fakeStorage.store.containsKey('t2_settings_v1'),
-        isFalse,
-        reason: 'Legacy t2_settings_v1 must be removed after verified settings.json write-and-readback',
-      );
-      final settingsText = File('${settingsDir.path}/settings.json')
-          .readAsStringSync();
-      expect(settingsText.contains('migrated-secret-password'), isFalse);
-
-      // Failed password write during migration must leave t2_settings_v1 intact:
-      final failedDir = Directory('${tempRoot.path}/migration_fail')
-        ..createSync(recursive: true);
-      final failingStorage = _TrackingFakeSecureStorage(<String, String>{
-        't2_settings_v1': v2Encoded,
-      })..writeErrorForKey = (key, value) => PlatformException(code: 'IO_ERR');
-      final failingRepo = SecureSettingsRepository(
-        storage: failingStorage,
-        buildProfile: AppBuildProfile.release,
-        settingsDirectoryPath: failedDir.path,
-        hostLockDirectoryOverride: lockDir.path,
-      );
-      await expectLater(
-        () => failingRepo.loadActiveWorkspace(),
-        throwsA(
-          isA<WorkspaceException>().having(
-            (error) => error.kind,
-            'kind',
-            WorkspaceErrorKind.credentialStorageUnavailable,
-          ),
-        ),
-      );
-      expect(
-        failingStorage.store['t2_settings_v1'],
-        equals(v2Encoded),
-        reason:
-            'Aborted migration must leave t2_settings_v1 untouched for retry',
-      );
-      expect(File('${failedDir.path}/settings.json').existsSync(), isFalse);
-
-      // TTW\x01 payload is rejected without deleting t2_settings_v1:
-      final v1Dir = Directory('${tempRoot.path}/migration_v1')
-        ..createSync(recursive: true);
-      final v1Encoded = const Base64Service().encodeBytes(
-        _encodeLegacyTtwV2(
-          const <AppWorkspace>[AppWorkspace.defaultWorkspace],
-          activeId: 'tasks',
-          versionByte: 0x01,
-        ),
-      );
-      final v1Storage = _TrackingFakeSecureStorage(<String, String>{
-        't2_settings_v1': v1Encoded,
-      });
-      final v1Repo = SecureSettingsRepository(
-        storage: v1Storage,
-        buildProfile: AppBuildProfile.release,
-        settingsDirectoryPath: v1Dir.path,
-        hostLockDirectoryOverride: lockDir.path,
-      );
-      expect(
-        await v1Repo.loadActiveWorkspace(),
-        equals(AppWorkspace.defaultWorkspace),
-      );
-      expect(
-        v1Storage.store['t2_settings_v1'],
-        equals(v1Encoded),
-        reason: 'Rejected TTW\\x01 payload must not delete t2_settings_v1',
-      );
-
-      // Cleanup failure after verified write logs warning and still returns migrated state:
-      AppLogger.setEnabled(
-        true,
-        minimumLevel: LogLevel.debug,
-        persistToDisk: false,
-      );
-      final cleanupFailDir = Directory('${tempRoot.path}/migration_cleanup')
-        ..createSync(recursive: true);
-      final cleanupFailStorage =
-          _TrackingFakeSecureStorage(<String, String>{
-              't2_settings_v1': v2Encoded,
-            })
-            ..writeErrorForKey = (key, value) {
-              if (key == 't2_settings_v1' && value == null) {
-                return PlatformException(code: 'DELETE_ERR');
-              }
-              return null;
-            };
-      final cleanupRepo = SecureSettingsRepository(
-        storage: cleanupFailStorage,
-        buildProfile: AppBuildProfile.release,
-        settingsDirectoryPath: cleanupFailDir.path,
-        hostLockDirectoryOverride: lockDir.path,
-      );
-      final migratedDespiteCleanupErr = await cleanupRepo.loadActiveWorkspace();
-      expect(migratedDespiteCleanupErr, equals(legacyWorkspaces.first));
-      expect(
-        AppLogger.lines.any(
-          (line) => line.contains('settings.legacy_migration.cleanup_failed'),
-        ),
-        isTrue,
-      );
-      // Next load reads settings.json directly without touching t2_settings_v1:
-      cleanupFailStorage.resetCounts();
-      final nextLoad = await cleanupRepo.loadActiveWorkspace();
-      expect(nextLoad, equals(legacyWorkspaces.first));
-      expect(cleanupFailStorage.readKeys.contains('t2_settings_v1'), isFalse);
-    });
-
+  group('SecureSettingsRepository Android filesDir & Sync State', () {
     test('resolves Android Context.filesDir via resolver and throws settingsPersistenceFailed when resolver fails', () async {
       final androidFilesDir = Directory('${tempRoot.path}/android_files')
         ..createSync(recursive: true);
@@ -1342,21 +1089,55 @@ void main() {
       );
 
       await repo.saveWorkspaceSyncState('tasks', largeState);
-      final storedEncoded = fakeStorage.store['t2_sync_v1_tasks'];
-      expect(storedEncoded, isNotNull);
+      final syncFile = File('${tempDir.path}/cfg/sync_state_tasks.tts');
       expect(
-        storedEncoded?.length ?? rawBytes.length,
+        syncFile.existsSync(),
+        isTrue,
+        reason:
+            'Sync state must be stored in host-local sync_state_<id>.tts file',
+      );
+      expect(
+        fakeStorage.store.containsKey('t2_sync_v1_tasks'),
+        isFalse,
+        reason: 'Saving sync state must never write to FlutterSecureStorage',
+      );
+      expect(
+        syncFile.lengthSync(),
         lessThan(rawBytes.length ~/ 4),
         reason: 'Gzip compression must shrink repetitive dual TDF sync state dramatically',
       );
+      if (Platform.isLinux) {
+        expect(
+          syncFile.statSync().mode & 0x1FF,
+          equals(0x180),
+          reason: 'Host-local .tts sync state file must use 0600 permissions',
+        );
+      }
+
+      // Reload from a fresh repository instance to verify on-disk round-trip and string deduplication:
+      final freshRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: '${tempDir.path}/cfg',
+        hostLockDirectoryOverride: '${tempDir.path}/locks',
+      );
+      final reloadedLarge = await freshRepo.loadWorkspaceSyncState('tasks');
       expect(
-        await repo.loadWorkspaceSyncState('tasks'),
+        reloadedLarge,
         equals(largeState),
         reason:
             'Compressed >1 MiB WorkspaceSyncState must round-trip losslessly',
       );
+      expect(
+        identical(
+          reloadedLarge.lastSyncedLocalTdf,
+          reloadedLarge.lastSyncedRemoteTdf,
+        ),
+        isTrue,
+        reason: 'Identical local and remote baselines must share one String reference in memory',
+      );
 
-      // Backward compatibility: pre-existing uncompressed TTS\x04 entry in storage must still load.
+      // Backward compatibility: pre-existing uncompressed TTS\x04 entry in legacy secure storage must migrate to .tts and delete legacy key.
       final smallState = WorkspaceSyncState(
         lastSyncedLocalTdf: 'tdf 0.8.0\n',
         acknowledgedLocalGeneration: 1,
@@ -1372,8 +1153,25 @@ void main() {
         reason:
             'Pre-existing uncompressed TTS\\x04 entries must remain readable',
       );
+      expect(
+        File('${tempDir.path}/cfg/sync_state_legacy_uncompressed.tts')
+            .existsSync(),
+        isTrue,
+        reason: 'Legacy secure-storage sync state must migrate to .tts file',
+      );
+      expect(
+        fakeStorage.store.containsKey('t2_sync_v1_legacy_uncompressed'),
+        isFalse,
+        reason:
+            'Legacy secure-storage sync key must be deleted after migration',
+      );
 
-      // Bounded decompression guard: gzip payload expanding past WorkspaceSyncState.maxSerializedBytes must return empty cleanly.
+      // Bounded decompression guard: gzip payload expanding past WorkspaceSyncState.maxSerializedBytes must return empty cleanly and log WARN.
+      AppLogger.setEnabled(
+        true,
+        minimumLevel: LogLevel.warn,
+        persistToDisk: false,
+      );
       final oversizedPayload = Uint8List(
         WorkspaceSyncState.maxSerializedBytes + 4096,
       );
@@ -1386,6 +1184,824 @@ void main() {
         await repo.loadWorkspaceSyncState('bomb'),
         equals(WorkspaceSyncState.empty),
         reason: 'Decompression exceeding maxSerializedBytes must fail safely to empty state',
+      );
+      expect(
+        AppLogger.lines.any(
+          (line) =>
+              line.contains('[WARN ]') &&
+              line.contains('settings.sync_state.corrupt'),
+        ),
+        isTrue,
+        reason: 'Corrupt sync state fallback must emit a WARN diagnostic event',
+      );
+
+      // Direct on-disk .tts gzip bomb must also fail safely to empty state.
+      File('${tempDir.path}/cfg/sync_state_disk_bomb.tts')
+          .writeAsBytesSync(compressedBomb, flush: true);
+      expect(
+        await repo.loadWorkspaceSyncState('disk_bomb'),
+        equals(WorkspaceSyncState.empty),
+        reason: 'On-disk gzip bomb .tts file must fail safely to empty state',
+      );
+
+      // Truncated gzip stream must also fail safely to empty state without uncaught FormatException.
+      final truncatedGzip = compressedBomb.sublist(0, 24);
+      await fakeStorage.write(
+        key: 't2_sync_v1_truncated',
+        value: const Base64Service().encodeBytes(truncatedGzip),
+      );
+      expect(
+        await repo.loadWorkspaceSyncState('truncated'),
+        equals(WorkspaceSyncState.empty),
+        reason: 'Truncated gzip payload must fail safely to empty state',
+      );
+    });
+
+    test('deduplicates identical local/remote baselines in WorkspaceSyncState.fromBytes, caches .tts sync states in memory, cleans up empty/deleted workspaces, and rejects invalid workspaceIds or symlinks', () async {
+      final settingsDir = Directory('${tempRoot.path}/sync_cache')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/sync_cache_locks')
+        ..createSync(recursive: true);
+      final fakeStorage = _TrackingFakeSecureStorage();
+      final repository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+
+      const digest =
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+      final sharedBaseline = String.fromCharCodes(
+        'tdf 0.8.0\n\ntask 000001OkD2 {\n    name "Shared"\n    created 2026-11-01 08:00\n}\n'
+            .codeUnits,
+      );
+      final copyBaseline = String.fromCharCodes(sharedBaseline.codeUnits);
+      expect(identical(sharedBaseline, copyBaseline), isFalse);
+
+      final constructed = WorkspaceSyncState(
+        lastSyncedLocalTdf: sharedBaseline,
+        lastSyncedRemoteTdf: copyBaseline,
+        acknowledgedLocalGeneration: 3,
+        acknowledgedRemoteGeneration: 3,
+        localSourceDigest: digest,
+        remoteSourceDigest: digest,
+        remoteEtag: '"etag-shared"',
+      );
+      expect(
+        identical(
+          constructed.lastSyncedLocalTdf,
+          constructed.lastSyncedRemoteTdf,
+        ),
+        isTrue,
+        reason: 'WorkspaceSyncState constructor must deduplicate identical local and remote baselines',
+      );
+
+      // Verify both Uint8List and plain List<int> wire decoding produce deduplicated references.
+      final wireBytes = constructed.toBytes();
+      final decodedFromTyped = WorkspaceSyncState.fromBytes(wireBytes);
+      final decodedFromList = WorkspaceSyncState.fromBytes(
+        List<int>.of(wireBytes),
+      );
+      expect(decodedFromTyped, equals(constructed));
+      expect(decodedFromList, equals(constructed));
+      expect(
+        identical(
+          decodedFromTyped.lastSyncedLocalTdf,
+          decodedFromTyped.lastSyncedRemoteTdf,
+        ),
+        isTrue,
+      );
+      expect(
+        identical(
+          decodedFromList.lastSyncedLocalTdf,
+          decodedFromList.lastSyncedRemoteTdf,
+        ),
+        isTrue,
+      );
+
+      // Save to .tts file: zero FlutterSecureStorage calls.
+      fakeStorage.resetCounts();
+      await repository.saveWorkspaceSyncState('tasks', constructed);
+      expect(fakeStorage.readKeys, isEmpty);
+      expect(fakeStorage.writeKeys, isEmpty);
+      expect(fakeStorage.deleteKeys, isEmpty);
+
+      final syncFile = File('${settingsDir.path}/sync_state_tasks.tts');
+      expect(syncFile.existsSync(), isTrue);
+
+      // In-memory cache avoids repeated disk reads on same repository instance.
+      final readsBeforeCacheHit = repository.syncStateDiskReadCountForTesting;
+      expect(
+        await repository.loadWorkspaceSyncState('tasks'),
+        equals(constructed),
+      );
+      expect(
+        await repository.loadWorkspaceSyncState('tasks'),
+        equals(constructed),
+      );
+      expect(
+        repository.syncStateDiskReadCountForTesting,
+        equals(readsBeforeCacheHit),
+        reason:
+            'In-memory cache must serve saved sync state without disk reads',
+      );
+      expect(fakeStorage.readKeys, isEmpty);
+
+      // Fresh repository reads once from disk, then serves subsequent loads from cache.
+      final freshRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      expect(
+        await freshRepo.loadWorkspaceSyncState('tasks'),
+        equals(constructed),
+      );
+      expect(freshRepo.syncStateDiskReadCountForTesting, equals(1));
+      expect(
+        await freshRepo.loadWorkspaceSyncState('tasks'),
+        equals(constructed),
+      );
+      expect(
+        freshRepo.syncStateDiskReadCountForTesting,
+        equals(1),
+        reason: 'Second load on fresh repository must hit in-memory cache',
+      );
+      expect(
+        fakeStorage.readKeys,
+        isEmpty,
+        reason:
+            'Existing .tts file must never trigger FlutterSecureStorage read',
+      );
+
+      // Saving empty state deletes both .tts file and any leftover legacy keyring key, and clears cache.
+      fakeStorage.store['t2_sync_v1_tasks'] = 'stale-legacy-value';
+      await freshRepo.saveWorkspaceSyncState('tasks', WorkspaceSyncState.empty);
+      expect(syncFile.existsSync(), isFalse);
+      expect(fakeStorage.store.containsKey('t2_sync_v1_tasks'), isFalse);
+      expect(
+        await freshRepo.loadWorkspaceSyncState('tasks'),
+        equals(WorkspaceSyncState.empty),
+      );
+
+      // Deleting a workspace removes its .tts file, legacy keyring key, and cached state.
+      await repository.createWorkspace('TempSync');
+      await repository.saveWorkspaceSyncState('tempsync', constructed);
+      fakeStorage.store['t2_sync_v1_tempsync'] = 'legacy-tempsync';
+      final tempSyncFile = File('${settingsDir.path}/sync_state_tempsync.tts');
+      expect(tempSyncFile.existsSync(), isTrue);
+      await repository.deleteWorkspace('tempsync');
+      expect(
+        tempSyncFile.existsSync(),
+        isFalse,
+        reason: 'Deleting a workspace must remove its .tts sync state file',
+      );
+      expect(
+        fakeStorage.store.containsKey('t2_sync_v1_tempsync'),
+        isFalse,
+        reason:
+            'Deleting a workspace must remove any legacy sync keyring entry',
+      );
+      expect(
+        await repository.loadWorkspaceSyncState('tempsync'),
+        equals(WorkspaceSyncState.empty),
+      );
+
+      // Path traversal / invalid workspaceId checks.
+      for (final badId in const <String>[
+        '',
+        '   ',
+        '.',
+        '..',
+        '../escape',
+        'nested/id',
+        r'nested\id',
+        'drive:id',
+        'bad\x00id',
+      ]) {
+        await expectLater(
+          () => repository.saveWorkspaceSyncState(badId, constructed),
+          throwsA(
+            isA<WorkspaceException>().having(
+              (error) => error.kind,
+              'kind',
+              WorkspaceErrorKind.settingsPersistenceFailed,
+            ),
+          ),
+          reason: 'Invalid workspaceId "$badId" must be rejected on save',
+        );
+        expect(
+          await repository.loadWorkspaceSyncState(badId),
+          equals(WorkspaceSyncState.empty),
+          reason:
+              'Invalid workspaceId "$badId" must safely return empty on load',
+        );
+      }
+
+      // Symlink at sync_state_<id>.tts must not be followed or clobbered.
+      final secretTarget = File('${tempRoot.path}/sync_secret.txt')
+        ..writeAsStringSync('keep-me', flush: true);
+      final symlinkSyncPath = '${settingsDir.path}/sync_state_linked.tts';
+      Link(symlinkSyncPath).createSync(secretTarget.path);
+      expect(
+        await freshRepo.loadWorkspaceSyncState('linked'),
+        equals(WorkspaceSyncState.empty),
+        reason: 'Symlink sync state file must not be read',
+      );
+      await expectLater(
+        () => freshRepo.saveWorkspaceSyncState('linked', constructed),
+        throwsA(
+          isA<WorkspaceException>().having(
+            (error) => error.kind,
+            'kind',
+            WorkspaceErrorKind.settingsPersistenceFailed,
+          ),
+        ),
+        reason: 'Symlink sync state file must be rejected on save',
+      );
+      expect(secretTarget.readAsStringSync(), equals('keep-me'));
+    });
+
+    test('caches decoded PersistedSettingsDocument across unchanged reads and reuses validated bytes for .bak rotation without redundant disk reads', () async {
+      final settingsDir = Directory('${tempRoot.path}/settings_cache')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/settings_cache_locks')
+        ..createSync(recursive: true);
+      final fakeStorage = _TrackingFakeSecureStorage();
+      final repository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+
+      // First save creates settings.json (no prior file on disk, populates cache).
+      await repository.saveConfig(
+        const WebDavConfig(language: AppLanguage.german),
+      );
+      expect(
+        repository.settingsDiskReadCountForTesting,
+        equals(0),
+        reason:
+            'Initial save on empty directory requires zero primary disk reads',
+      );
+
+      // Repeated read-only loads hit stat-validated cache with zero disk reads.
+      expect(
+        (await repository.loadActiveWorkspace()).config.language,
+        equals(AppLanguage.german),
+      );
+      expect((await repository.loadWorkspaceSummaries()).length, equals(1));
+      expect(
+        repository.settingsDiskReadCountForTesting,
+        equals(0),
+        reason: 'Unchanged loadActiveWorkspace and loadWorkspaceSummaries must hit cache',
+      );
+
+      // Second save rotates .bak from cached bytes without reading disk again.
+      final primaryBeforeSecondSave = File('${settingsDir.path}/settings.json')
+          .readAsBytesSync();
+      await repository.saveConfig(
+        const WebDavConfig(
+          language: AppLanguage.german,
+          themeMode: AppThemeMode.dark,
+        ),
+      );
+      expect(
+        repository.settingsDiskReadCountForTesting,
+        equals(0),
+        reason: 'Mutating cached settings.json must reuse validated bytes for .bak rotation',
+      );
+      expect(
+        File('${settingsDir.path}/settings.json.bak').readAsBytesSync(),
+        equals(primaryBeforeSecondSave),
+        reason: '.bak file must match exact bytes of previous settings.json',
+      );
+
+      // Fresh repository instance saving over existing settings.json reads disk ONLY ONCE (not twice for .bak rotation).
+      final freshRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      await freshRepo.saveConfig(
+        const WebDavConfig(
+          language: AppLanguage.english,
+          themeMode: AppThemeMode.light,
+        ),
+      );
+      expect(
+        freshRepo.settingsDiskReadCountForTesting,
+        equals(1),
+        reason: 'Fresh save must read settings.json once in _loadDocumentLocked and reuse those bytes for .bak rotation',
+      );
+
+      // Subsequent reads hit cache (still 1 disk read).
+      expect(
+        (await freshRepo.loadActiveWorkspace()).config.themeMode,
+        equals(AppThemeMode.light),
+      );
+      await freshRepo.loadWorkspaceSummaries();
+      expect(freshRepo.settingsDiskReadCountForTesting, equals(1));
+
+      // External modification invalidates stat cache and triggers a fresh disk read.
+      final settingsFile = File('${settingsDir.path}/settings.json');
+      final modifiedJson = settingsFile.readAsStringSync().replaceFirst(
+        '"themeMode": "light"',
+        '"themeMode": "dark"',
+      );
+      settingsFile.writeAsStringSync('$modifiedJson\n  \n', flush: true);
+      final externallyUpdated = await freshRepo.loadActiveWorkspace();
+      expect(
+        externallyUpdated.config.themeMode,
+        equals(AppThemeMode.dark),
+        reason: 'External settings.json edit must invalidate stat-keyed cache',
+      );
+      expect(freshRepo.settingsDiskReadCountForTesting, equals(2));
+    });
+
+    test('saveConfigForWorkspace persists only to the targeted workspaceId and throws workspaceNotFound when missing or deleted', () async {
+      final settingsDir = Directory('${tempRoot.path}/targeted_save')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/targeted_locks')
+        ..createSync(recursive: true);
+      final fakeStorage = _TrackingFakeSecureStorage();
+      final secureRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      final memoryRepo = InMemorySettingsRepository();
+
+      for (final (label, repo) in <(String, SettingsRepository)>[
+        ('InMemorySettingsRepository', memoryRepo),
+        ('SecureSettingsRepository', secureRepo),
+      ]) {
+        final work = await repo.createWorkspace('Work', activate: true);
+        expect((await repo.loadActiveWorkspace()).id, equals(work.id));
+
+        const updatedTasksConfig = WebDavConfig(
+          localFilePath: 'tasks_custom.tdf',
+          filePath: 'tasks_custom.tdf',
+          serverUrl: 'https://tasks.example.com',
+          username: 'alice',
+          password: 'tasks-secret-password',
+          themeMode: AppThemeMode.dark,
+        );
+
+        await repo.saveConfigForWorkspace(
+          AppWorkspace.defaultId,
+          updatedTasksConfig,
+        );
+
+        // Active workspace ('work') must stay active and unmodified.
+        final activeWork = await repo.loadActiveWorkspace();
+        expect(
+          activeWork.id,
+          equals(work.id),
+          reason: '$label must keep active workspace unchanged',
+        );
+        expect(
+          activeWork.config.themeMode,
+          equals(AppThemeMode.system),
+          reason:
+              '$label must NOT overwrite active workspace config when saving for another workspaceId',
+        );
+        expect(
+          activeWork.config.password,
+          isEmpty,
+          reason:
+              '$label must NOT leak targeted workspace password into active workspace',
+        );
+
+        // Switching back to 'tasks' must expose the targeted save (including password).
+        final reloadedTasks = await repo.activateWorkspace(
+          AppWorkspace.defaultId,
+        );
+        expect(
+          reloadedTasks.config.themeMode,
+          equals(AppThemeMode.dark),
+          reason: '$label must persist targeted config to default workspace',
+        );
+        expect(reloadedTasks.config.localFilePath, equals('tasks_custom.tdf'));
+        expect(
+          reloadedTasks.config.password,
+          equals('tasks-secret-password'),
+          reason: '$label must persist password under targeted workspaceId',
+        );
+
+        // Duplicate file path collision against active/other workspace must still throw.
+        await expectLater(
+          () => repo.saveConfigForWorkspace(
+            work.id,
+            const WebDavConfig(localFilePath: 'tasks_custom.tdf'),
+          ),
+          throwsA(
+            isA<WorkspaceException>().having(
+              (error) => error.kind,
+              'kind',
+              WorkspaceErrorKind.duplicateFilePath,
+            ),
+          ),
+          reason: '$label must reject duplicate .tdf paths across workspaces',
+        );
+
+        // Deleting 'work' and saving to its deleted ID must throw workspaceNotFound without touching 'tasks'.
+        await repo.deleteWorkspace(work.id);
+        await expectLater(
+          () => repo.saveConfigForWorkspace(
+            work.id,
+            const WebDavConfig(
+              localFilePath: 'ghost.tdf',
+              password: 'ghost-password',
+            ),
+          ),
+          throwsA(
+            isA<WorkspaceException>().having(
+              (error) => error.kind,
+              'kind',
+              WorkspaceErrorKind.workspaceNotFound,
+            ),
+          ),
+          reason:
+              '$label must fail with workspaceNotFound for deleted workspaceId',
+        );
+        expect(
+          (await repo.loadActiveWorkspace()).config.localFilePath,
+          equals('tasks_custom.tdf'),
+          reason:
+              '$label must leave active workspace intact after workspaceNotFound',
+        );
+      }
+
+      expect(
+        fakeStorage.store['t2_webdav_pw_tasks'],
+        equals('tasks-secret-password'),
+      );
+      expect(
+        fakeStorage.store.containsKey('t2_webdav_pw_work'),
+        isFalse,
+        reason:
+            'Failed save to deleted workspace must never write keyring entry',
+      );
+    });
+
+    test('offloads >= 32 KiB gzip sync state compression and decompression to Isolate.run while enforcing decompression bounds', () async {
+      final settingsDir = Directory('${tempRoot.path}/large_tts_cfg')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/large_tts_locks')
+        ..createSync(recursive: true);
+      final fakeStorage = _TrackingFakeSecureStorage();
+      final repository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+
+      // Build deterministic high-entropy TDF comments so both raw and gzipped wire sizes exceed 32 KiB.
+      final rng = math.Random(42);
+      const alphabet =
+          'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      final buffer = StringBuffer('tdf 0.8.0\n');
+      for (var line = 0; line < 750; line++) {
+        buffer.write('# ');
+        for (var col = 0; col < 64; col++) {
+          buffer.write(alphabet[rng.nextInt(alphabet.length)]);
+        }
+        buffer.writeln();
+      }
+      final highEntropyTdf = buffer.toString();
+      const digest =
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+      final largeState = WorkspaceSyncState(
+        lastSyncedLocalTdf: highEntropyTdf,
+        lastSyncedRemoteTdf: highEntropyTdf,
+        acknowledgedLocalGeneration: 3,
+        acknowledgedRemoteGeneration: 3,
+        localSourceDigest: digest,
+        remoteSourceDigest: digest,
+        remoteEtag: '"etag-32k"',
+      );
+      expect(
+        largeState.toBytes().length,
+        greaterThanOrEqualTo(32768),
+        reason: 'Raw sync state must exceed 32 KiB offload threshold',
+      );
+
+      await repository.saveWorkspaceSyncState('tasks', largeState);
+      final syncFile = File('${settingsDir.path}/sync_state_tasks.tts');
+      expect(syncFile.existsSync(), isTrue);
+      final persistedBytes = syncFile.readAsBytesSync();
+      expect(
+        persistedBytes.length,
+        greaterThanOrEqualTo(32768),
+        reason: 'Persisted compressed sync state must exceed 32 KiB to exercise isolate decompression offload',
+      );
+
+      final freshRepository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      final reloaded = await freshRepository.loadWorkspaceSyncState('tasks');
+      expect(
+        reloaded,
+        equals(largeState),
+        reason: 'Isolate-compressed and isolate-decompressed >= 32 KiB sync state must round-trip losslessly',
+      );
+
+      // Verify >= 32 KiB compressed gzip bomb expanding past maxSerializedBytes still returns empty safely.
+      final bombRaw = Uint8List(WorkspaceSyncState.maxSerializedBytes + 65536);
+      for (var i = 0; i < 40000; i++) {
+        bombRaw[i] = rng.nextInt(256);
+      }
+      final largeBomb = gzip.encode(bombRaw);
+      expect(largeBomb.length, greaterThanOrEqualTo(32768));
+      File('${settingsDir.path}/sync_state_large_bomb.tts')
+          .writeAsBytesSync(largeBomb, flush: true);
+      expect(
+        await freshRepository.loadWorkspaceSyncState('large_bomb'),
+        equals(WorkspaceSyncState.empty),
+        reason: 'Isolate-decompressed gzip bomb exceeding maxSerializedBytes must safely return empty',
+      );
+    });
+
+    test('validates custom workspace id for uniqueness and filename safety in both InMemorySettingsRepository and SecureSettingsRepository', () async {
+      final settingsDir = Directory('${tempRoot.path}/custom_id_cfg')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/custom_id_locks')
+        ..createSync(recursive: true);
+      final fakeStorage = _TrackingFakeSecureStorage();
+      final secureRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      final memoryRepo = InMemorySettingsRepository();
+
+      for (final (label, repo) in <(String, SettingsRepository)>[
+        ('InMemorySettingsRepository', memoryRepo),
+        ('SecureSettingsRepository', secureRepo),
+      ]) {
+        for (final duplicateId in const <String>['tasks', 'TASKS']) {
+          await expectLater(
+            () => repo.createWorkspace('Unique Board', id: duplicateId),
+            throwsA(isA<WorkspaceException>()),
+            reason: '$label must reject duplicate workspace id "$duplicateId"',
+          );
+        }
+
+        for (final unsafeId in <String>[
+          '',
+          '   ',
+          '.',
+          '..',
+          '../escape',
+          'nested/id',
+          r'nested\id',
+          'drive:id',
+          'bad\x00id',
+          '\nleading_control',
+          'trailing_control\r',
+          'bidi\u202Eid',
+          'a' * 129,
+        ]) {
+          await expectLater(
+            () => repo.createWorkspace('Safe Name', id: unsafeId),
+            throwsA(isA<WorkspaceException>()),
+            reason: '$label must reject unsafe workspace id "$unsafeId"',
+          );
+        }
+
+        final created = await repo.createWorkspace('Custom', id: 'custom_id_1');
+        expect(created.id, equals('custom_id_1'));
+      }
+    });
+
+    test('rolls back keyring and password cache when settings.json persistence fails in createWorkspace and saveConfig', () async {
+      final settingsDir = Directory('${tempRoot.path}/rollback_cfg')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/rollback_locks')
+        ..createSync(recursive: true);
+      final fakeStorage = _TrackingFakeSecureStorage();
+      final repository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+
+      // Seed initial workspace with an existing password.
+      await repository.saveConfig(
+        const WebDavConfig(
+          serverUrl: 'https://cloud.example.com',
+          username: 'alice',
+          password: 'original-password',
+          storageMode: StorageMode.both,
+        ),
+      );
+      expect(
+        fakeStorage.store['t2_webdav_pw_tasks'],
+        equals('original-password'),
+      );
+
+      // Poison settings.json.bak with a symlink so _persistDocumentLocked throws before writing settings.json.
+      final backupSymlink = Link('${settingsDir.path}/settings.json.bak');
+      if (File('${settingsDir.path}/settings.json.bak').existsSync()) {
+        File('${settingsDir.path}/settings.json.bak').deleteSync();
+      }
+      backupSymlink.createSync('${tempRoot.path}/decoy_target.txt');
+
+      // 1. createWorkspace with password rolls back newly written keyring entry.
+      await expectLater(
+        () => repository.createWorkspace(
+          'Failing Workspace',
+          id: 'failing_ws',
+          config: const WebDavConfig(
+            localFilePath: 'failing.tdf',
+            filePath: 'failing.tdf',
+            serverUrl: 'https://cloud.example.com',
+            username: 'bob',
+            password: 'ephemeral-password',
+            storageMode: StorageMode.both,
+          ),
+        ),
+        throwsA(isA<WorkspaceException>()),
+      );
+      expect(
+        fakeStorage.store.containsKey('t2_webdav_pw_failing_ws'),
+        isFalse,
+        reason: 'Failed createWorkspace must roll back newly written keyring password',
+      );
+
+      // 2. saveConfig updating cached password rolls back keyring AND cache to original-password.
+      await expectLater(
+        () => repository.saveConfig(
+          const WebDavConfig(
+            serverUrl: 'https://cloud.example.com',
+            username: 'alice',
+            password: 'updated-password-should-rollback',
+            storageMode: StorageMode.both,
+          ),
+        ),
+        throwsA(isA<WorkspaceException>()),
+      );
+      expect(
+        fakeStorage.store['t2_webdav_pw_tasks'],
+        equals('original-password'),
+        reason: 'Failed saveConfig password update must roll back keyring to original password',
+      );
+
+      // 3. saveConfig clearing password rolls back keyring deletion to original-password.
+      await expectLater(
+        () => repository.saveConfig(
+          const WebDavConfig(
+            serverUrl: 'https://cloud.example.com',
+            username: 'alice',
+          ),
+        ),
+        throwsA(isA<WorkspaceException>()),
+      );
+      expect(
+        fakeStorage.store['t2_webdav_pw_tasks'],
+        equals('original-password'),
+        reason: 'Failed saveConfig password clear must restore original password in keyring',
+      );
+
+      // 4. Fresh uncached repository failing password update also restores prior keyring password.
+      final freshRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      await expectLater(
+        () => freshRepo.saveConfig(
+          const WebDavConfig(
+            serverUrl: 'https://cloud.example.com',
+            username: 'alice',
+            password: 'uncached-update-should-rollback',
+            storageMode: StorageMode.both,
+          ),
+        ),
+        throwsA(isA<WorkspaceException>()),
+      );
+      expect(
+        fakeStorage.store['t2_webdav_pw_tasks'],
+        equals('original-password'),
+        reason: 'Fresh uncached repository must restore prior keyring password on persistence failure',
+      );
+
+      // Remove poisoned backup symlink and verify cached password in original repository still matches original-password.
+      backupSymlink.deleteSync();
+      final activeAfterRollback = await repository.loadActiveWorkspace();
+      expect(
+        activeAfterRollback.config.password,
+        equals('original-password'),
+        reason: 'In-memory password cache must remain rolled back to original-password',
+      );
+    });
+
+    test('quarantines oversized settings.json via bounded read and evicts sync-state cache inside sync lock during deleteWorkspace', () async {
+      final settingsDir = Directory('${tempRoot.path}/bounded_and_race')
+        ..createSync(recursive: true);
+      final lockDir = Directory('${tempRoot.path}/bounded_and_race_locks')
+        ..createSync(recursive: true);
+      final fakeStorage = _TrackingFakeSecureStorage();
+      final repository = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+
+      // Oversized settings.json exceeding SettingsCodec.maxJsonBytes is quarantined and reset cleanly.
+      final settingsFile = File('${settingsDir.path}/settings.json');
+      settingsFile.writeAsBytesSync(
+        List<int>.filled(SettingsCodec.maxJsonBytes + 1, 0x20),
+        flush: true,
+      );
+      final recovered = await repository.loadActiveWorkspace();
+      expect(recovered.id, equals(AppWorkspace.defaultId));
+      expect(
+        repository.takeLastRecoveryNotice()?.kind,
+        equals(SettingsRecoveryKind.resetAfterQuarantine),
+      );
+
+      // Concurrent loadWorkspaceSyncState while deleteWorkspace removes workspace must not leave stale cache behind.
+      await repository.createWorkspace('RaceBoard', id: 'race_board');
+      const digest =
+          'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+      final state = WorkspaceSyncState(
+        lastSyncedLocalTdf: 'tdf 0.8.0\n',
+        lastSyncedRemoteTdf: 'tdf 0.8.0\n',
+        acknowledgedLocalGeneration: 1,
+        acknowledgedRemoteGeneration: 1,
+        localSourceDigest: digest,
+        remoteSourceDigest: digest,
+      );
+      await repository.saveWorkspaceSyncState('race_board', state);
+
+      final freshRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: settingsDir.path,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      await Future.wait(<Future<Object?>>[
+        freshRepo.deleteWorkspace('race_board'),
+        freshRepo.loadWorkspaceSyncState('race_board'),
+      ]);
+      expect(
+        File('${settingsDir.path}/sync_state_race_board.tts').existsSync(),
+        isFalse,
+      );
+      expect(
+        await freshRepo.loadWorkspaceSyncState('race_board'),
+        equals(WorkspaceSyncState.empty),
+        reason: 'Sync state cache must be evicted under sync lock so post-delete loads see empty state',
+      );
+
+      // Verify TdfFilePath.trimTrailingSeparators preserves Windows drive roots (C:\) and POSIX root (/).
+      final driveRootRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: r'C:\',
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      expect(
+        await driveRootRepo.resolveSettingsFilePathForTesting(),
+        equals(r'C:\settings.json'),
+        reason: 'Windows drive root C:\\ must not be truncated to drive-relative C:',
+      );
+
+      final multiSlashDriveRootRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: r'C:\\\',
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      expect(
+        await multiSlashDriveRootRepo.resolveSettingsFilePathForTesting(),
+        equals(r'C:\settings.json'),
+      );
+
+      final posixRootRepo = SecureSettingsRepository(
+        storage: fakeStorage,
+        buildProfile: AppBuildProfile.release,
+        settingsDirectoryPath: '///',
+        hostLockDirectoryOverride: lockDir.path,
+      );
+      expect(
+        await posixRootRepo.resolveSettingsFilePathForTesting(),
+        equals('/settings.json'),
       );
     });
   });

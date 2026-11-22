@@ -469,7 +469,6 @@ class _UiToastBanner extends StatelessWidget {
                   const SizedBox(width: 10.0),
                   UiButton(
                     label: actionLabel,
-                    variant: UiButtonVariant.secondary,
                     density: UiButtonDensity.dense,
                     isActive: true,
                     onPressed: onAction,
@@ -646,7 +645,6 @@ class _UiInlineConfirmBanner extends StatelessWidget {
                   if (cancelLabel case final cancel?)
                     UiButton(
                       label: cancel,
-                      variant: UiButtonVariant.secondary,
                       density: UiButtonDensity.compact,
                       onPressed: onCancel,
                     ),
@@ -757,15 +755,17 @@ class _UiLoadingStateBannerState extends State<_UiLoadingStateBanner>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              RotationTransition(
-                turns: _controller,
-                child: SizedBox.square(
-                  dimension: 32.0,
-                  child: CircularProgressIndicator(
-                    value: 0.72,
-                    strokeWidth: tokens.radii.spinnerStrokeWidth,
-                    color: colors.accent,
-                    backgroundColor: colors.line,
+              RepaintBoundary(
+                child: RotationTransition(
+                  turns: _controller,
+                  child: SizedBox.square(
+                    dimension: 32.0,
+                    child: CircularProgressIndicator(
+                      value: 0.72,
+                      strokeWidth: tokens.radii.spinnerStrokeWidth,
+                      color: colors.accent,
+                      backgroundColor: colors.line,
+                    ),
                   ),
                 ),
               ),

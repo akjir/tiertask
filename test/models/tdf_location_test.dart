@@ -41,7 +41,7 @@ void main() {
 
   group('TdfLocation Entity, Base62 IDs, Decimal Validation & Rounding', () {
     test('generates and validates 10-character Base62 location IDs', () {
-      final timestamp = DateTime.utc(2026, 11, 1, 8, 0);
+      final timestamp = DateTime.utc(2026, 11, 1, 8);
       final firstId = generateLocationId(
         timestamp: timestamp,
         random: math.Random(42),
@@ -115,7 +115,7 @@ void main() {
         clearNote: true,
         clearSource: true,
         radius: 250.5,
-        modifiedAt: DateTime.utc(2026, 11, 2, 10, 0),
+        modifiedAt: DateTime.utc(2026, 11, 2, 10),
       );
       expect(updated.name, equals('Home HQ'));
       expect(updated.note, isNull);
@@ -123,7 +123,7 @@ void main() {
       expect(updated.radiusText, equals('250.5'));
       expect(
         updated.effectiveModifiedAt,
-        equals(DateTime.utc(2026, 11, 2, 10, 0)),
+        equals(DateTime.utc(2026, 11, 2, 10)),
       );
       expect(updated, isNot(equals(location)));
       expect(updated.copyWith(), equals(updated));
@@ -136,7 +136,7 @@ void main() {
       );
       expect(
         location
-            .copyWith(modifiedAt: DateTime.utc(1970, 1, 1, 0, 0, 0))
+            .copyWith(modifiedAt: DateTime.utc(1970))
             .canonicalDirectChildStatementCount,
         equals(6),
         reason:
@@ -241,7 +241,7 @@ void main() {
         ),
       };
 
-      final evalTime = DateTime.utc(2026, 11, 1, 12, 0);
+      final evalTime = DateTime.utc(2026, 11, 1, 12);
       expect(
         condition.isSatisfiedAt(evalTime, locations: locations),
         isTrue,
@@ -279,7 +279,7 @@ void main() {
       );
       expect(origin.toString().contains('SECRET-KEY-99'), isFalse);
 
-      final due = DateTime.utc(2026, 11, 7, 16, 0);
+      final due = DateTime.utc(2026, 11, 7, 16);
       final task = TaskItem(
         id: '8jKaCdOkD2',
         title: 'Task with due and origin',
@@ -312,7 +312,6 @@ void main() {
         deletedAt: DateTime.utc(2026, 11, 2, 10, 15),
       );
       final block = TdfDeletedBlock(
-        generation: 0,
         locations: <TdfDeletedLocationRecord>[deletedLoc],
       );
       expect(block.isDefaultEmpty, isFalse);

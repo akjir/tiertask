@@ -278,10 +278,7 @@ void main() {
         await expectLater(
           () => repository.createWorkspace(
             'Dritter Job',
-            config: const WebDavConfig(
-              localFilePath: 'dritter_job.tdf',
-              filePath: 'tasks.tdf',
-            ),
+            config: const WebDavConfig(localFilePath: 'dritter_job.tdf'),
           ),
           throwsA(
             isA<WorkspaceException>().having(
@@ -361,10 +358,7 @@ void main() {
 
         await expectLater(
           () => repository.saveConfig(
-            const WebDavConfig(
-              localFilePath: 'arbeit.tdf',
-              filePath: 'tasks.tdf',
-            ),
+            const WebDavConfig(localFilePath: 'arbeit.tdf'),
           ),
           throwsA(
             isA<WorkspaceException>().having(

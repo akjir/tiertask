@@ -20,6 +20,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/repositories/host_file_lock.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
+import 'package:tiertask/repositories/posix_file_lock_bindings.dart';
+import 'package:tiertask/repositories/win32_file_lock_bindings.dart';
 import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/services/sha256_service.dart';
 
@@ -41,7 +43,7 @@ void main() {
       }
     });
 
-    test('computes identical 64-char SHA-256 targetPathHash across file symlinks, parent directory symlinks, trailing slashes, and Windows case/separators', () async {
+    test('computes identical 64-char SHA-256 targetPathHash across file symlinks, parent directory symlinks, trailing slashes, and Windows case/separators', () {
       final realDirectory = Directory(
         '${tempRoot.path}${Platform.pathSeparator}real_workspace',
       )..createSync(recursive: true);
@@ -408,7 +410,6 @@ void main() {
       final contendingManager = HostFileLockManager<LocalFileException>(
         createException: LocalFileException.new,
         hostLockDirectoryOverride: lockDir.path,
-        lockAcquireTimeout: const Duration(seconds: 5),
       );
       final lockFilePath = contendingManager.resolveLockFilePath(targetPath);
 
@@ -605,7 +606,7 @@ void main() {
           cleanupTemp: () {
             nonTransientCleanedUp = true;
           },
-          delay: (_) async {
+          delay: (_) {
             fail('Non-sharing errors must not sleep or retry');
           },
         ),
@@ -969,6 +970,460 @@ void main() {
           lessThanOrEqualTo(fdCountBefore),
           reason: 'Repeated lock and atomic write cycles must not leak open file descriptors',
         );
+      }
+    });
+
+    test('writeAllPosixLoop and writeAllWindowsLoop handle partial writes and fail cleanly on zero-byte writes without spinning', () {
+      final manager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+
+      // 1. POSIX partial writes + EINTR retry succeed.
+      final posixChunks = <(int, int)>[];
+      var posixStep = 0;
+      manager.writeAllPosixLoop(
+        totalBytes: 10,
+        performWrite: (offset, remaining) {
+          posixChunks.add((offset, remaining));
+          posixStep++;
+          if (posixStep == 1) return 4;
+          if (posixStep == 2) return -1;
+          return remaining;
+        },
+        readErrno: () => 4,
+        path: '/tmp/.tasks.tdf.tmp.abc',
+      );
+      expect(
+        posixChunks,
+        equals(const <(int, int)>[(0, 10), (4, 6), (4, 6)]),
+        reason: 'POSIX write loop must resume after partial write and EINTR',
+      );
+
+      // 2. POSIX zero-byte write throws EIO (5) immediately without consulting stale errno (even if errno == EINTR).
+      var posixZeroReadsErrno = false;
+      var posixZeroCalls = 0;
+      expect(
+        () => manager.writeAllPosixLoop(
+          totalBytes: 10,
+          performWrite: (_, _) {
+            posixZeroCalls++;
+            return 0;
+          },
+          readErrno: () {
+            posixZeroReadsErrno = true;
+            return 4;
+          },
+          path: '/tmp/.tasks.tdf.tmp.zero',
+          formatFailureMessage: (details) => 'Save failed: $details',
+        ),
+        throwsA(
+          isA<LocalFileException>()
+              .having((e) => e.message, 'message', contains('errno 5'))
+              .having(
+                (e) => e.cause,
+                'cause',
+                isA<FileSystemException>().having(
+                  (c) => c.osError?.errorCode,
+                  'osError.errorCode',
+                  equals(5),
+                ),
+              ),
+        ),
+        reason:
+            'POSIX write returning 0 must fail immediately with EIO (errno 5)',
+      );
+      expect(posixZeroCalls, equals(1));
+      expect(
+        posixZeroReadsErrno,
+        isFalse,
+        reason: 'Zero-byte POSIX write must not read stale errno',
+      );
+
+      // 3. Windows partial writes succeed, and zero-byte WriteFile progress terminates with error instead of looping.
+      final winChunks = <(int, int)>[];
+      var winStep = 0;
+      manager.writeAllWindowsLoop(
+        totalBytes: 10,
+        performWrite: (offset, remaining) {
+          winChunks.add((offset, remaining));
+          winStep++;
+          return (succeeded: true, bytesWritten: winStep == 1 ? 3 : remaining);
+        },
+        readLastError: () => 0,
+        path: r'C:\vault\.tasks.tdf.tmp.abc',
+      );
+      expect(winChunks, equals(const <(int, int)>[(0, 10), (3, 7)]));
+
+      var winZeroCalls = 0;
+      expect(
+        () => manager.writeAllWindowsLoop(
+          totalBytes: 10,
+          performWrite: (_, _) {
+            winZeroCalls++;
+            return (succeeded: true, bytesWritten: 0);
+          },
+          readLastError: () => 0,
+          path: r'C:\vault\.tasks.tdf.tmp.zero',
+          formatFailureMessage: (details) => 'Save failed: $details',
+        ),
+        throwsA(
+          isA<LocalFileException>().having(
+            (e) => e.message,
+            'message',
+            contains('zero bytes'),
+          ),
+        ),
+        reason: 'Win32 WriteFile reporting 0 bytes written must abort cleanly instead of infinite-looping',
+      );
+      expect(winZeroCalls, equals(1));
+    });
+
+    test('validateLockFileEntityType rejects non-regular entities and closeWindowsWriteHandle reports CloseHandle failure', () {
+      final manager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+
+      for (final rejectedType in const <FileSystemEntityType>[
+        FileSystemEntityType.link,
+        FileSystemEntityType.directory,
+        FileSystemEntityType.pipe,
+        FileSystemEntityType.unixDomainSock,
+      ]) {
+        expect(
+          () => manager.validateLockFileEntityType(
+            rejectedType,
+            r'C:\Temp\tdf-locks\tdf-bad.lock',
+          ),
+          throwsA(isA<LocalFileException>()),
+          reason: 'Lock entity type $rejectedType must be rejected',
+        );
+      }
+      manager.validateLockFileEntityType(
+        FileSystemEntityType.notFound,
+        r'C:\Temp\tdf-locks\tdf-ok.lock',
+      );
+      manager.validateLockFileEntityType(
+        FileSystemEntityType.file,
+        r'C:\Temp\tdf-locks\tdf-ok.lock',
+      );
+
+      expect(
+        () => manager.closeWindowsWriteHandle(
+          closeHandle: () => false,
+          readLastError: () => 6,
+          tempPath: r'C:\vault\.tasks.tdf.tmp.abc',
+          formatFailureMessage: (details) => 'Save failed: $details',
+        ),
+        throwsA(
+          isA<LocalFileException>().having(
+            (e) => e.message,
+            'message',
+            contains('CloseHandle failed (Win32 error 6)'),
+          ),
+        ),
+        reason:
+            'CloseHandle failure must log and throw formatted domain exception',
+      );
+      expect(AppLogger.fullLogText, contains('local.write.close_failed'));
+    });
+
+    test('withExclusiveLock starts OS acquire timeout stopwatch AFTER awaiting in-process FIFO gate', () async {
+      final manager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: lockDir.path,
+        lockAcquireTimeout: const Duration(milliseconds: 120),
+      );
+      final targetPath =
+          '${workspaceDir.path}${Platform.pathSeparator}fifo_budget.tdf';
+
+      final firstEntered = Completer<void>();
+      final firstFuture = manager.withExclusiveLock(targetPath, () async {
+        firstEntered.complete();
+        await Future<void>.delayed(const Duration(milliseconds: 220));
+      });
+
+      await firstEntered.future;
+      final secondFuture = manager.withExclusiveLock(targetPath, () async {
+        return 'ok';
+      });
+
+      await firstFuture;
+      expect(await secondFuture, equals('ok'));
+
+      final acquireLines = AppLogger.lines
+          .where((line) => line.contains('local.lock.acquire |'))
+          .toList();
+      expect(acquireLines.length, equals(2));
+      final match = RegExp(r'elapsed_ms=(\d+)').firstMatch(acquireLines.last);
+      final rawElapsed = match?.group(1);
+      expect(rawElapsed, isNotNull);
+      final secondAcquireElapsedMs = int.parse(rawElapsed ?? '9999');
+      expect(
+        secondAcquireElapsedMs,
+        lessThan(100),
+        reason: 'Queued in-process caller must not spend its OS acquire timeout budget while waiting on previousGate',
+      );
+    });
+
+    test('applyPosixChmodBestEffort sets 0600 via native libc FFI without throwing on missing paths, and POSIX lock directory cache auto-recreates deleted directories on ENOENT', () async {
+      if (!Platform.isLinux) {
+        return;
+      }
+      // 1. Native FFI chmod tightens 0644 file to 0600 and ignores non-existent paths safely.
+      final sampleFile = File(
+        '${workspaceDir.path}${Platform.pathSeparator}ffi_chmod_test.log',
+      )..writeAsStringSync('diagnostic\n', flush: true);
+      Process.runSync('chmod', <String>['0644', sampleFile.path]);
+      expect(sampleFile.statSync().mode & 0x1FF, equals(0x1A4));
+
+      HostFileLockManager.applyPosixChmodBestEffort(sampleFile.path, 0x180);
+      expect(
+        sampleFile.statSync().mode & 0x1FF,
+        equals(0x180),
+        reason: 'applyPosixChmodBestEffort must set 0600 permissions via libc chmod',
+      );
+      HostFileLockManager.applyPosixChmodBestEffort(
+        '${workspaceDir.path}${Platform.pathSeparator}nonexistent.log',
+        0x180,
+      );
+
+      // 2. POSIX lock directory cache records verified dir and auto-recreates on ENOENT if deleted externally.
+      final cachedLockDir = Directory(
+        '${tempRoot.path}${Platform.pathSeparator}cached_posix_locks',
+      );
+      final manager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: cachedLockDir.path,
+      );
+      final targetPath =
+          '${workspaceDir.path}${Platform.pathSeparator}cached_dir.tdf';
+
+      expect(
+        HostFileLockManager.isPosixLockDirectoryVerifiedForTesting(
+          cachedLockDir.path,
+        ),
+        isFalse,
+      );
+      await manager.withExclusiveLock(targetPath, () async {});
+      expect(
+        HostFileLockManager.isPosixLockDirectoryVerifiedForTesting(
+          cachedLockDir.path,
+        ),
+        isTrue,
+        reason:
+            'First lock acquire must cache the verified POSIX lock directory',
+      );
+
+      // Delete lock directory externally while still cached -> next acquire hits ENOENT and recreates with 0700.
+      cachedLockDir.deleteSync(recursive: true);
+      expect(cachedLockDir.existsSync(), isFalse);
+      await manager.withExclusiveLock(targetPath, () async {
+        await manager.writeAtomically(
+          targetPath,
+          utf8.encode('tdf 0.8.0\n# recreated\n'),
+        );
+      });
+      expect(
+        cachedLockDir.existsSync(),
+        isTrue,
+        reason: 'ENOENT during open() on cached lock dir must auto-recreate it',
+      );
+      expect(
+        cachedLockDir.statSync().mode & 0x1FF,
+        equals(0x1C0),
+        reason: 'Recreated POSIX lock directory must have 0700 permissions',
+      );
+      expect(
+        HostFileLockManager.isPosixLockDirectoryVerifiedForTesting(
+          cachedLockDir.path,
+        ),
+        isTrue,
+      );
+      expect(
+        File(targetPath).readAsStringSync(),
+        equals('tdf 0.8.0\n# recreated\n'),
+      );
+    });
+
+    test('rejects embedded NUL in POSIX UTF-8 allocation, prevents symlink-following chmod and lock directory attacks, and hardens writeAtomically against pipes, sockets, and parent creation errors', () async {
+      final manager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: lockDir.path,
+      );
+
+      // 1. Parent directory creation failure (parent is an existing regular file) maps to LocalFileException.
+      final blockingFile = File(
+        '${workspaceDir.path}${Platform.pathSeparator}not_a_directory',
+      )..writeAsStringSync('blocker', flush: true);
+      final invalidChildTarget =
+          '${blockingFile.path}${Platform.pathSeparator}tasks.tdf';
+      await expectLater(
+        () => manager.writeAtomically(
+          invalidChildTarget,
+          utf8.encode('tdf 0.8.0\n'),
+          formatFailureMessage: (details) => 'Localized write error: $details',
+        ),
+        throwsA(
+          isA<LocalFileException>()
+              .having(
+                (error) => error.message,
+                'message',
+                startsWith('Localized write error: '),
+              )
+              .having(
+                (error) => error.cause,
+                'cause',
+                isA<FileSystemException>(),
+              ),
+        ),
+        reason: 'parentDirectory.createSync FileSystemException must be mapped through createException/formatFailureMessage',
+      );
+
+      // 2. Embedded NUL rejected in both Win32 UTF-16 encoding and POSIX UTF-8 allocation.
+      expect(
+        () => Win32LockBindings.encodeUtf16NoNul('C:\\safe\u0000evil'),
+        throwsA(isA<ArgumentError>()),
+        reason: 'Win32LockBindings must reject embedded NUL code units',
+      );
+      expect(
+        Win32LockBindings.encodeUtf16NoNul(r'C:\safe\path.tdf'),
+        equals(r'C:\safe\path.tdf'.codeUnits),
+      );
+
+      if (!Platform.isLinux) {
+        return;
+      }
+
+      expect(
+        () => PosixLockBindings.instance.allocateUtf8('/tmp/safe\u0000evil'),
+        throwsA(isA<ArgumentError>()),
+        reason: 'PosixLockBindings.allocateUtf8 must reject embedded NUL bytes',
+      );
+
+      // Verify O_DIRECTORY | O_NOFOLLOW rejects symlinks at the kernel level (ELOOP) and opens real dirs.
+      final probeDir = Directory(
+        '${tempRoot.path}${Platform.pathSeparator}dir_flag_probe',
+      )..createSync(recursive: true);
+      final probeSymlink = Link(
+        '${tempRoot.path}${Platform.pathSeparator}dir_flag_link',
+      )..createSync(probeDir.path);
+      final bindings = PosixLockBindings.instance;
+      final dirOpenFlags =
+          PosixLockBindings.oRdonly |
+          PosixLockBindings.oCloexec |
+          bindings.directoryFlag |
+          bindings.noFollowFlag;
+      final symlinkOpen = bindings.openRaw(probeSymlink.path, dirOpenFlags, 0);
+      expect(
+        symlinkOpen.descriptor,
+        equals(-1),
+        reason: 'O_DIRECTORY | O_NOFOLLOW must reject directory symlinks',
+      );
+      final realDirOpen = bindings.openRaw(probeDir.path, dirOpenFlags, 0);
+      expect(realDirOpen.descriptor, greaterThanOrEqualTo(0));
+      bindings.close(realDirOpen.descriptor);
+
+      // 3. applyPosixChmodBestEffort must NOT follow symbolic links.
+      final victimFile = File(
+        '${workspaceDir.path}${Platform.pathSeparator}chmod_victim.txt',
+      )..writeAsStringSync('keep-perms\n', flush: true);
+      Process.runSync('chmod', <String>['0644', victimFile.path]);
+      expect(victimFile.statSync().mode & 0x1FF, equals(0x1A4));
+
+      final symlinkPath =
+          '${workspaceDir.path}${Platform.pathSeparator}chmod_link.log';
+      Link(symlinkPath).createSync(victimFile.path);
+      HostFileLockManager.applyPosixChmodBestEffort(symlinkPath, 0x180);
+      expect(
+        victimFile.statSync().mode & 0x1FF,
+        equals(0x1A4),
+        reason: 'applyPosixChmodBestEffort must open with O_NOFOLLOW + fchmod and never alter symlink targets',
+      );
+
+      // 4. Lock directory symlink must be rejected without modifying the real target directory permissions.
+      final targetDir = Directory(
+        '${tempRoot.path}${Platform.pathSeparator}victim_dir',
+      )..createSync(recursive: true);
+      Process.runSync('chmod', <String>['0755', targetDir.path]);
+      expect(targetDir.statSync().mode & 0x1FF, equals(0x1ED));
+
+      final lockDirSymlink = Link(
+        '${tempRoot.path}${Platform.pathSeparator}symlink_lock_dir',
+      )..createSync(targetDir.path);
+      final symlinkLockManager = HostFileLockManager<LocalFileException>(
+        createException: LocalFileException.new,
+        hostLockDirectoryOverride: lockDirSymlink.path,
+      );
+      await expectLater(
+        () => symlinkLockManager.withExclusiveLock(
+          '${workspaceDir.path}${Platform.pathSeparator}tasks.tdf',
+          () async {},
+        ),
+        throwsA(isA<LocalFileException>()),
+        reason: 'Symlink host lock directory must be rejected',
+      );
+      expect(
+        targetDir.statSync().mode & 0x1FF,
+        equals(0x1ED),
+        reason: 'Rejected symlink lock directory must never alter target directory mode',
+      );
+      expect(
+        HostFileLockManager.isPosixLockDirectoryVerifiedForTesting(
+          lockDirSymlink.path,
+        ),
+        isFalse,
+      );
+
+      // 5. writeAtomically rejects Unix domain sockets and FIFO pipes.
+      final socketTarget =
+          '${workspaceDir.path}${Platform.pathSeparator}atomic_sock.tdf';
+      final unixSocket = await ServerSocket.bind(
+        InternetAddress(socketTarget, type: InternetAddressType.unix),
+        0,
+      );
+      try {
+        await expectLater(
+          () => manager.writeAtomically(
+            socketTarget,
+            utf8.encode('tdf 0.8.0\n'),
+            formatFailureMessage: (details) => 'Write failed: $details',
+          ),
+          throwsA(
+            isA<LocalFileException>().having(
+              (error) => error.message,
+              'message',
+              startsWith('Write failed: '),
+            ),
+          ),
+          reason: 'writeAtomically must reject Unix domain sockets',
+        );
+      } finally {
+        await unixSocket.close();
+        if (FileSystemEntity.typeSync(socketTarget, followLinks: false) !=
+            FileSystemEntityType.notFound) {
+          File(socketTarget).deleteSync();
+        }
+      }
+
+      final fifoTarget =
+          '${workspaceDir.path}${Platform.pathSeparator}atomic_pipe.tdf';
+      final mkfifoResult = Process.runSync('mkfifo', <String>[fifoTarget]);
+      if (mkfifoResult.exitCode == 0) {
+        try {
+          await expectLater(
+            () =>
+                manager.writeAtomically(fifoTarget, utf8.encode('tdf 0.8.0\n')),
+            throwsA(isA<LocalFileException>()),
+            reason: 'writeAtomically must reject FIFO pipes',
+          );
+        } finally {
+          if (FileSystemEntity.typeSync(fifoTarget, followLinks: false) !=
+              FileSystemEntityType.notFound) {
+            File(fifoTarget).deleteSync();
+          }
+        }
       }
     });
   });

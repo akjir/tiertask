@@ -119,8 +119,7 @@ class TaskBoardQueueMutator {
       return board;
     }
 
-    final useForever =
-        suspendedUntil == null || suspendedUntil == TaskItem.defaultSuspendedAt;
+    final useForever = suspendedUntil == null;
     final blockedTask = task.copyWith(
       isCompleted: false,
       clearCompletedAt: true,
@@ -150,7 +149,7 @@ class TaskBoardQueueMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-    ).logDomainMutation('blockTask id=$taskId');
+    ).logDomainMutation('task.block id=$taskId');
   }
 
   /// Captures the required completion number for a newly added or rearmed prerequisite [target] per `TDF-OCC-001`.
@@ -200,7 +199,6 @@ class TaskBoardQueueMutator {
       activeLabelId: activeLabelId,
       currentLatitude: currentLatitude,
       currentLongitude: currentLongitude,
-      pruneExpiredCompleted: false,
     );
     final sourceTier = contextBoard.findTierOfTask(taskId);
     if (sourceTier == null) return board;
@@ -217,7 +215,7 @@ class TaskBoardQueueMutator {
       );
       return identical(result, board)
           ? board
-          : result.logDomainMutation('downgradeTask id=$taskId from=Focus');
+          : result.logDomainMutation('task.downgrade id=$taskId from=Focus');
     }
     if (sourceTier == TaskTier.ready) {
       final result = _downgradeToQueueTail(
@@ -230,7 +228,7 @@ class TaskBoardQueueMutator {
       );
       return identical(result, board)
           ? board
-          : result.logDomainMutation('downgradeTask id=$taskId from=Ready');
+          : result.logDomainMutation('task.downgrade id=$taskId from=Ready');
     }
     if (sourceTier == TaskTier.planned) {
       final result = _downgradeToSomeday(
@@ -243,7 +241,7 @@ class TaskBoardQueueMutator {
       );
       return identical(result, board)
           ? board
-          : result.logDomainMutation('downgradeTask id=$taskId from=Planned');
+          : result.logDomainMutation('task.downgrade id=$taskId from=Planned');
     }
     return board;
   }
@@ -304,24 +302,31 @@ class TaskBoardQueueMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-      pruneExpiredCompleted: false,
-    ).logDomainMutation('moveTaskInQueue id=$taskId');
+    ).logDomainMutation('task.move_queue id=$taskId');
   }
 
   /// Rearms [dependencies] on [board] for the next occurrence of a recurring or restored task per `TDF_SPEC.md` Section 6.9.3.
   static List<TdfTaskDependency> rearmDependencies(
     NormalizedTierSlices board,
     List<TdfTaskDependency> dependencies,
-  ) => List.unmodifiable([
-    for (final item in dependencies)
-      if (board.findTask(item.taskId) case final target?)
-        TdfTaskDependency(
-          taskId: item.taskId,
-          requiredCompletion: captureDependencyRequirement(target),
-        )
-      else
-        item,
-  ]);
+  ) {
+    if (dependencies.isEmpty) {
+      return const <TdfTaskDependency>[];
+    }
+    final tasksById = <String, TaskItem>{
+      for (final task in board.allTasks) task.id: task,
+    };
+    return List<TdfTaskDependency>.unmodifiable(<TdfTaskDependency>[
+      for (final item in dependencies)
+        if (tasksById[item.taskId] case final target?)
+          TdfTaskDependency(
+            taskId: item.taskId,
+            requiredCompletion: captureDependencyRequirement(target),
+          )
+        else
+          item,
+    ]);
+  }
 
   /// Reconciles [currentQueue] when `copyWith` replaces tier slices without providing an explicit `queueBlock`.
   static TdfQueueBlock reconcileQueueWithSlices({
@@ -349,12 +354,17 @@ class TaskBoardQueueMutator {
         orderedSliceIds.add(task.id);
       }
     }
-    final reconciled = <String>[
-      for (final id in currentQueue.taskIds)
-        if (scheduledOpenIds.contains(id)) id,
-    ];
+    final reconciled = <String>[];
+    final seenInReconciled = <String>{};
+    for (final id in currentQueue.taskIds) {
+      if (scheduledOpenIds.contains(id) && seenInReconciled.add(id)) {
+        reconciled.add(id);
+      }
+    }
     for (final id in orderedSliceIds) {
-      if (!reconciled.contains(id)) reconciled.add(id);
+      if (seenInReconciled.add(id)) {
+        reconciled.add(id);
+      }
     }
     if (listEquals(reconciled, currentQueue.taskIds)) return currentQueue;
     return TdfQueueBlock(
@@ -458,7 +468,9 @@ class TaskBoardQueueMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-    ).logDomainMutation('restoreTask id=$taskId targetTier=${targetTier.name}');
+    ).logDomainMutation(
+      'task.restore id=$taskId targetTier=${targetTier.name}',
+    );
   }
 
   /// Schedules a task on [board] from `Someday` into the active pull cycle per `spec/TDF_SPEC_0.8.0.md` Section 10.4.2 (`TDF-MUT-004`).
@@ -479,9 +491,8 @@ class TaskBoardQueueMutator {
 
     final wasCompleted = existing.isCompleted || existing.completedAt != null;
     final effectivePriority = isPriority || existing.isPriority;
-    final nextDuePassive = (wasCompleted || isPriority)
-        ? false
-        : existing.isDuePassive;
+    final nextDuePassive =
+        !(wasCompleted || isPriority) && existing.isDuePassive;
     final taskAttributesChanged =
         wasCompleted ||
         effectivePriority != existing.isPriority ||
@@ -501,9 +512,7 @@ class TaskBoardQueueMutator {
             clearDueAnchor: wasCompleted,
             clearDueNote: wasCompleted,
             isDuePassive: nextDuePassive,
-            isSuspendedForever: wasCompleted
-                ? false
-                : existing.isSuspendedForever,
+            isSuspendedForever: !wasCompleted && existing.isSuspendedForever,
             isPriority: effectivePriority,
             dependencies: wasCompleted
                 ? rearmDependencies(board, existing.dependencies)
@@ -534,7 +543,7 @@ class TaskBoardQueueMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-    ).logDomainMutation('scheduleTask id=$taskId');
+    ).logDomainMutation('task.schedule id=$taskId');
   }
 
   /// Returns a list of [steps] with every step's `isCompleted` state set to [isCompleted].
@@ -604,7 +613,7 @@ class TaskBoardQueueMutator {
     final bool alignedDuePassive;
     if (seventhHasEffectivePriority) {
       anchorTask = eligibleWithoutTask[readyEndAfterExcludingTarget - 1];
-      alignedPriority = isTargetDueUrgent ? task.isPriority : true;
+      alignedPriority = !isTargetDueUrgent || task.isPriority;
       alignedDuePassive = task.isDuePassive;
     } else {
       anchorTask = eligibleWithoutTask.isEmpty
@@ -613,7 +622,7 @@ class TaskBoardQueueMutator {
                 ? eligibleWithoutTask.last
                 : eligibleWithoutTask[readyEndAfterExcludingTarget - 1]);
       alignedPriority = false;
-      alignedDuePassive = isTargetDueUrgent ? true : task.isDuePassive;
+      alignedDuePassive = isTargetDueUrgent || task.isDuePassive;
     }
 
     final taskChanged =
@@ -674,7 +683,7 @@ class TaskBoardQueueMutator {
     required Duration? dueLeadWindow,
   }) {
     final isTargetDueUrgent = task.isWithinDueLeadWindow(now, dueLeadWindow);
-    final nextDuePassive = isTargetDueUrgent ? true : task.isDuePassive;
+    final nextDuePassive = isTargetDueUrgent || task.isDuePassive;
     final taskChanged = task.isPriority || task.isDuePassive != nextDuePassive;
     final nextQueueIds = <String>[
       for (final id in board.queueBlock.taskIds)
@@ -838,7 +847,6 @@ class TaskBoardQueueMutator {
         deletedBlock: board.deletedBlock,
         queueBlock: board.queueBlock,
         activeLabelId: labelId,
-        pruneExpiredCompleted: false,
       );
       if (labelBoard.findTierOfTask(task.id) != TaskTier.blocked) {
         return false;

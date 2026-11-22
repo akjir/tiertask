@@ -17,8 +17,6 @@ import 'package:flutter/foundation.dart';
 
 import '../l10n/app_localizations.dart';
 import '../l10n/storage_file_read_localization_extension.dart';
-import '../l10n/tier_localization_extension.dart';
-import '../models/app_workspace.dart';
 import '../models/location_state.dart';
 import '../models/storage_file_read_status.dart';
 import '../models/task_board.dart';
@@ -30,10 +28,8 @@ import '../models/tdf_metadata.dart';
 import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
 import '../models/webdav_config.dart';
-import '../repositories/local_file_repository.dart';
-import '../repositories/webdav_repository.dart';
-import '../services/app_logger.dart';
-import 'sync_providers.dart';
+import 'sync_error_formatter.dart';
+import 'task_condition_draft_helper.dart';
 
 /// Canonical `#RRGGBB` preset color swatches offered in label color pickers.
 const List<String> canonicalLabelPresetHexColors = <String>[
@@ -301,31 +297,39 @@ class TaskScheduleHelper {
     List<TaskCondition> rules, {
     required bool isTask,
   }) {
-    final accumulator = _ConditionDraftAccumulator();
-    for (final rule in rules) {
-      _accumulateConditionRule(rule, accumulator, isTask: isTask);
-    }
-    accumulator.weekdays.sort();
+    final extracted = TaskConditionDraftHelper.extractDraftFields(
+      rules,
+      isTask: isTask,
+    );
     return ConditionDraft(
-      ignoreAllLabelConditions: accumulator.ignoreAll,
-      daysMode: _resolveDimensionMode(
-        isTask: isTask,
-        hasRules: accumulator.weekdays.isNotEmpty,
-        hasAny: accumulator.dayAny,
+      ignoreAllLabelConditions: extracted.ignoreAllLabelConditions,
+      daysMode: _fromCompileMode(
+        TaskConditionDraftHelper.resolveDimensionMode(
+          isTask: isTask,
+          hasRules: extracted.weekdays.isNotEmpty,
+          hasAny: extracted.dayAny,
+        ),
       ),
-      weekdays: accumulator.weekdays,
-      timeMode: _resolveDimensionMode(
-        isTask: isTask,
-        hasRules: accumulator.timeWindows.isNotEmpty,
-        hasAny: accumulator.timeAny,
+      weekdays: extracted.weekdays,
+      timeMode: _fromCompileMode(
+        TaskConditionDraftHelper.resolveDimensionMode(
+          isTask: isTask,
+          hasRules: extracted.timeWindows.isNotEmpty,
+          hasAny: extracted.timeAny,
+        ),
       ),
-      timeWindows: accumulator.timeWindows,
-      locationMode: _resolveDimensionMode(
-        isTask: isTask,
-        hasRules: accumulator.locationIds.isNotEmpty,
-        hasAny: accumulator.locationAny,
+      timeWindows: <TimeWindowDraft>[
+        for (final window in extracted.timeWindows)
+          TimeWindowDraft(start: window.start, end: window.end),
+      ],
+      locationMode: _fromCompileMode(
+        TaskConditionDraftHelper.resolveDimensionMode(
+          isTask: isTask,
+          hasRules: extracted.locationIds.isNotEmpty,
+          hasAny: extracted.locationAny,
+        ),
       ),
-      locationIds: accumulator.locationIds,
+      locationIds: extracted.locationIds,
     );
   }
 
@@ -335,34 +339,19 @@ class TaskScheduleHelper {
     required Iterable<TaskCondition> inheritedRules,
     required Map<String, TdfLocation> locationsById,
     required AppLocalizations localizations,
-  }) {
-    final chips = <ConditionSummaryChip>[];
-    final hasGlobalReset = ownRules.any(
-      (condition) => condition is GlobalResetTaskCondition,
-    );
-    if (hasGlobalReset) {
-      chips.add(
-        ConditionSummaryChip(label: localizations.conditionGlobalAnyLabel),
-      );
-    }
-    _appendRuleSummaryChips(
-      rules: ownRules,
-      isInherited: false,
+  }) => <ConditionSummaryChip>[
+    for (final chip in TaskConditionDraftHelper.buildSummaryChips(
+      ownRules: ownRules,
+      inheritedRules: inheritedRules,
       locationsById: locationsById,
       localizations: localizations,
-      target: chips,
-    );
-    if (!hasGlobalReset && inheritedRules.isNotEmpty) {
-      _appendRuleSummaryChips(
-        rules: inheritedRules,
-        isInherited: true,
-        locationsById: locationsById,
-        localizations: localizations,
-        target: chips,
-      );
-    }
-    return chips;
-  }
+    ))
+      ConditionSummaryChip(
+        label: chip.label,
+        locationId: chip.locationId,
+        isInherited: chip.isInherited,
+      ),
+  ];
 
   /// Collects all live and tombstoned entity identifiers currently referenced on [board].
   static Set<String> collectAllUsedEntityIds(TaskBoard board) => <String>{
@@ -405,56 +394,21 @@ class TaskScheduleHelper {
     required TaskBoard board,
     required bool isTask,
     required AppLocalizations localizations,
-  }) {
-    if (isTask && draft.ignoreAllLabelConditions) {
-      return (
-        conditions: const <TaskCondition>[GlobalResetTaskCondition()],
-        error: null,
-      );
-    }
-    final rules = <TaskCondition>[];
-
-    final dayError = _compileDayDimension(
-      mode: draft.daysMode,
-      weekdays: draft.weekdays,
-      isTask: isTask,
-      rules: rules,
-      localizations: localizations,
-    );
-    if (dayError != null) {
-      return (conditions: const <TaskCondition>[], error: dayError);
-    }
-
-    final timeError = _compileTimeDimension(
-      mode: draft.timeMode,
-      timeWindows: draft.timeWindows,
-      isTask: isTask,
-      rules: rules,
-      localizations: localizations,
-    );
-    if (timeError != null) {
-      return (conditions: const <TaskCondition>[], error: timeError);
-    }
-
-    final locationError = _compileLocationDimension(
-      mode: draft.locationMode,
-      locationIds: draft.locationIds,
-      board: board,
-      isTask: isTask,
-      rules: rules,
-      localizations: localizations,
-    );
-    if (locationError != null) {
-      return (conditions: const <TaskCondition>[], error: locationError);
-    }
-
-    return (
-      conditions: rules.isEmpty
-          ? const <TaskCondition>[]
-          : List<TaskCondition>.unmodifiable(rules),
-      error: null,
-    );
-  }
+  }) => TaskConditionDraftHelper.compileConditions(
+    ignoreAllLabelConditions: draft.ignoreAllLabelConditions,
+    daysMode: _toCompileMode(draft.daysMode),
+    weekdays: draft.weekdays,
+    timeMode: _toCompileMode(draft.timeMode),
+    timeWindows: <TimeWindowTokenPair>[
+      for (final window in draft.timeWindows)
+        (start: window.start, end: window.end),
+    ],
+    locationMode: _toCompileMode(draft.locationMode),
+    locationIds: draft.locationIds,
+    board: board,
+    isTask: isTask,
+    localizations: localizations,
+  );
 
   /// Returns `true` when [anchor] differs in any `(year, month, day, hour, minute, second)` component from [localWallClock].
   static bool differsFromWallClock(
@@ -556,13 +510,12 @@ class TaskScheduleHelper {
     ];
   }
 
-  /// Formats an initial `suspended` UTC timestamp in [configuration]'s local wall-clock time (omitting `defaultSuspendedAt`).
+  /// Formats an initial `suspended` UTC timestamp in [configuration]'s local wall-clock time, returning `''` when `null`.
   static String formatInitialSuspendedText(
     DateTime? suspendedAtUtc, [
     WebDavConfig configuration = const WebDavConfig(),
   ]) {
-    if (suspendedAtUtc == null ||
-        suspendedAtUtc == TaskItem.defaultSuspendedAt) {
+    if (suspendedAtUtc == null) {
       return '';
     }
     return formatLocalTimestamp(suspendedAtUtc, configuration);
@@ -659,93 +612,29 @@ class TaskScheduleHelper {
     Object error,
     AppLocalizations localizations, {
     bool isSave = false,
-  }) {
-    if (error is TdfSyncOutcomeException) {
-      return formatSyncOutcomeMessage(error, localizations);
-    }
-    if (error is StorageFileReadException) {
-      final formatted = localizations.formatStorageFileReadMessage(
-        error.report,
-      );
-      if (formatted.isNotEmpty) {
-        return formatted;
-      }
-      return AppLogger.sanitize(error.message);
-    }
-    if (error is LocalFileException) {
-      return AppLogger.sanitize(error.message);
-    }
-    if (error is WebDavException) {
-      return AppLogger.sanitize(error.toString());
-    }
-    if (error is WorkspaceException) {
-      return localizations.localizeWorkspaceError(error);
-    }
-    if (error is TdfException) {
-      return AppLogger.sanitize(error.message);
-    }
-    final details = AppLogger.sanitize(error.toString());
-    return isSave
-        ? localizations.errorUnexpectedSave(details)
-        : localizations.errorUnexpectedLoad(details);
-  }
+  }) =>
+      SyncErrorFormatter.formatSyncError(error, localizations, isSave: isSave);
 
   /// Maps a [TdfSyncOutcomeException] exhaustively to its localized banner message.
   static String formatSyncOutcomeMessage(
     TdfSyncOutcomeException outcome,
     AppLocalizations localizations,
-  ) {
-    return switch (outcome.kind) {
-      TdfSyncOutcomeKind.deletionConflict =>
-        localizations.syncConflictDeletionBanner,
-      TdfSyncOutcomeKind.recoveryRequired =>
-        localizations.syncConflictRecoveryBanner,
-      TdfSyncOutcomeKind.syncGenerationRollback =>
-        localizations.syncErrorGenerationRollbackBanner,
-    };
-  }
+  ) => SyncErrorFormatter.formatSyncOutcomeMessage(outcome, localizations);
+
+  /// Returns `true` when [latitude] and [longitude] are finite WGS-84 coordinates.
+  static bool isValidCoordinates(double latitude, double longitude) =>
+      latitude.isFinite &&
+      latitude >= -90.0 &&
+      latitude <= 90.0 &&
+      longitude.isFinite &&
+      longitude >= -180.0 &&
+      longitude <= 180.0;
 
   /// Maps a domain [TdfErrorKind] exhaustively into a sanitized localized persistence failure message.
   static String mapTdfExceptionMessage(
     TdfErrorKind kind,
     AppLocalizations localizations,
-  ) {
-    return switch (kind) {
-      TdfErrorKind.circularDependency =>
-        localizations.prerequisiteCyclePreventedHint,
-      TdfErrorKind.emptyText => localizations.taskNameErrorEmpty,
-      TdfErrorKind.invalidColor => localizations.labelColorErrorInvalid,
-      TdfErrorKind.invalidCondition => localizations.conditionTimeErrorInvalid,
-      TdfErrorKind.invalidNumber => localizations.repeatErrorInvalid,
-      TdfErrorKind.invalidUri => localizations.linkErrorInvalid,
-      TdfErrorKind.limitExceeded => localizations.errorLocalFileTooLarge,
-      TdfErrorKind.unexpectedToken => localizations.schedulingNoteErrorInvalid,
-      TdfErrorKind.unknownLocationReference =>
-        localizations.conditionLocationErrorInvalid,
-      TdfErrorKind.duplicateDirective ||
-      TdfErrorKind.duplicateIdentifier ||
-      TdfErrorKind.invalidBlockHeader ||
-      TdfErrorKind.invalidBoolean ||
-      TdfErrorKind.invalidCompletionState ||
-      TdfErrorKind.invalidEscapeSequence ||
-      TdfErrorKind.invalidIdentifier ||
-      TdfErrorKind.invalidQueueMembership ||
-      TdfErrorKind.invalidTime ||
-      TdfErrorKind.invalidTimestamp ||
-      TdfErrorKind.missingDirectiveArgument ||
-      TdfErrorKind.missingRequiredDirective ||
-      TdfErrorKind.missingVersionHeader ||
-      TdfErrorKind.unclosedBlock ||
-      TdfErrorKind.unexpectedClosingBrace ||
-      TdfErrorKind.unexpectedRootDirective ||
-      TdfErrorKind.unknownBlockType ||
-      TdfErrorKind.unknownDirective ||
-      TdfErrorKind.unknownLabelReference ||
-      TdfErrorKind.unsupportedVersion ||
-      TdfErrorKind.unterminatedString =>
-        localizations.taskSuspendedErrorInvalid,
-    };
-  }
+  ) => SyncErrorFormatter.mapTdfExceptionMessage(kind, localizations);
 
   /// Normalizes user-edited [rawText], collapsing ASCII-whitespace-only strings to `null` and CR/CRLF breaks to `\n`.
   static String? normalizeSchedulingNote(String rawText) {
@@ -786,7 +675,7 @@ class TaskScheduleHelper {
     );
     if (parsedLatitude == null ||
         parsedLongitude == null ||
-        !_isValidCoordinates(parsedLatitude, parsedLongitude)) {
+        !isValidCoordinates(parsedLatitude, parsedLongitude)) {
       return (
         latitude: null,
         longitude: null,
@@ -801,7 +690,7 @@ class TaskScheduleHelper {
     );
     if (roundedLatitude == null ||
         roundedLongitude == null ||
-        !_isValidCoordinates(roundedLatitude, roundedLongitude)) {
+        !isValidCoordinates(roundedLatitude, roundedLongitude)) {
       return (
         latitude: null,
         longitude: null,
@@ -840,7 +729,7 @@ class TaskScheduleHelper {
 
   /// Parses a geofence radius string (`0.01m..100km`, supporting `m`/`km` and `.`/`,`) into meters rounded to 2 decimals.
   static double? parseRadiusMeters(String rawRadius) {
-    if (_containsAsciiControlChar(rawRadius)) {
+    if (TdfMetadata.containsAsciiControlChar(rawRadius)) {
       return null;
     }
     final trimmed = rawRadius.trim();
@@ -1050,11 +939,11 @@ class TaskScheduleHelper {
     return _replaceInternalBreaksWithSpaces(rawText, firstKeep, lastKeep);
   }
 
-  /// Returns the soft WIP limit for [tier] (`3` for Focus, `5` for Ready, else `null`).
+  /// Returns the soft WIP limit for [tier] ([TaskBoard.focusSoftLimit] for Focus, [TaskBoard.readySoftLimit] for Ready, else `null`).
   static int? tierWipLimit(TaskTier tier) {
     return switch (tier) {
-      TaskTier.focus => 3,
-      TaskTier.ready => 5,
+      TaskTier.focus => TaskBoard.focusSoftLimit,
+      TaskTier.ready => TaskBoard.readySoftLimit,
       TaskTier.planned ||
       TaskTier.blocked ||
       TaskTier.someday ||
@@ -1178,7 +1067,7 @@ class TaskScheduleHelper {
     if (sourceType == LocationSourceType.gps) {
       return (normalizedSource: null, error: null);
     }
-    if (_containsAsciiControlChar(rawSource)) {
+    if (TdfMetadata.containsAsciiControlChar(rawSource)) {
       return (
         normalizedSource: null,
         error: localizations.locationSourceErrorEmpty,
@@ -1203,7 +1092,7 @@ class TaskScheduleHelper {
     String rawColorHex,
     AppLocalizations localizations,
   ) {
-    if (_containsAsciiControlChar(rawColorHex)) {
+    if (TdfMetadata.containsAsciiControlChar(rawColorHex)) {
       return (normalizedHex: null, error: localizations.labelColorErrorInvalid);
     }
     final trimmed = rawColorHex.trim();
@@ -1242,7 +1131,7 @@ class TaskScheduleHelper {
     required String invalidError,
     required String tooLongError,
   }) {
-    if (_containsAsciiControlChar(rawText) ||
+    if (TdfMetadata.containsAsciiControlChar(rawText) ||
         TdfCalendar.countUnicodeScalars(rawText) == null) {
       return (trimmed: '', error: invalidError);
     }
@@ -1355,256 +1244,6 @@ class TimeWindowDraft {
   int get hashCode => Object.hash(start, end);
 }
 
-/// Mutable accumulator collecting condition dimensions during a single-pass scan of rules.
-class _ConditionDraftAccumulator {
-  /// Creates an empty [_ConditionDraftAccumulator].
-  _ConditionDraftAccumulator();
-
-  /// Unique referenced location identifiers in insertion order.
-  final List<String> locationIds = <String>[];
-
-  /// Parsed daily time-window drafts in declaration order.
-  final List<TimeWindowDraft> timeWindows = <TimeWindowDraft>[];
-
-  /// Unique ISO weekdays collected from day rules.
-  final List<int> weekdays = <int>[];
-
-  /// Whether a `day any` group reset was seen.
-  bool dayAny = false;
-
-  /// Whether a global `condition any` reset was seen on a task.
-  bool ignoreAll = false;
-
-  /// Whether a `location any` group reset was seen.
-  bool locationAny = false;
-
-  /// Whether a `time any` group reset was seen.
-  bool timeAny = false;
-}
-
-/// Accumulates one [TaskCondition] into [accumulator] without nesting loops or switches.
-void _accumulateConditionRule(
-  TaskCondition rule,
-  _ConditionDraftAccumulator accumulator, {
-  required bool isTask,
-}) {
-  switch (rule) {
-    case GlobalResetTaskCondition():
-      if (isTask) {
-        accumulator.ignoreAll = true;
-      }
-    case GroupResetTaskCondition(:final targetGroup):
-      _markGroupReset(targetGroup, accumulator);
-    case DayTaskCondition(:final weekdays):
-      _appendUniqueInts(weekdays, accumulator.weekdays);
-    case TimeWindowTaskCondition(:final startToken, :final endToken):
-      accumulator.timeWindows.add(
-        TimeWindowDraft(start: startToken, end: endToken),
-      );
-    case LocationTaskCondition(:final locationIds):
-      _appendUniqueStrings(locationIds, accumulator.locationIds);
-  }
-}
-
-/// Validates and appends a custom weekday condition to [rules], returning an error message or `null`.
-String? _appendCustomDayCondition({
-  required List<int> weekdays,
-  required List<TaskCondition> rules,
-  required AppLocalizations localizations,
-}) {
-  for (final weekday in weekdays) {
-    if (weekday < DateTime.monday || weekday > DateTime.sunday) {
-      return localizations.conditionTimeErrorInvalid;
-    }
-  }
-  if (weekdays.isEmpty) {
-    return null;
-  }
-  if (rules.length >= maxTdfConditionRulesPerEntity) {
-    return localizations.errorLocalFileTooLarge;
-  }
-  rules.add(DayTaskCondition.fromWeekdays(weekdays));
-  return null;
-}
-
-/// Validates and appends a custom location condition to [rules], enforcing `maxTdfLocationRefsPerEntity` before deduplication.
-String? _appendCustomLocationCondition({
-  required List<String> locationIds,
-  required TaskBoard board,
-  required List<TaskCondition> rules,
-  required AppLocalizations localizations,
-}) {
-  if (locationIds.length > maxTdfLocationRefsPerEntity) {
-    return localizations.errorLocalFileTooLarge;
-  }
-  final deduplicatedIds = <String>[];
-  final seenIds = <String>{};
-  for (final locationId in locationIds) {
-    if (board.findLocation(locationId) == null) {
-      return localizations.conditionLocationErrorInvalid;
-    }
-    if (seenIds.add(locationId)) {
-      deduplicatedIds.add(locationId);
-    }
-  }
-  if (deduplicatedIds.isEmpty) {
-    return null;
-  }
-  if (rules.length >= maxTdfConditionRulesPerEntity) {
-    return localizations.errorLocalFileTooLarge;
-  }
-  rules.add(LocationTaskCondition.fromIds(deduplicatedIds));
-  return null;
-}
-
-/// Validates and appends custom time-window conditions to [rules], enforcing `maxTdfConditionRulesPerEntity`.
-String? _appendCustomTimeConditions({
-  required List<TimeWindowDraft> timeWindows,
-  required List<TaskCondition> rules,
-  required AppLocalizations localizations,
-}) {
-  for (final window in timeWindows) {
-    if (rules.length >= maxTdfConditionRulesPerEntity) {
-      return localizations.errorLocalFileTooLarge;
-    }
-    if (_containsAsciiControlChar(window.start) ||
-        _containsAsciiControlChar(window.end)) {
-      return localizations.conditionTimeErrorInvalid;
-    }
-    final parsedWindow = TimeWindowTaskCondition.tryParse(
-      window.start,
-      window.end,
-    );
-    if (parsedWindow == null) {
-      return localizations.conditionTimeErrorInvalid;
-    }
-    rules.add(parsedWindow);
-  }
-  return null;
-}
-
-/// Appends a [GroupResetTaskCondition] for [targetGroup] respecting `maxTdfConditionRulesPerEntity`.
-String? _appendGroupResetRule(
-  ConditionGroup targetGroup,
-  List<TaskCondition> rules,
-  AppLocalizations localizations,
-) {
-  if (rules.length >= maxTdfConditionRulesPerEntity) {
-    return localizations.errorLocalFileTooLarge;
-  }
-  rules.add(GroupResetTaskCondition(targetGroup: targetGroup));
-  return null;
-}
-
-/// Appends location condition summary chips for [locationIds] into [target].
-void _appendLocationSummaryChips({
-  required List<String> locationIds,
-  required bool isInherited,
-  required Map<String, TdfLocation> locationsById,
-  required List<ConditionSummaryChip> target,
-}) {
-  for (final locationId in locationIds) {
-    final location = locationsById[locationId];
-    target.add(
-      ConditionSummaryChip(
-        label: location?.name ?? locationId,
-        locationId: location != null ? locationId : null,
-        isInherited: isInherited,
-      ),
-    );
-  }
-}
-
-/// Appends localized summary chips for each rule in [rules].
-void _appendRuleSummaryChips({
-  required Iterable<TaskCondition> rules,
-  required bool isInherited,
-  required Map<String, TdfLocation> locationsById,
-  required AppLocalizations localizations,
-  required List<ConditionSummaryChip> target,
-}) {
-  final dayNames = <String>[
-    localizations.weekdayMon,
-    localizations.weekdayTue,
-    localizations.weekdayWed,
-    localizations.weekdayThu,
-    localizations.weekdayFri,
-    localizations.weekdaySat,
-    localizations.weekdaySun,
-  ];
-  for (final rule in rules) {
-    _appendSingleRuleSummaryChips(
-      rule: rule,
-      isInherited: isInherited,
-      dayNames: dayNames,
-      locationsById: locationsById,
-      localizations: localizations,
-      target: target,
-    );
-  }
-}
-
-/// Appends localized summary chips for a single [rule] into [target].
-void _appendSingleRuleSummaryChips({
-  required TaskCondition rule,
-  required bool isInherited,
-  required List<String> dayNames,
-  required Map<String, TdfLocation> locationsById,
-  required AppLocalizations localizations,
-  required List<ConditionSummaryChip> target,
-}) {
-  switch (rule) {
-    case GlobalResetTaskCondition():
-      return;
-    case GroupResetTaskCondition(:final targetGroup):
-      final label = switch (targetGroup) {
-        ConditionGroup.day => localizations.conditionDayAnyLabel,
-        ConditionGroup.time => localizations.conditionTimeAnyLabel,
-        ConditionGroup.location => localizations.conditionLocationAnyLabel,
-      };
-      target.add(ConditionSummaryChip(label: label, isInherited: isInherited));
-    case DayTaskCondition(:final weekdays):
-      final formatted = _formatWeekdaysSummary(weekdays, dayNames);
-      if (formatted.isNotEmpty) {
-        target.add(
-          ConditionSummaryChip(label: formatted, isInherited: isInherited),
-        );
-      }
-    case TimeWindowTaskCondition(:final startToken, :final endToken):
-      target.add(
-        ConditionSummaryChip(
-          label: '$startToken - $endToken',
-          isInherited: isInherited,
-        ),
-      );
-    case LocationTaskCondition(:final locationIds):
-      _appendLocationSummaryChips(
-        locationIds: locationIds,
-        isInherited: isInherited,
-        locationsById: locationsById,
-        target: target,
-      );
-  }
-}
-
-/// Appends unique integer items from [source] to [target] preserving insertion order.
-void _appendUniqueInts(Iterable<int> source, List<int> target) {
-  for (final item in source) {
-    if (!target.contains(item)) {
-      target.add(item);
-    }
-  }
-}
-
-/// Appends unique string items from [source] to [target] preserving insertion order.
-void _appendUniqueStrings(Iterable<String> source, List<String> target) {
-  for (final item in source) {
-    if (!target.contains(item)) {
-      target.add(item);
-    }
-  }
-}
-
 /// Collapses `\r\n` and standalone `\r` sequences starting at [firstCrIndex] into `\n` in a single pass.
 String _collapseCrLineEndings(String rawText, int firstCrIndex) {
   final buffer = StringBuffer(rawText.substring(0, firstCrIndex));
@@ -1622,119 +1261,6 @@ String _collapseCrLineEndings(String rawText, int firstCrIndex) {
   return buffer.toString();
 }
 
-/// Compiles the weekday dimension for [mode] and appends to [rules], returning an error or `null`.
-String? _compileDayDimension({
-  required ConditionDimensionMode mode,
-  required List<int> weekdays,
-  required bool isTask,
-  required List<TaskCondition> rules,
-  required AppLocalizations localizations,
-}) {
-  if (!isTask) {
-    if (mode == ConditionDimensionMode.any || weekdays.isEmpty) {
-      return null;
-    }
-    return _appendCustomDayCondition(
-      weekdays: weekdays,
-      rules: rules,
-      localizations: localizations,
-    );
-  }
-  return switch (mode) {
-    ConditionDimensionMode.inherit => null,
-    ConditionDimensionMode.any => _appendGroupResetRule(
-      ConditionGroup.day,
-      rules,
-      localizations,
-    ),
-    ConditionDimensionMode.custom => _appendCustomDayCondition(
-      weekdays: weekdays,
-      rules: rules,
-      localizations: localizations,
-    ),
-  };
-}
-
-/// Compiles the location dimension for [mode] and appends to [rules], returning an error or `null`.
-String? _compileLocationDimension({
-  required ConditionDimensionMode mode,
-  required List<String> locationIds,
-  required TaskBoard board,
-  required bool isTask,
-  required List<TaskCondition> rules,
-  required AppLocalizations localizations,
-}) {
-  if (!isTask) {
-    if (mode == ConditionDimensionMode.any || locationIds.isEmpty) {
-      return null;
-    }
-    return _appendCustomLocationCondition(
-      locationIds: locationIds,
-      board: board,
-      rules: rules,
-      localizations: localizations,
-    );
-  }
-  return switch (mode) {
-    ConditionDimensionMode.inherit => null,
-    ConditionDimensionMode.any => _appendGroupResetRule(
-      ConditionGroup.location,
-      rules,
-      localizations,
-    ),
-    ConditionDimensionMode.custom => _appendCustomLocationCondition(
-      locationIds: locationIds,
-      board: board,
-      rules: rules,
-      localizations: localizations,
-    ),
-  };
-}
-
-/// Compiles the time-window dimension for [mode] and appends to [rules], returning an error or `null`.
-String? _compileTimeDimension({
-  required ConditionDimensionMode mode,
-  required List<TimeWindowDraft> timeWindows,
-  required bool isTask,
-  required List<TaskCondition> rules,
-  required AppLocalizations localizations,
-}) {
-  if (!isTask) {
-    if (mode == ConditionDimensionMode.any || timeWindows.isEmpty) {
-      return null;
-    }
-    return _appendCustomTimeConditions(
-      timeWindows: timeWindows,
-      rules: rules,
-      localizations: localizations,
-    );
-  }
-  return switch (mode) {
-    ConditionDimensionMode.inherit => null,
-    ConditionDimensionMode.any => _appendGroupResetRule(
-      ConditionGroup.time,
-      rules,
-      localizations,
-    ),
-    ConditionDimensionMode.custom => _appendCustomTimeConditions(
-      timeWindows: timeWindows,
-      rules: rules,
-      localizations: localizations,
-    ),
-  };
-}
-
-/// Returns `true` when [value] contains any ASCII control character (`0x00..0x1F` or `0x7F`).
-bool _containsAsciiControlChar(String value) {
-  for (var i = 0; i < value.length; i++) {
-    final unit = value.codeUnitAt(i);
-    if (unit <= 0x1F || unit == 0x7F) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /// Returns whether [text] contains any control character disallowed by `<note>` (`0x00..0x1F` except `\t`, `\n`, `\r`, or `0x7F`).
 bool _containsIllegalNoteControlChar(String text) {
   for (var i = 0; i < text.length; i++) {
@@ -1748,20 +1274,13 @@ bool _containsIllegalNoteControlChar(String text) {
   return false;
 }
 
-/// Formats valid ISO [weekdays] (`1..7`) into a comma-separated label using [dayNames].
-String _formatWeekdaysSummary(List<int> weekdays, List<String> dayNames) {
-  final buffer = StringBuffer();
-  for (final day in weekdays) {
-    if (day < DateTime.monday || day > DateTime.sunday) {
-      continue;
-    }
-    if (buffer.isNotEmpty) {
-      buffer.write(', ');
-    }
-    buffer.write(dayNames[day - 1]);
-  }
-  return buffer.toString();
-}
+/// Maps [ConditionCompileMode] to UI [ConditionDimensionMode].
+ConditionDimensionMode _fromCompileMode(ConditionCompileMode mode) =>
+    switch (mode) {
+      ConditionCompileMode.inherit => ConditionDimensionMode.inherit,
+      ConditionCompileMode.any => ConditionDimensionMode.any,
+      ConditionCompileMode.custom => ConditionDimensionMode.custom,
+    };
 
 /// Returns `true` when [unit] is ASCII trim whitespace (`TAB`, `LF`, `CR`, or `SPACE`).
 bool _isAsciiTrimWhitespace(int unit) =>
@@ -1770,30 +1289,6 @@ bool _isAsciiTrimWhitespace(int unit) =>
 /// Returns `true` when [unit] is `TAB`, `LF`, or `CR`.
 bool _isInternalLineBreakOrTab(int unit) =>
     unit == 0x09 || unit == 0x0A || unit == 0x0D;
-
-/// Returns `true` when [latitude] and [longitude] are finite WGS-84 coordinates.
-bool _isValidCoordinates(double latitude, double longitude) =>
-    latitude.isFinite &&
-    latitude >= -90.0 &&
-    latitude <= 90.0 &&
-    longitude.isFinite &&
-    longitude >= -180.0 &&
-    longitude <= 180.0;
-
-/// Records a group reset flag on [accumulator] for [targetGroup].
-void _markGroupReset(
-  ConditionGroup targetGroup,
-  _ConditionDraftAccumulator accumulator,
-) {
-  switch (targetGroup) {
-    case ConditionGroup.day:
-      accumulator.dayAny = true;
-    case ConditionGroup.time:
-      accumulator.timeAny = true;
-    case ConditionGroup.location:
-      accumulator.locationAny = true;
-  }
-}
 
 /// Collapses `\r\n`, `\r`, `\n`, and `\t` inside `rawText[start..end]` into single `0x20` spaces.
 String _replaceInternalBreaksWithSpaces(String rawText, int start, int end) {
@@ -1812,22 +1307,13 @@ String _replaceInternalBreaksWithSpaces(String rawText, int start, int end) {
   return buffer.toString();
 }
 
-/// Resolves the UI [ConditionDimensionMode] from entity type and parsed rules.
-ConditionDimensionMode _resolveDimensionMode({
-  required bool isTask,
-  required bool hasRules,
-  required bool hasAny,
-}) {
-  if (hasRules) {
-    return ConditionDimensionMode.custom;
-  }
-  if (isTask && hasAny) {
-    return ConditionDimensionMode.any;
-  }
-  return isTask
-      ? ConditionDimensionMode.inherit
-      : ConditionDimensionMode.custom;
-}
+/// Maps UI [ConditionDimensionMode] to [ConditionCompileMode].
+ConditionCompileMode _toCompileMode(ConditionDimensionMode mode) =>
+    switch (mode) {
+      ConditionDimensionMode.inherit => ConditionCompileMode.inherit,
+      ConditionDimensionMode.any => ConditionCompileMode.any,
+      ConditionDimensionMode.custom => ConditionCompileMode.custom,
+    };
 
 /// Parses an unsigned ASCII decimal integer in `[min, max]` bounded by `maxTdfNumberLength`, or returns `null`.
 int? _tryParseBoundedUnsignedInt(
@@ -1854,7 +1340,7 @@ int? _tryParseBoundedUnsignedInt(
 
 /// Parses a strict finite decimal string accepting `.` or `,` without exponents, or returns `null`.
 double? _tryParseDecimalString(String raw, {required bool allowNegative}) {
-  if (raw.isEmpty || _containsAsciiControlChar(raw)) {
+  if (raw.isEmpty || TdfMetadata.containsAsciiControlChar(raw)) {
     return null;
   }
   final trimmed = raw.trim();
@@ -1910,7 +1396,7 @@ double? _tryParseDecimalString(String raw, {required bool allowNegative}) {
   SubtaskItem step,
   AppLocalizations localizations,
 ) {
-  if (_containsAsciiControlChar(step.title) ||
+  if (TdfMetadata.containsAsciiControlChar(step.title) ||
       TdfCalendar.countUnicodeScalars(step.title) == null) {
     return (item: null, error: localizations.historyErrorTextInvalid);
   }

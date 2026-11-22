@@ -54,13 +54,13 @@ class _BlockingTaskNotifier extends TaskNotifier {
 
   final TaskBoard _initialBoard;
   Completer<void>? nextMutationCompleter;
-  Object? nextError;
+  Exception? nextError;
 
   @override
   Future<TaskBoard> build() async => _initialBoard;
 
   @override
-  Future<void> addLabel(
+  Future<bool> addLabel(
     String name, {
     String? color,
     String? id,
@@ -71,10 +71,11 @@ class _BlockingTaskNotifier extends TaskNotifier {
     DateTime? currentDate,
   }) async {
     await _awaitGate();
+    return true;
   }
 
   @override
-  Future<void> updateLabel(
+  Future<bool> updateLabel(
     String labelId, {
     String? name,
     String? color,
@@ -87,6 +88,7 @@ class _BlockingTaskNotifier extends TaskNotifier {
     DateTime? currentDate,
   }) async {
     await _awaitGate();
+    return true;
   }
 
   Future<void> _awaitGate() async {
@@ -152,7 +154,7 @@ class _ControlledSettingsRepository extends InMemorySettingsRepository {
   int createCallCount = 0;
   Completer<void>? deleteGate;
   int deleteCallCount = 0;
-  Object? nextError;
+  Exception? nextError;
   Completer<void>? renameGate;
   int renameCallCount = 0;
 
@@ -220,17 +222,17 @@ class _ControlledSettingsRepository extends InMemorySettingsRepository {
 
 class _DelayedLocationRepository extends FakeLocationRepository {
   Completer<List<GeocodingCandidate>>? nextSearchCompleter;
-  Object? nextSearchError;
+  Exception? nextSearchError;
 
   @override
-  Future<List<GeocodingCandidate>> searchLocations(String query) async {
+  Future<List<GeocodingCandidate>> searchLocations(String query) {
     if (nextSearchCompleter case final completer?) {
       nextSearchCompleter = null;
       return completer.future;
     }
     if (nextSearchError case final error?) {
       nextSearchError = null;
-      throw error;
+      return Future<List<GeocodingCandidate>>.error(error);
     }
     return super.searchLocations(query);
   }
@@ -404,7 +406,7 @@ class _SpyTaskNotifier extends TaskNotifier {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final fixedNow = DateTime.utc(2026, 11, 21, 12, 0);
+  final fixedNow = DateTime.utc(2026, 11, 21, 12);
   const englishLocale = Locale('en');
   const germanLocale = Locale('de');
   final englishLocalizations = lookupAppLocalizations(englishLocale);
@@ -631,7 +633,7 @@ location loc0000001 {
 
         const syncStateA = SyncActionsState();
         final syncStateB = syncStateA.copyWith(isBusy: true);
-        expect(syncStateA, equals(const SyncActionsState(isBusy: false)));
+        expect(syncStateA, equals(const SyncActionsState()));
         expect(syncStateA.hashCode, equals(const SyncActionsState().hashCode));
         expect(syncStateB, equals(const SyncActionsState(isBusy: true)));
         expect(syncStateB.copyWith(), equals(syncStateB));
@@ -1559,7 +1561,6 @@ location locA$idSuffix {
   group('EntityActionsNotifier GPS, Address & Plus Code resolution', () {
     test('resolveCurrentGpsPosition refreshes missing fix, formats 6dp, and emits gpsAppliedNotice', () async {
       final harness = createEntityHarness(
-        locationState: const LocationState.unavailable(),
         refreshedFix: const LocationFix(
           latitude: 52.5200089,
           longitude: 13.4049541,
@@ -1579,9 +1580,7 @@ location locA$idSuffix {
         equals(englishLocalizations.gpsAppliedNotice),
       );
 
-      final unavailableHarness = createEntityHarness(
-        locationState: const LocationState.unavailable(),
-      );
+      final unavailableHarness = createEntityHarness();
       addTearDown(unavailableHarness.container.dispose);
       await unavailableHarness.container.read(taskNotifierProvider.future);
       final unavailableActions = unavailableHarness.container.read(
@@ -1949,7 +1948,6 @@ location locA$idSuffix {
         serverUrl: 'https://dav.example.com/remote.php/dav/files/user/',
         username: 'user',
         password: 'secret',
-        filePath: 'tasks.tdf',
         language: AppLanguage.english,
       );
       var isWebDavOffline = false;
@@ -2126,9 +2124,9 @@ location locA$idSuffix {
     test('refreshLocation returns ActionPersistFailed when location refresh throws', () async {
       final notifier = _ControlledLocationNotifier(
         const LocationState.unavailable(),
-        onRefresh: (_) async {
-          throw const LocalFileException('Location daemon unavailable');
-        },
+        onRefresh: (_) => Future<void>.error(
+          const LocalFileException('Location daemon unavailable'),
+        ),
       );
       final container = createSyncContainer(
         localeOverride: englishLocale,
@@ -2466,14 +2464,11 @@ location locA$idSuffix {
       );
       final spyNotifier = _SpyTaskNotifier(
         board: createSampleBoard(),
-        onResolveDeletionConflicts:
-            ({
-              required taskResolutions,
-              required labelResolutions,
-              required locationResolutions,
-            }) async {
-              throw resolutionError;
-            },
+        onResolveDeletionConflicts: ({
+          required taskResolutions,
+          required labelResolutions,
+          required locationResolutions,
+        }) => Future<TaskBoard>.error(resolutionError),
       );
       final container = createSyncContainer(
         localeOverride: englishLocale,
@@ -2625,13 +2620,13 @@ location locA$idSuffix {
               required taskResolutions,
               required labelResolutions,
               required locationResolutions,
-            }) async {
-              throw const TdfSyncOutcomeException(
+            }) => Future<TaskBoard>.error(
+              const TdfSyncOutcomeException(
                 kind: TdfSyncOutcomeKind.deletionConflict,
                 message: 'Secondary conflict encountered',
                 conflictedTaskIds: <String>['task000001'],
-              );
-            },
+              ),
+            ),
       );
       final container = createSyncContainer(
         localeOverride: englishLocale,
@@ -2734,7 +2729,6 @@ location locA$idSuffix {
       final subscription = container.listen<FloatingNotice?>(
         floatingNoticeProvider,
         (_, next) => noticeHistory.add(next),
-        fireImmediately: false,
       );
       addTearDown(subscription.close);
 
@@ -2837,7 +2831,7 @@ location locA$idSuffix {
 
       final actions = container.read(workspaceActionsProvider.notifier);
       await actions.createWorkspace('Work', activate: false);
-      await actions.createWorkspace('Home', activate: true);
+      await actions.createWorkspace('Home');
       await container.read(workspaceSummariesProvider.future);
 
       final renameActive = await actions.renameWorkspace(
@@ -3016,7 +3010,7 @@ location locA$idSuffix {
       final repository = _ControlledSettingsRepository(
         const WebDavConfig(language: AppLanguage.english),
       );
-      await repository.createWorkspace('Work', activate: false);
+      await repository.createWorkspace('Work');
 
       final container = createWorkspaceContainer(
         settingsRepository: repository,
@@ -3201,9 +3195,8 @@ location locA$idSuffix {
       );
       final locationNotifier = _ControlledLocationNotifier(
         const LocationState.unavailable(),
-        onRefresh: (_) async {
-          throw const LocalFileException('Sensor unavailable');
-        },
+        onRefresh: (_) =>
+            Future<void>.error(const LocalFileException('Sensor unavailable')),
       );
       final container = createSyncContainer(
         localeOverride: englishLocale,
@@ -3336,6 +3329,173 @@ location locA$idSuffix {
         harness.container.read(entityActionsProvider).isResolvingLocation,
         isFalse,
       );
+    });
+
+    test('EntityActionsNotifier and SyncActionsNotifier reject ABA workspace-switch stale completions and return clear busy messages', () async {
+      const workspaceAConfig = WebDavConfig(
+        language: AppLanguage.english,
+        localFilePath: 'alpha.tdf',
+        filePath: 'alpha.tdf',
+      );
+      const workspaceB = AppWorkspace(
+        id: 'workspace_b',
+        name: 'Workspace B',
+        config: WebDavConfig(
+          language: AppLanguage.english,
+          localFilePath: 'beta.tdf',
+          filePath: 'beta.tdf',
+        ),
+      );
+      final workspaceNotifier = _ControllableWorkspaceNotifier();
+      final blockingTask = _BlockingTaskNotifier(TaskBoard.empty());
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(workspaceAConfig),
+          ),
+          activeWorkspaceProvider.overrideWith(() => workspaceNotifier),
+          taskNotifierProvider.overrideWith(() => blockingTask),
+          appLocaleProvider.overrideWithValue(englishLocale),
+          clockProvider.overrideWithValue(() => fixedNow),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final workspaceA = await container.read(activeWorkspaceProvider.future);
+      await container.read(taskNotifierProvider.future);
+      final entitySub = container.listen(entityActionsProvider, (_, _) {});
+      addTearDown(entitySub.close);
+      final noticeSub = container.listen(floatingNoticeProvider, (_, _) {});
+      addTearDown(noticeSub.close);
+
+      // Busy rejection in EntityActionsNotifier must report syncStatusSyncing, not unreadable file error.
+      final firstGate = Completer<void>();
+      blockingTask.nextMutationCompleter = firstGate;
+      final entityActions = container.read(entityActionsProvider.notifier);
+      final pendingCreate = entityActions.quickCreateLabel('First');
+      final busyResult = await entityActions.quickCreateLabel('Second');
+      expect(busyResult, isA<ActionPersistFailed>());
+      expect(
+        (busyResult as ActionPersistFailed).message,
+        equals(englishLocalizations.syncStatusSyncing),
+        reason: 'EntityActionsNotifier busy guard must return syncStatusSyncing instead of unreadable local file error',
+      );
+
+      // Perform an ABA workspace switch (A -> B -> A) while pendingCreate is suspended!
+      workspaceNotifier.emitWorkspace(workspaceB);
+      expect(container.read(entityActionsProvider).isBusy, isFalse);
+      workspaceNotifier.emitWorkspace(workspaceA);
+
+      // Start a fresh operation in the new Workspace A session so isBusy is true again.
+      final secondGate = Completer<void>();
+      blockingTask.nextMutationCompleter = secondGate;
+      final newSessionCreate = entityActions.quickCreateLabel('Fresh');
+      expect(container.read(entityActionsProvider).isBusy, isTrue);
+
+      // Complete the stale first session's operation: ABA guard must NOT clear the new session's isBusy or emit stale notices!
+      firstGate.complete();
+      await pendingCreate;
+      expect(
+        container.read(entityActionsProvider).isBusy,
+        isTrue,
+        reason: 'Stale operation from pre-ABA workspace A must NOT clear isBusy of the new workspace A session',
+      );
+      expect(
+        container.read(floatingNoticeProvider),
+        isNull,
+        reason: 'Stale operation from pre-ABA workspace A must NOT emit a floating notice into the new session',
+      );
+
+      secondGate.complete();
+      await newSessionCreate;
+      expect(container.read(entityActionsProvider).isBusy, isFalse);
+
+      // SyncActionsNotifier must also reject ABA workspace-switch (A -> B -> A) stale completions.
+      final syncGate1 = Completer<void>();
+      final syncGate2 = Completer<void>();
+      var syncCallCount = 0;
+      final syncWorkspaceNotifier = _ControllableWorkspaceNotifier();
+      final spySyncTask = _SpyTaskNotifier(
+        onSyncFromRemote: () {
+          syncCallCount++;
+          return syncCallCount == 1 ? syncGate1.future : syncGate2.future;
+        },
+      );
+      final syncContainer = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(workspaceAConfig),
+          ),
+          activeWorkspaceProvider.overrideWith(() => syncWorkspaceNotifier),
+          taskNotifierProvider.overrideWith(() => spySyncTask),
+          appLocaleProvider.overrideWithValue(englishLocale),
+          clockProvider.overrideWithValue(() => fixedNow),
+        ],
+      );
+      addTearDown(syncContainer.dispose);
+      final syncWorkspaceA = await syncContainer.read(
+        activeWorkspaceProvider.future,
+      );
+      await syncContainer.read(taskNotifierProvider.future);
+      final syncSub = syncContainer.listen(syncActionsProvider, (_, _) {});
+      addTearDown(syncSub.close);
+
+      final syncActions = syncContainer.read(syncActionsProvider.notifier);
+      final staleSync = syncActions.syncNow(locale: englishLocale);
+      expect(syncContainer.read(syncActionsProvider).isBusy, isTrue);
+
+      // Switch A -> B -> A while staleSync is suspended, then start a fresh sync in the new A session.
+      syncWorkspaceNotifier.emitWorkspace(workspaceB);
+      expect(syncContainer.read(syncActionsProvider).isBusy, isFalse);
+      syncWorkspaceNotifier.emitWorkspace(syncWorkspaceA);
+
+      final freshSync = syncActions.syncNow(locale: englishLocale);
+      expect(syncContainer.read(syncActionsProvider).isBusy, isTrue);
+
+      syncGate1.complete();
+      await staleSync;
+      expect(
+        syncContainer.read(syncActionsProvider).isBusy,
+        isTrue,
+        reason: 'Stale SyncActionsNotifier completion after A -> B -> A must not clear new session isBusy',
+      );
+      syncGate2.complete();
+      await freshSync;
+      expect(syncContainer.read(syncActionsProvider).isBusy, isFalse);
+
+      // WorkspaceActionsNotifier busy rejection must return a non-empty localized syncStatusSyncing message.
+      final wsRepo = _ControlledSettingsRepository(workspaceAConfig);
+      await wsRepo.createWorkspace(
+        'Work',
+        id: 'work',
+        config: const WebDavConfig(
+          localFilePath: 'work.tdf',
+          filePath: 'work.tdf',
+        ),
+      );
+      final wsContainer = createWorkspaceContainer(settingsRepository: wsRepo);
+      addTearDown(wsContainer.dispose);
+      await primeWorkspaceProviders(wsContainer);
+      final switchGate = Completer<void>();
+      wsRepo.activateGate = switchGate;
+      final wsActions = wsContainer.read(workspaceActionsProvider.notifier);
+      final pendingSwitch = wsActions.switchWorkspace(
+        'work',
+        locale: englishLocale,
+      );
+      final wsBusy = await wsActions.renameWorkspace(
+        'work',
+        'Renamed',
+        locale: englishLocale,
+      );
+      expect(wsBusy, isA<ActionValidationFailed>());
+      expect(
+        (wsBusy as ActionValidationFailed).message,
+        equals(englishLocalizations.syncStatusSyncing),
+        reason: 'WorkspaceActionsNotifier busy guard must return localized syncStatusSyncing instead of empty message',
+      );
+      switchGate.complete();
+      await pendingSwitch;
     });
   });
 }

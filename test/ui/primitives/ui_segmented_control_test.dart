@@ -105,6 +105,58 @@ void main() {
       await tester.pump();
       expect(selected, equals('a'));
     });
+
+    testWidgets(
+      'defers FocusNode disposal when shrinking segments while trailing segment is focused',
+      (tester) async {
+        var selected = 'c';
+        var segments = const <UiSegment<String>>[
+          UiSegment<String>(value: 'a', label: 'Alpha'),
+          UiSegment<String>(value: 'b', label: 'Beta'),
+          UiSegment<String>(value: 'c', label: 'Gamma'),
+        ];
+        late StateSetter rebuildHost;
+
+        await pumpUiWidget(
+          tester,
+          StatefulBuilder(
+            builder: (context, setState) {
+              rebuildHost = setState;
+              return Center(
+                child: SizedBox(
+                  width: 320,
+                  child: UiSegmentedControl<String>(
+                    value: selected,
+                    segments: segments,
+                    onChanged: (next) => setState(() => selected = next),
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+
+        await tester.tap(find.text('Gamma'));
+        await tester.pump();
+
+        rebuildHost(() {
+          selected = 'a';
+          segments = const <UiSegment<String>>[
+            UiSegment<String>(value: 'a', label: 'Alpha'),
+            UiSegment<String>(value: 'b', label: 'Beta'),
+          ];
+        });
+        await tester.pumpAndSettle();
+
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'Shrinking horizontal segments must defer disposal of removed FocusNodes until after detach',
+        );
+        expect(find.text('Gamma'), findsNothing);
+        expect(find.text('Alpha'), findsOneWidget);
+      },
+    );
   });
 
   group('UiSegmentedControl vertical combobox mode', () {
@@ -1092,6 +1144,114 @@ void main() {
           same(verticalElementBefore),
           reason: 'Re-enabling vertical control must preserve trigger AnimatedContainer element',
         );
+      },
+    );
+
+    testWidgets(
+      'refreshes popup metrics dynamically when viewport resizes or ancestor scrollable moves while open and supports Home/End keys',
+      (tester) async {
+        final scrollController = ScrollController();
+        addTearDown(scrollController.dispose);
+        var selected = 'queue';
+
+        await pumpUiWidget(
+          tester,
+          StatefulBuilder(
+            builder: (context, setState) {
+              return SingleChildScrollView(
+                controller: scrollController,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    const SizedBox(height: 720.0),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 16.0),
+                      child: UiSegmentedControl<String>(
+                        key: const ValueKey<String>('dynamic_vertical_control'),
+                        mode: UiSegmentedControlMode.vertical,
+                        value: selected,
+                        segments: _placementSegments,
+                        onChanged: (next) => setState(() => selected = next),
+                      ),
+                    ),
+                    const SizedBox(height: 800.0),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+
+        // Scroll so trigger is near top of viewport -> opens downward.
+        scrollController.jumpTo(680.0);
+        await tester.pumpAndSettle();
+
+        final controlFinder = find.byKey(
+          const ValueKey<String>('dynamic_vertical_control'),
+        );
+        await tester.tap(controlFinder);
+        await tester.pumpAndSettle();
+
+        final followerFinder = find.byType(CompositedTransformFollower);
+        expect(followerFinder, findsOneWidget);
+        expect(
+          tester
+              .widget<SizeTransition>(
+                find.descendant(
+                  of: followerFinder,
+                  matching: find.byType(SizeTransition),
+                ),
+              )
+              .alignment,
+          equals(Alignment.topCenter),
+          reason: 'Trigger near top must initially open downward',
+        );
+
+        // Scroll ancestor while popup stays open so trigger sits near bottom -> flips upward.
+        scrollController.jumpTo(0.0);
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<SizeTransition>(
+                find.descendant(
+                  of: followerFinder,
+                  matching: find.byType(SizeTransition),
+                ),
+              )
+              .alignment,
+          equals(Alignment.bottomCenter),
+          reason: 'Ancestor scroll moving trigger near bottom must refresh popup direction upward',
+        );
+
+        // Resize viewport to compact 390px while open -> row height refreshes to 44px.
+        tester.view.physicalSize = const Size(390.0, 700.0);
+        await tester.pumpAndSettle();
+        final priorityRow = find
+            .ancestor(
+              of: find.text('Priority'),
+              matching: find.byType(AnimatedContainer),
+            )
+            .first;
+        expect(
+          tester.getSize(priorityRow).height,
+          greaterThanOrEqualTo(UiSpacingTokens.standard.touchTargetMobile),
+          reason: 'Resizing viewport to compact while open must refresh option row height to 44px',
+        );
+
+        // Home/End keyboard navigation jumps to last (Someday) and first (Queue) enabled options.
+        await tester.sendKeyEvent(LogicalKeyboardKey.end);
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(selected, equals('someday'));
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        await tester.sendKeyEvent(LogicalKeyboardKey.home);
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pumpAndSettle();
+        expect(selected, equals('queue'));
       },
     );
   });

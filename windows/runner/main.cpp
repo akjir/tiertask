@@ -5,6 +5,29 @@
 #include "flutter_window.h"
 #include "utils.h"
 
+namespace {
+
+// RAII guard balancing CoInitializeEx with CoUninitialize on every exit path.
+class ScopedComApartment {
+ public:
+  explicit ScopedComApartment(DWORD coinit_flags)
+      : hr_(::CoInitializeEx(nullptr, coinit_flags)) {}
+
+  ~ScopedComApartment() {
+    if (SUCCEEDED(hr_)) {
+      ::CoUninitialize();
+    }
+  }
+
+  ScopedComApartment(const ScopedComApartment&) = delete;
+  ScopedComApartment& operator=(const ScopedComApartment&) = delete;
+
+ private:
+  HRESULT hr_;
+};
+
+}  // namespace
+
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
   // Attach to console when present (e.g., 'flutter run') or create a
@@ -15,7 +38,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   // Initialize COM, so that it is available for use in the library and/or
   // plugins.
-  ::CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+  ScopedComApartment com_apartment(COINIT_APARTMENTTHREADED);
 
   flutter::DartProject project(L"data");
 
@@ -38,6 +61,5 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
     ::DispatchMessage(&msg);
   }
 
-  ::CoUninitialize();
   return EXIT_SUCCESS;
 }

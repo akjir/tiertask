@@ -18,6 +18,7 @@ import 'package:material_ui/material_ui.dart';
 import '../tokens/ui_theme_tokens.dart';
 import '../tokens/ui_typography_tokens.dart';
 import 'ui_button.dart';
+import 'ui_segmented_control.dart';
 
 /// Input control role rendered by [UiField] (`U-COMP-002`).
 enum UiFieldKind {
@@ -30,7 +31,7 @@ enum UiFieldKind {
   /// Password text input with built-in visibility reveal toggle.
   password,
 
-  /// Flat `1px` bordered dropdown select without Material underline.
+  /// Flat `1px` bordered combobox select with animated custom popup menu.
   select,
 
   /// Tap-to-pick bordered date/time display input.
@@ -224,21 +225,92 @@ class UiField extends StatefulWidget {
   State<UiField> createState() => _UiFieldState();
 }
 
+/// Vertical wrapper rendering optional field label, control slot, helper text, and live error text.
+class _UiFieldLayoutColumn extends StatelessWidget {
+  /// Creates a [_UiFieldLayoutColumn].
+  const _UiFieldLayoutColumn({
+    required this.label,
+    required this.helperText,
+    required this.errorText,
+    required this.opacity,
+    required this.control,
+  });
+
+  /// Inner interactive field control.
+  final Widget control;
+
+  /// Optional inline validation error text.
+  final String? errorText;
+
+  /// Optional muted helper copy beneath the field.
+  final String? helperText;
+
+  /// Optional label rendered above the field.
+  final String? label;
+
+  /// Effective enabled/readonly opacity applied to [control].
+  final double opacity;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+    final error = errorText;
+    final hasError = error != null && error.isNotEmpty;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        if (label case final fieldLabel?) ...<Widget>[
+          Text(
+            fieldLabel,
+            style: tokens.typography.meta.copyWith(
+              color: colors.muted,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(height: 6.0),
+        ],
+        Opacity(opacity: opacity, child: control),
+        if (helperText case final helper?) ...<Widget>[
+          const SizedBox(height: 4.0),
+          Text(
+            helper,
+            style: tokens.typography.eyebrow.copyWith(
+              color: colors.muted,
+              fontWeight: FontWeight.w400,
+              letterSpacing: 0.0,
+            ),
+          ),
+        ],
+        if (hasError) ...<Widget>[
+          const SizedBox(height: 4.0),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              error,
+              style: tokens.typography.meta.copyWith(
+                color: colors.danger,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 /// Manages internal controller/focus lifecycles, focus border color, and password reveal state for [UiField].
 class _UiFieldState extends State<UiField> {
-  /// Internal controller created only when `widget.controller == null`.
+  final List<ChangeNotifier> _pendingDisposals = <ChangeNotifier>[];
+
   TextEditingController? _ownedController;
-
-  /// Internal focus node created only when `widget.focusNode == null`.
   FocusNode? _ownedFocusNode;
-
-  /// Whether password characters are currently obscured.
   bool _obscurePassword = true;
-
-  /// Whether [_controller] currently holds non-empty text (gates clear-button rebuilds).
   bool _hasText = false;
-
-  /// Whether this field container currently holds focus.
+  bool _isDisposalScheduled = false;
   bool _isFocused = false;
 
   /// Active text controller (caller-owned or internal).
@@ -271,9 +343,11 @@ class _UiFieldState extends State<UiField> {
     if (oldWidget.focusNode != widget.focusNode) {
       final previousNode = oldWidget.focusNode ?? _ownedFocusNode;
       previousNode?.removeListener(_handleFocusChange);
-      if (widget.focusNode != null && _ownedFocusNode != null) {
-        _ownedFocusNode?.dispose();
-        _ownedFocusNode = null;
+      if (widget.focusNode != null) {
+        if (_ownedFocusNode case final previousOwned?) {
+          _ownedFocusNode = null;
+          _enqueueDisposal(previousOwned);
+        }
       }
       _attachFocusListener(_focusNode);
       _isFocused = _focusNode.hasFocus;
@@ -281,9 +355,11 @@ class _UiFieldState extends State<UiField> {
     if (oldWidget.controller != widget.controller) {
       final previousController = oldWidget.controller ?? _ownedController;
       previousController?.removeListener(_handleTextChange);
-      if (widget.controller != null && _ownedController != null) {
-        _ownedController?.dispose();
-        _ownedController = null;
+      if (widget.controller != null) {
+        if (_ownedController case final previousOwned?) {
+          _ownedController = null;
+          _enqueueDisposal(previousOwned);
+        }
       }
       _attachTextListener(_controller);
       _hasText = _controller.text.isNotEmpty;
@@ -294,6 +370,7 @@ class _UiFieldState extends State<UiField> {
   void dispose() {
     (widget.focusNode ?? _ownedFocusNode)?.removeListener(_handleFocusChange);
     (widget.controller ?? _ownedController)?.removeListener(_handleTextChange);
+    _flushPendingDisposals();
     _ownedFocusNode?.dispose();
     _ownedController?.dispose();
     super.dispose();
@@ -302,73 +379,50 @@ class _UiFieldState extends State<UiField> {
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
-    final surfaceLevel = UiSurfaceScope.of(context);
-    final fillColor = surfaceLevel == UiSurfaceLevel.insetWell
-        ? colors.panel
-        : colors.bg;
     final errorTextValue = widget.errorText;
     final hasError = errorTextValue != null && errorTextValue.isNotEmpty;
-    final borderColor = hasError
-        ? colors.danger
-        : (_isFocused ? colors.accent : colors.line);
     final opacity = widget.readOnly
         ? tokens.focus.readonlyOpacity
         : (widget.enabled ? 1.0 : tokens.focus.disabledOpacity);
 
-    final control = AnimatedContainer(
-      duration: tokens.focus.hoverDuration,
-      constraints: BoxConstraints(minHeight: _resolveHeight(tokens)),
-      decoration: BoxDecoration(
-        color: fillColor,
-        borderRadius: BorderRadius.circular(
-          widget.borderRadius ?? tokens.radii.md,
-        ),
-        border: Border.all(color: borderColor, width: tokens.radii.borderWidth),
-      ),
-      child: _buildInnerControl(tokens),
-    );
+    final control = widget.kind == UiFieldKind.select
+        ? UiSegmentedControl<String?>(
+            mode: UiSegmentedControlMode.vertical,
+            segments: <UiSegment<String?>>[
+              for (final option in widget.selectOptions)
+                UiSegment<String?>(
+                  value: option.value,
+                  label: option.label,
+                  enabled: option.enabled,
+                ),
+            ],
+            value: widget.selectValue,
+            onChanged: widget.onSelectChanged != null ? _handleSelect : null,
+            enabled: widget.enabled && !widget.readOnly,
+            semanticLabel: widget.semanticLabel ?? widget.label,
+            focusNode: _focusNode,
+            hintText: widget.hintText ?? '',
+            leadingIcon: widget.leadingIcon,
+            hasError: hasError,
+            minHeight: _resolveHeight(tokens),
+            borderRadius: widget.borderRadius ?? tokens.radii.md,
+            textStyle: _resolveTextStyle(tokens),
+            applyDisabledOpacity: false,
+          )
+        : _UiStandardFieldShell(
+            minHeight: _resolveHeight(tokens),
+            borderRadius: widget.borderRadius ?? tokens.radii.md,
+            hasError: hasError,
+            isFocused: _isFocused,
+            child: _buildStandardControl(tokens),
+          );
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        if (widget.label case final fieldLabel?) ...<Widget>[
-          Text(
-            fieldLabel,
-            style: tokens.typography.meta.copyWith(
-              color: colors.muted,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-          const SizedBox(height: 6.0),
-        ],
-        Opacity(opacity: opacity, child: control),
-        if (widget.helperText case final helper?) ...<Widget>[
-          const SizedBox(height: 4.0),
-          Text(
-            helper,
-            style: tokens.typography.eyebrow.copyWith(
-              color: colors.muted,
-              fontWeight: FontWeight.w400,
-              letterSpacing: 0.0,
-            ),
-          ),
-        ],
-        if (hasError) ...<Widget>[
-          const SizedBox(height: 4.0),
-          Semantics(
-            liveRegion: true,
-            child: Text(
-              widget.errorText ?? '',
-              style: tokens.typography.meta.copyWith(
-                color: colors.danger,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ],
+    return _UiFieldLayoutColumn(
+      label: widget.label,
+      helperText: widget.helperText,
+      errorText: errorTextValue,
+      opacity: opacity,
+      control: control,
     );
   }
 
@@ -380,19 +434,6 @@ class _UiFieldState extends State<UiField> {
   /// Attaches text change monitoring so the clear button updates reactively.
   void _attachTextListener(TextEditingController controller) {
     controller.addListener(_handleTextChange);
-  }
-
-  /// Builds the kind-specific interior control inside the flat bordered shell.
-  Widget _buildInnerControl(UiThemeTokens tokens) {
-    return switch (widget.kind) {
-      UiFieldKind.text ||
-      UiFieldKind.multiline ||
-      UiFieldKind.password ||
-      UiFieldKind.search => _buildTextInput(tokens),
-      UiFieldKind.select => _buildSelectInput(tokens),
-      UiFieldKind.dateTime => _buildDateTimeInput(tokens),
-      UiFieldKind.readOnlyDisplay => _buildReadOnlyDisplay(tokens),
-    };
   }
 
   /// Builds the tap-to-pick bordered date/time display row.
@@ -485,61 +526,17 @@ class _UiFieldState extends State<UiField> {
     );
   }
 
-  /// Builds a flat borderless-inner [DropdownButton] inside the `1px` container.
-  Widget _buildSelectInput(UiThemeTokens tokens) {
-    final colors = tokens.colors;
-    final validValues = widget.selectOptions
-        .map((option) => option.value)
-        .toSet();
-    final safeValue = validValues.contains(widget.selectValue)
-        ? widget.selectValue
-        : null;
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 10.0),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          focusNode: _focusNode,
-          value: safeValue,
-          isExpanded: true,
-          isDense: true,
-          dropdownColor: colors.panel,
-          iconEnabledColor: colors.muted,
-          iconDisabledColor: colors.muted,
-          icon: Icon(
-            Icons.keyboard_arrow_down_rounded,
-            size: tokens.spacing.iconMd,
-          ),
-          style: _resolveTextStyle(tokens),
-          hint: widget.hintText != null
-              ? Text(
-                  widget.hintText ?? '',
-                  style: _resolveTextStyle(tokens)
-                      .copyWith(color: colors.muted),
-                )
-              : null,
-          items: <DropdownMenuItem<String>>[
-            for (final option in widget.selectOptions)
-              DropdownMenuItem<String>(
-                value: option.value,
-                enabled: option.enabled,
-                child: Text(
-                  option.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-          ],
-          onChanged: widget.enabled && !widget.readOnly
-              ? (next) {
-                  if (next != null) {
-                    widget.onSelectChanged?.call(next);
-                  }
-                }
-              : null,
-        ),
-      ),
-    );
+  /// Builds the interior widget for non-select [UiFieldKind] variants.
+  Widget _buildStandardControl(UiThemeTokens tokens) {
+    return switch (widget.kind) {
+      UiFieldKind.text ||
+      UiFieldKind.multiline ||
+      UiFieldKind.password ||
+      UiFieldKind.search => _buildTextInput(tokens),
+      UiFieldKind.dateTime => _buildDateTimeInput(tokens),
+      UiFieldKind.readOnlyDisplay => _buildReadOnlyDisplay(tokens),
+      UiFieldKind.select => const SizedBox.shrink(),
+    };
   }
 
   /// Builds borderless inner [TextField] with leading icon, password toggle, or clear action.
@@ -645,6 +642,31 @@ class _UiFieldState extends State<UiField> {
     );
   }
 
+  /// Queues a replaced internal [notifier] for post-frame disposal after children detach.
+  void _enqueueDisposal(ChangeNotifier notifier) {
+    _pendingDisposals.add(notifier);
+    if (_isDisposalScheduled) {
+      return;
+    }
+    _isDisposalScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _flushPendingDisposals();
+    });
+  }
+
+  /// Disposes all queued internal controllers and focus nodes after the frame or during unmount.
+  void _flushPendingDisposals() {
+    _isDisposalScheduled = false;
+    if (_pendingDisposals.isEmpty) {
+      return;
+    }
+    final notifiers = List<ChangeNotifier>.of(_pendingDisposals);
+    _pendingDisposals.clear();
+    for (final notifier in notifiers) {
+      notifier.dispose();
+    }
+  }
+
   /// Clears the controller text, notifies callbacks, and keeps focus on the input.
   void _handleClear() {
     _controller.clear();
@@ -660,6 +682,13 @@ class _UiFieldState extends State<UiField> {
     final nextFocused = _focusNode.hasFocus;
     if (_isFocused != nextFocused && mounted) {
       setState(() => _isFocused = nextFocused);
+    }
+  }
+
+  /// Forwards non-null combobox selections to [UiField.onSelectChanged].
+  void _handleSelect(String? nextValue) {
+    if (nextValue != null) {
+      widget.onSelectChanged?.call(nextValue);
     }
   }
 
@@ -701,5 +730,55 @@ class _UiFieldState extends State<UiField> {
           fontWeight: FontWeight.w400,
         );
     return widget.isMonospace ? UiTypographyTokens.mono(base) : base;
+  }
+}
+
+/// Surface-aware `1px` bordered container shared by non-select [UiFieldKind] controls.
+class _UiStandardFieldShell extends StatelessWidget {
+  /// Creates a [_UiStandardFieldShell].
+  const _UiStandardFieldShell({
+    required this.minHeight,
+    required this.borderRadius,
+    required this.hasError,
+    required this.isFocused,
+    required this.child,
+  });
+
+  /// Corner radius in logical pixels.
+  final double borderRadius;
+
+  /// Inner control widget.
+  final Widget child;
+
+  /// Highlights border in `danger` when true.
+  final bool hasError;
+
+  /// Highlights border in `accent` when focused.
+  final bool isFocused;
+
+  /// Minimum height of the bordered container.
+  final double minHeight;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+    final fillColor = UiSurfaceScope.of(context) == UiSurfaceLevel.insetWell
+        ? colors.panel
+        : colors.bg;
+    final borderColor = hasError
+        ? colors.danger
+        : (isFocused ? colors.accent : colors.line);
+
+    return AnimatedContainer(
+      duration: tokens.focus.hoverDuration,
+      constraints: BoxConstraints(minHeight: minHeight),
+      decoration: BoxDecoration(
+        color: fillColor,
+        borderRadius: BorderRadius.circular(borderRadius),
+        border: Border.all(color: borderColor, width: tokens.radii.borderWidth),
+      ),
+      child: child,
+    );
   }
 }

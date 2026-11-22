@@ -20,6 +20,7 @@ import 'package:material_ui/material_ui.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../models/task_item.dart';
+import '../../models/task_tier.dart';
 import '../../models/tdf_error.dart';
 import '../../models/webdav_config.dart';
 import '../../providers/board_actions_provider.dart';
@@ -35,6 +36,104 @@ import '../tokens/ui_theme_tokens.dart';
 import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
 import '../widgets/entity_date_time_fields.dart';
+import '../widgets/entity_inline_name_editor.dart';
+
+/// Pure Due timestamp, auto-prioritize toggle, and deadline note form fields shared by live and draft task editors.
+class TaskDueFields extends StatelessWidget {
+  /// Creates a [TaskDueFields].
+  const TaskDueFields({
+    super.key,
+    required this.dueController,
+    required this.dueNoteController,
+    required this.autoPrioritize,
+    required this.currentLocalDateTimeHint,
+    required this.dueError,
+    required this.dueNoteError,
+    required this.isBusy,
+    required this.onDueChanged,
+    required this.onDueNoteChanged,
+    required this.onAutoPrioritizeChanged,
+    this.autofocus = false,
+    this.onSubmitted,
+  });
+
+  /// Auto-prioritize near deadline toggle state.
+  final bool autoPrioritize;
+
+  /// Requests initial focus on the due date input when mounted.
+  final bool autofocus;
+
+  /// Current local timestamp seeding pickers.
+  final String currentLocalDateTimeHint;
+
+  /// Controller for the due timestamp field.
+  final TextEditingController dueController;
+
+  /// Optional due timestamp field error.
+  final String? dueError;
+
+  /// Controller for the deadline note field.
+  final TextEditingController dueNoteController;
+
+  /// Optional deadline note field error.
+  final String? dueNoteError;
+
+  /// Whether a save or clear request is in flight.
+  final bool isBusy;
+
+  /// Callback toggling [autoPrioritize].
+  final ValueChanged<bool> onAutoPrioritizeChanged;
+
+  /// Callback notified when due timestamp text changes.
+  final ValueChanged<String> onDueChanged;
+
+  /// Callback notified when deadline note text changes.
+  final ValueChanged<String> onDueNoteChanged;
+
+  /// Optional callback invoked when the due timestamp input submits.
+  final VoidCallback? onSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final spacing = UiThemeTokens.of(context).spacing.space2;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        EntityHybridDateTimeField(
+          controller: dueController,
+          label: localizations.taskDueButtonLabel,
+          fallbackLocalDateTime: currentLocalDateTimeHint,
+          autofocus: autofocus,
+          enabled: !isBusy,
+          errorText: dueError,
+          onChanged: onDueChanged,
+          onSubmitted: onSubmitted == null ? null : (_) => onSubmitted?.call(),
+        ),
+        SizedBox(height: spacing),
+        UiToggleRow(
+          label: localizations.taskDueAutoPrioritizeLabel,
+          description: localizations.taskDueAutoPrioritizeSubtitle,
+          value: autoPrioritize,
+          isDense: true,
+          enabled: !isBusy,
+          onChanged: onAutoPrioritizeChanged,
+        ),
+        SizedBox(height: spacing),
+        _ScheduleNoteField(
+          controller: dueNoteController,
+          label: localizations.taskDueNoteLabel,
+          hintText: localizations.taskDueNoteHint,
+          enabled: !isBusy,
+          errorText: dueNoteError,
+          onChanged: onDueNoteChanged,
+        ),
+      ],
+    );
+  }
+}
 
 /// Read-only and inline-editable Due section for expanded Task cards (`U-CARD-002`..`003`).
 class TaskDueSection extends ConsumerStatefulWidget {
@@ -80,7 +179,7 @@ class TaskDueSection extends ConsumerStatefulWidget {
 }
 
 /// Inline single-line task title editor rendered inside an expanded open Task card header.
-class TaskInlineTitleEditor extends ConsumerStatefulWidget {
+class TaskInlineTitleEditor extends ConsumerWidget {
   /// Creates a [TaskInlineTitleEditor].
   const TaskInlineTitleEditor({
     super.key,
@@ -99,8 +198,183 @@ class TaskInlineTitleEditor extends ConsumerStatefulWidget {
   final String taskId;
 
   @override
-  ConsumerState<TaskInlineTitleEditor> createState() =>
-      _TaskInlineTitleEditorState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final isBusy = ref.watch(
+      boardActionsProvider.select((state) => state.isBusy),
+    );
+    return EntityInlineNameEditor(
+      initialValue: initialTitle,
+      hintText: localizations.taskNameLabel,
+      semanticsLabel: localizations.inlineEditTitleTooltip,
+      inputKey: ValueKey<String>('task_title_editor_input_$taskId'),
+      saveKey: ValueKey<String>('task_title_editor_save_$taskId'),
+      cancelKey: ValueKey<String>('task_title_editor_cancel_$taskId'),
+      isBusy: isBusy,
+      onCancel: onCancel,
+      onSave: (value) => ref
+          .read(boardActionsProvider.notifier)
+          .saveTitle(taskId, value, locale: locale),
+    );
+  }
+}
+
+/// Queue & Priority segmented placement inset card shared by live task cards and [TaskDraftCard].
+class TaskPlacementCard extends StatelessWidget {
+  /// Creates a [TaskPlacementCard].
+  const TaskPlacementCard({
+    super.key,
+    this.cardKey,
+    this.controlKey,
+    required this.placement,
+    required this.isBusy,
+    required this.onChanged,
+    this.caption,
+  });
+
+  /// Optional explanatory caption rendered below the segmented control.
+  final String? caption;
+
+  /// Optional stable key placed on the outer [UiCard.inset].
+  final Key? cardKey;
+
+  /// Optional stable key placed on the [UiSegmentedControl].
+  final Key? controlKey;
+
+  /// Whether a task mutation is in flight.
+  final bool isBusy;
+
+  /// Callback updating the selected [QuickAddMode].
+  final ValueChanged<QuickAddMode> onChanged;
+
+  /// Currently selected placement mode.
+  final QuickAddMode placement;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final tokens = UiThemeTokens.of(context);
+    final segmented = _TaskPlacementSegmentedControl(
+      controlKey: controlKey,
+      placement: placement,
+      isBusy: isBusy,
+      onChanged: onChanged,
+    );
+
+    return UiCard.inset(
+      key: cardKey,
+      headerIcon: Icons.bolt_outlined,
+      headerTitle: localizations.inlinePlacementSectionTitle,
+      child: caption == null
+          ? segmented
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                segmented,
+                SizedBox(height: tokens.spacing.space2),
+                Text(
+                  caption ?? '',
+                  style: tokens.typography.meta.copyWith(
+                    color: tokens.colors.muted,
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+/// Pure recurrence interval count, unit, and preparation lead-days fields shared by live and draft task editors.
+class TaskRepeatFields extends StatelessWidget {
+  /// Creates a [TaskRepeatFields].
+  const TaskRepeatFields({
+    super.key,
+    required this.countController,
+    required this.unit,
+    required this.leadDaysController,
+    required this.hasDueDate,
+    required this.countError,
+    required this.leadError,
+    required this.isBusy,
+    required this.onCountChanged,
+    required this.onLeadDaysChanged,
+    required this.onUnitChanged,
+    this.autofocus = false,
+    this.onSubmitted,
+  });
+
+  /// Requests initial focus on the repeat interval count input when mounted.
+  final bool autofocus;
+
+  /// Controller for the repeat interval count (`1..3650`).
+  final TextEditingController countController;
+
+  /// Optional count validation error.
+  final String? countError;
+
+  /// Whether the task has a due date enabling preparation lead days.
+  final bool hasDueDate;
+
+  /// Whether a save or disable mutation is in flight.
+  final bool isBusy;
+
+  /// Controller for preparation lead days (`0..3650`).
+  final TextEditingController leadDaysController;
+
+  /// Optional lead-days validation error.
+  final String? leadError;
+
+  /// Callback notified when interval count text changes.
+  final ValueChanged<String> onCountChanged;
+
+  /// Callback notified when lead-days text changes.
+  final ValueChanged<String> onLeadDaysChanged;
+
+  /// Optional callback invoked when a repeat text field submits.
+  final VoidCallback? onSubmitted;
+
+  /// Callback changing recurrence unit.
+  final ValueChanged<RepeatUnit> onUnitChanged;
+
+  /// Selected recurrence unit.
+  final RepeatUnit unit;
+
+  @override
+  Widget build(BuildContext context) {
+    final spacing = UiThemeTokens.of(context).spacing.space2;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _TaskRepeatCountField(
+          controller: countController,
+          autofocus: autofocus,
+          errorText: countError,
+          isBusy: isBusy,
+          onChanged: onCountChanged,
+          onSubmitted: onSubmitted,
+        ),
+        SizedBox(height: spacing),
+        _TaskRepeatUnitControl(
+          unit: unit,
+          isBusy: isBusy,
+          onUnitChanged: onUnitChanged,
+        ),
+        SizedBox(height: spacing),
+        _TaskRepeatLeadDaysField(
+          controller: leadDaysController,
+          hasDueDate: hasDueDate,
+          errorText: leadError,
+          isBusy: isBusy,
+          onChanged: onLeadDaysChanged,
+          onSubmitted: onSubmitted,
+        ),
+      ],
+    );
+  }
 }
 
 /// Read-only and inline-editable Repeat section supporting interval count, unit, and Mode 2 lead days.
@@ -128,6 +402,105 @@ class TaskRepeatSection extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<TaskRepeatSection> createState() => _TaskRepeatSectionState();
+}
+
+/// Pure suspension mode, optional until timestamp, and deferral note fields shared by live and draft task editors.
+class TaskSuspendedFields extends StatelessWidget {
+  /// Creates a [TaskSuspendedFields].
+  const TaskSuspendedFields({
+    super.key,
+    required this.indefinitely,
+    required this.untilController,
+    required this.noteController,
+    required this.currentLocalDateTimeHint,
+    required this.untilError,
+    required this.noteError,
+    required this.isBusy,
+    required this.onModeChanged,
+    required this.onUntilChanged,
+    required this.onNoteChanged,
+    this.autofocus = false,
+    this.onSubmitted,
+  });
+
+  /// Requests initial focus on the timed until input when mounted.
+  final bool autofocus;
+
+  /// Current local timestamp seeding pickers.
+  final String currentLocalDateTimeHint;
+
+  /// Whether indefinite suspension is selected.
+  final bool indefinitely;
+
+  /// Whether a save or resume mutation is in flight.
+  final bool isBusy;
+
+  /// Controller for the optional deferral note.
+  final TextEditingController noteController;
+
+  /// Optional deferral note validation error.
+  final String? noteError;
+
+  /// Callback toggling between timed (`false`) and indefinite (`true`) suspension.
+  final ValueChanged<bool> onModeChanged;
+
+  /// Callback notified when deferral note text changes.
+  final ValueChanged<String> onNoteChanged;
+
+  /// Optional callback invoked when the until timestamp submits.
+  final VoidCallback? onSubmitted;
+
+  /// Callback notified when timed until timestamp text changes.
+  final ValueChanged<String> onUntilChanged;
+
+  /// Controller for the timed suspension timestamp.
+  final TextEditingController untilController;
+
+  /// Optional timed suspension timestamp error.
+  final String? untilError;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final spacing = UiThemeTokens.of(context).spacing.space2;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        _TaskSuspendedModeControl(
+          indefinitely: indefinitely,
+          isBusy: isBusy,
+          onModeChanged: onModeChanged,
+        ),
+        if (!indefinitely) ...<Widget>[
+          SizedBox(height: spacing),
+          EntityHybridDateTimeField(
+            controller: untilController,
+            label: localizations.taskSuspendedUntilLabel,
+            fallbackLocalDateTime: currentLocalDateTimeHint,
+            autofocus: autofocus,
+            enabled: !isBusy,
+            errorText: untilError,
+            onChanged: onUntilChanged,
+            onSubmitted: onSubmitted == null ? null : _handleSubmitted,
+          ),
+        ],
+        SizedBox(height: spacing),
+        _ScheduleNoteField(
+          controller: noteController,
+          label: localizations.taskSuspendedNoteLabel,
+          hintText: localizations.taskSuspendedNoteHint,
+          enabled: !isBusy,
+          errorText: noteError,
+          onChanged: onNoteChanged,
+        ),
+      ],
+    );
+  }
+
+  /// Forwards keyboard submit events from the timed suspension field to [onSubmitted].
+  void _handleSubmitted(String _) => onSubmitted?.call();
 }
 
 /// Read-only and inline-editable Suspended section supporting timed vs indefinite deferral and notes.
@@ -272,39 +645,6 @@ class _ScheduleSectionEditButton extends StatelessWidget {
   }
 }
 
-/// Auto-prioritize near deadline toggle row inside [_TaskDueEditFields].
-class _TaskDueAutoPrioritizeToggle extends StatelessWidget {
-  /// Creates a [_TaskDueAutoPrioritizeToggle].
-  const _TaskDueAutoPrioritizeToggle({
-    required this.value,
-    required this.isBusy,
-    required this.onChanged,
-  });
-
-  /// Whether a save or clear mutation is in flight.
-  final bool isBusy;
-
-  /// Callback updating the auto-prioritize toggle state.
-  final ValueChanged<bool> onChanged;
-
-  /// Current auto-prioritize toggle value.
-  final bool value;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-
-    return UiToggleRow(
-      label: localizations.taskDueAutoPrioritizeLabel,
-      description: localizations.taskDueAutoPrioritizeSubtitle,
-      value: value,
-      isDense: true,
-      enabled: !isBusy,
-      onChanged: onChanged,
-    );
-  }
-}
-
 /// Inline editing card for [TaskDueSection].
 class _TaskDueEditCard extends StatelessWidget {
   /// Creates a [_TaskDueEditCard].
@@ -384,103 +724,20 @@ class _TaskDueEditCard extends StatelessWidget {
         onSave: onSave,
         isBusy: isBusy,
       ),
-      child: _TaskDueEditFields(
+      child: TaskDueFields(
         dueController: dueController,
         dueNoteController: dueNoteController,
         autoPrioritize: autoPrioritize,
         currentLocalDateTimeHint: currentLocalDateTimeHint,
+        autofocus: true,
         dueError: dueError,
         dueNoteError: dueNoteError,
         isBusy: isBusy,
-        onChanged: onChanged,
+        onDueChanged: onChanged,
+        onDueNoteChanged: onChanged,
         onAutoPrioritizeChanged: onAutoPrioritizeChanged,
-        onSave: onSave,
+        onSubmitted: onSave,
       ),
-    );
-  }
-}
-
-/// Due timestamp, auto-prioritize toggle, and note inputs inside [_TaskDueEditCard].
-class _TaskDueEditFields extends StatelessWidget {
-  /// Creates a [_TaskDueEditFields].
-  const _TaskDueEditFields({
-    required this.dueController,
-    required this.dueNoteController,
-    required this.autoPrioritize,
-    required this.currentLocalDateTimeHint,
-    required this.dueError,
-    required this.dueNoteError,
-    required this.isBusy,
-    required this.onChanged,
-    required this.onAutoPrioritizeChanged,
-    required this.onSave,
-  });
-
-  /// Auto-prioritize near deadline toggle state.
-  final bool autoPrioritize;
-
-  /// Current local timestamp seeding pickers.
-  final String currentLocalDateTimeHint;
-
-  /// Controller for the due timestamp field.
-  final TextEditingController dueController;
-
-  /// Optional due timestamp field error.
-  final String? dueError;
-
-  /// Controller for the deadline note field.
-  final TextEditingController dueNoteController;
-
-  /// Optional deadline note field error.
-  final String? dueNoteError;
-
-  /// Whether a save or clear request is in flight.
-  final bool isBusy;
-
-  /// Callback toggling [autoPrioritize].
-  final ValueChanged<bool> onAutoPrioritizeChanged;
-
-  /// Callback clearing errors on edit.
-  final ValueChanged<String> onChanged;
-
-  /// Callback saving the edited due date.
-  final VoidCallback onSave;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final spacing = UiThemeTokens.of(context).spacing.space2;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        EntityHybridDateTimeField(
-          controller: dueController,
-          label: localizations.taskDueButtonLabel,
-          fallbackLocalDateTime: currentLocalDateTimeHint,
-          autofocus: true,
-          enabled: !isBusy,
-          errorText: dueError,
-          onChanged: onChanged,
-          onSubmitted: (_) => onSave(),
-        ),
-        SizedBox(height: spacing),
-        _TaskDueAutoPrioritizeToggle(
-          value: autoPrioritize,
-          isBusy: isBusy,
-          onChanged: onAutoPrioritizeChanged,
-        ),
-        SizedBox(height: spacing),
-        _ScheduleNoteField(
-          controller: dueNoteController,
-          label: localizations.taskDueNoteLabel,
-          hintText: localizations.taskDueNoteHint,
-          enabled: !isBusy,
-          errorText: dueNoteError,
-          onChanged: onChanged,
-        ),
-      ],
     );
   }
 }
@@ -824,21 +1081,24 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
       _isSubmitting = true;
       _submitError = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .clearDue(widget.task.id, locale: Localizations.localeOf(context));
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .clearDue(widget.task.id, locale: Localizations.localeOf(context));
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message):
+        case ActionPersistFailed(:final message):
+          setState(() => _submitError = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _submitError = message;
-        });
+      }
     }
   }
 
@@ -853,35 +1113,37 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
       _dueNoteError = null;
       _submitError = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .saveDue(
-          widget.task.id,
-          rawDue: _dueController.text,
-          autoPrioritize: _autoPrioritize,
-          rawDueNote: _dueNoteController.text,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .saveDue(
+            widget.task.id,
+            rawDue: _dueController.text,
+            autoPrioritize: _autoPrioritize,
+            rawDueNote: _dueNoteController.text,
+            locale: Localizations.localeOf(context),
+          );
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message, :final fieldErrors):
+          setState(() {
+            _dueError = fieldErrors['due'];
+            _dueNoteError = fieldErrors['dueNote'];
+            _submitError = (_dueError == null && _dueNoteError == null)
+                ? message
+                : null;
+          });
+        case ActionPersistFailed(:final message):
+          setState(() => _submitError = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message, :final fieldErrors):
-        setState(() {
-          _isSubmitting = false;
-          _dueError = fieldErrors['due'];
-          _dueNoteError = fieldErrors['dueNote'];
-          _submitError = (_dueError == null && _dueNoteError == null)
-              ? message
-              : null;
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _submitError = message;
-        });
+      }
     }
   }
 
@@ -892,227 +1154,69 @@ class _TaskDueSectionState extends ConsumerState<TaskDueSection> {
   void _triggerSave() => unawaited(_handleSave());
 }
 
-/// Single-line title input and save/cancel buttons rendered inside [TaskInlineTitleEditor].
-class _TaskInlineTitleEditorRow extends StatelessWidget {
-  /// Creates a [_TaskInlineTitleEditorRow].
-  const _TaskInlineTitleEditorRow({
-    required this.taskId,
-    required this.controller,
-    required this.errorText,
+/// Three-way `Queue` / `Priority` / `Someday` segmented control inside [TaskPlacementCard].
+class _TaskPlacementSegmentedControl extends StatelessWidget {
+  /// Creates a [_TaskPlacementSegmentedControl].
+  const _TaskPlacementSegmentedControl({
+    required this.controlKey,
+    required this.placement,
     required this.isBusy,
     required this.onChanged,
-    required this.onSave,
-    required this.onCancel,
   });
 
-  /// Controller for the edited task title.
-  final TextEditingController controller;
+  /// Optional deterministic widget key applied to the segmented control.
+  final Key? controlKey;
 
-  /// Optional validation or persistence error text.
-  final String? errorText;
-
-  /// Whether a save mutation is in flight.
+  /// Whether a task mutation is in flight.
   final bool isBusy;
 
-  /// Callback cancelling inline title editing.
-  final VoidCallback onCancel;
+  /// Callback changing task placement.
+  final ValueChanged<QuickAddMode> onChanged;
 
-  /// Callback clearing errors when typing resumes.
-  final ValueChanged<String> onChanged;
-
-  /// Callback saving the edited title.
-  final VoidCallback onSave;
-
-  /// Canonical task identifier for deterministic keys.
-  final String taskId;
+  /// Selected placement mode.
+  final QuickAddMode placement;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
-
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Expanded(
-          child: _TaskInlineTitleField(
-            taskId: taskId,
-            controller: controller,
-            errorText: errorText,
-            isBusy: isBusy,
-            onChanged: onChanged,
-            onSubmitted: onSave,
-          ),
+    return UiSegmentedControl<QuickAddMode>(
+      key: controlKey,
+      segments: <UiSegment<QuickAddMode>>[
+        UiSegment<QuickAddMode>(
+          value: QuickAddMode.standard,
+          label: localizations.placementQueueOption,
         ),
-        const SizedBox(width: 6.0),
-        UiButton(
-          key: ValueKey<String>('task_title_editor_save_$taskId'),
-          label: localizations.actionSave,
-          variant: UiButtonVariant.primary,
-          density: UiButtonDensity.compact,
-          isLoading: isBusy,
-          onPressed: isBusy ? null : onSave,
+        UiSegment<QuickAddMode>(
+          value: QuickAddMode.priority,
+          label: localizations.quickAddPriority,
         ),
-        const SizedBox(width: 6.0),
-        UiButton(
-          key: ValueKey<String>('task_title_editor_cancel_$taskId'),
-          label: localizations.actionCancel,
-          variant: UiButtonVariant.secondary,
-          density: UiButtonDensity.compact,
-          onPressed: isBusy ? null : onCancel,
+        UiSegment<QuickAddMode>(
+          value: QuickAddMode.someday,
+          label: localizations.tier5Name,
         ),
       ],
+      value: placement,
+      enabled: !isBusy,
+      semanticLabel: localizations.inlinePlacementSectionTitle,
+      onChanged: onChanged,
     );
   }
 }
 
-/// Manages inline title editing state and validation readout for [TaskInlineTitleEditor].
-class _TaskInlineTitleEditorState extends ConsumerState<TaskInlineTitleEditor> {
-  late final TextEditingController _controller;
-
-  String? _errorText;
-  bool _isSubmitting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.initialTitle);
-    _controller.selection = TextSelection.collapsed(
-      offset: widget.initialTitle.length,
-    );
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isControllerBusy = ref.watch(
-      boardActionsProvider.select((state) => state.isBusy),
-    );
-    final isBusy = _isSubmitting || isControllerBusy;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _TaskInlineTitleEditorRow(
-          taskId: widget.taskId,
-          controller: _controller,
-          errorText: _errorText,
-          isBusy: isBusy,
-          onChanged: _handleChanged,
-          onSave: _triggerSave,
-          onCancel: widget.onCancel,
-        ),
-      ],
-    );
-  }
-
-  /// Clears inline error text when the user resumes typing.
-  void _handleChanged(String _) {
-    if (_errorText != null) {
-      setState(() => _errorText = null);
-    }
-  }
-
-  /// Persists the edited title through [BoardActionsNotifier.saveTitle].
-  Future<void> _handleSave() async {
-    if (_isSubmitting) {
-      return;
-    }
-    setState(() {
-      _isSubmitting = true;
-      _errorText = null;
-    });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .saveTitle(
-          widget.taskId,
-          _controller.text,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
-        setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
-    }
-  }
-
-  /// Dispatches async title save from synchronous field/button callbacks.
-  void _triggerSave() => unawaited(_handleSave());
-}
-
-/// Single-line title input field inside [_TaskInlineTitleEditorRow].
-class _TaskInlineTitleField extends StatelessWidget {
-  /// Creates a [_TaskInlineTitleField].
-  const _TaskInlineTitleField({
-    required this.taskId,
+/// Numeric repeat interval count input inside [TaskRepeatFields].
+class _TaskRepeatCountField extends StatelessWidget {
+  /// Creates a [_TaskRepeatCountField].
+  const _TaskRepeatCountField({
     required this.controller,
+    required this.autofocus,
     required this.errorText,
     required this.isBusy,
     required this.onChanged,
     required this.onSubmitted,
   });
 
-  /// Controller for the edited task title.
-  final TextEditingController controller;
-
-  /// Optional validation or persistence error text.
-  final String? errorText;
-
-  /// Whether a save mutation is in flight.
-  final bool isBusy;
-
-  /// Callback clearing errors when typing resumes.
-  final ValueChanged<String> onChanged;
-
-  /// Callback submitting the edited title.
-  final VoidCallback onSubmitted;
-
-  /// Canonical task identifier for deterministic keys.
-  final String taskId;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-
-    return UiField(
-      key: ValueKey<String>('task_title_editor_input_$taskId'),
-      kind: UiFieldKind.text,
-      controller: controller,
-      maxLength: maxTdfTextLength,
-      autofocus: true,
-      enabled: !isBusy,
-      errorText: errorText,
-      semanticLabel: localizations.inlineEditTitleTooltip,
-      textInputAction: TextInputAction.done,
-      onChanged: onChanged,
-      onSubmitted: (_) => onSubmitted(),
-    );
-  }
-}
-
-/// Numeric repeat interval count input inside [_TaskRepeatEditFields].
-class _TaskRepeatCountField extends StatelessWidget {
-  /// Creates a [_TaskRepeatCountField].
-  const _TaskRepeatCountField({
-    required this.controller,
-    required this.errorText,
-    required this.isBusy,
-    required this.onChanged,
-    required this.onSave,
-  });
+  /// Whether the input requests initial focus when mounted.
+  final bool autofocus;
 
   /// Controller for the repeat interval count (`1..3650`).
   final TextEditingController controller;
@@ -1126,24 +1230,23 @@ class _TaskRepeatCountField extends StatelessWidget {
   /// Callback clearing inline errors when typing resumes.
   final ValueChanged<String> onChanged;
 
-  /// Callback saving the edited recurrence rule.
-  final VoidCallback onSave;
+  /// Optional callback saving the edited recurrence rule on submit.
+  final VoidCallback? onSubmitted;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
 
     return UiField(
-      kind: UiFieldKind.text,
       controller: controller,
       label: localizations.repeatIntervalLabel,
       hintText: '1',
       keyboardType: TextInputType.number,
-      autofocus: true,
+      autofocus: autofocus,
       enabled: !isBusy,
       errorText: errorText,
       onChanged: onChanged,
-      onSubmitted: (_) => onSave(),
+      onSubmitted: onSubmitted == null ? null : (_) => onSubmitted?.call(),
     );
   }
 }
@@ -1229,104 +1332,25 @@ class _TaskRepeatEditCard extends StatelessWidget {
         onSave: onSave,
         isBusy: isBusy,
       ),
-      child: _TaskRepeatEditFields(
+      child: TaskRepeatFields(
         countController: countController,
         unit: unit,
         leadDaysController: leadDaysController,
         hasDueDate: hasDueDate,
+        autofocus: true,
         countError: countError,
         leadError: leadError,
         isBusy: isBusy,
-        onChanged: onChanged,
+        onCountChanged: onChanged,
+        onLeadDaysChanged: onChanged,
         onUnitChanged: onUnitChanged,
-        onSave: onSave,
+        onSubmitted: onSave,
       ),
     );
   }
 }
 
-/// Interval count, recurrence unit, and lead-days inputs inside [_TaskRepeatEditCard].
-class _TaskRepeatEditFields extends StatelessWidget {
-  /// Creates a [_TaskRepeatEditFields].
-  const _TaskRepeatEditFields({
-    required this.countController,
-    required this.unit,
-    required this.leadDaysController,
-    required this.hasDueDate,
-    required this.countError,
-    required this.leadError,
-    required this.isBusy,
-    required this.onChanged,
-    required this.onUnitChanged,
-    required this.onSave,
-  });
-
-  /// Controller for the repeat interval count (`1..3650`).
-  final TextEditingController countController;
-
-  /// Optional count validation error.
-  final String? countError;
-
-  /// Whether the task has a due date enabling preparation lead days.
-  final bool hasDueDate;
-
-  /// Whether a save or disable mutation is in flight.
-  final bool isBusy;
-
-  /// Controller for preparation lead days (`0..3650`).
-  final TextEditingController leadDaysController;
-
-  /// Optional lead-days validation error.
-  final String? leadError;
-
-  /// Callback clearing inline errors when typing resumes.
-  final ValueChanged<String> onChanged;
-
-  /// Callback saving the edited recurrence rule.
-  final VoidCallback onSave;
-
-  /// Callback changing recurrence unit.
-  final ValueChanged<RepeatUnit> onUnitChanged;
-
-  /// Selected recurrence unit.
-  final RepeatUnit unit;
-
-  @override
-  Widget build(BuildContext context) {
-    final spacing = UiThemeTokens.of(context).spacing.space2;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _TaskRepeatCountField(
-          controller: countController,
-          errorText: countError,
-          isBusy: isBusy,
-          onChanged: onChanged,
-          onSave: onSave,
-        ),
-        SizedBox(height: spacing),
-        _TaskRepeatUnitControl(
-          unit: unit,
-          isBusy: isBusy,
-          onUnitChanged: onUnitChanged,
-        ),
-        SizedBox(height: spacing),
-        _TaskRepeatLeadDaysField(
-          controller: leadDaysController,
-          hasDueDate: hasDueDate,
-          errorText: leadError,
-          isBusy: isBusy,
-          onChanged: onChanged,
-          onSave: onSave,
-        ),
-      ],
-    );
-  }
-}
-
-/// Preparation lead-days input inside [_TaskRepeatEditFields].
+/// Preparation lead-days input inside [TaskRepeatFields].
 class _TaskRepeatLeadDaysField extends StatelessWidget {
   /// Creates a [_TaskRepeatLeadDaysField].
   const _TaskRepeatLeadDaysField({
@@ -1335,7 +1359,7 @@ class _TaskRepeatLeadDaysField extends StatelessWidget {
     required this.errorText,
     required this.isBusy,
     required this.onChanged,
-    required this.onSave,
+    required this.onSubmitted,
   });
 
   /// Controller for preparation lead days (`0..3650`).
@@ -1353,15 +1377,14 @@ class _TaskRepeatLeadDaysField extends StatelessWidget {
   /// Callback clearing inline errors when typing resumes.
   final ValueChanged<String> onChanged;
 
-  /// Callback saving the edited recurrence rule.
-  final VoidCallback onSave;
+  /// Optional callback saving the edited recurrence rule on submit.
+  final VoidCallback? onSubmitted;
 
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
 
     return UiField(
-      kind: UiFieldKind.text,
       controller: controller,
       label: localizations.repeatLeadDaysLabel,
       hintText: localizations.repeatLeadDaysHint,
@@ -1372,7 +1395,7 @@ class _TaskRepeatLeadDaysField extends StatelessWidget {
       enabled: !isBusy && hasDueDate,
       errorText: errorText,
       onChanged: onChanged,
-      onSubmitted: (_) => onSave(),
+      onSubmitted: onSubmitted == null ? null : (_) => onSubmitted?.call(),
     );
   }
 }
@@ -1583,21 +1606,27 @@ class _TaskRepeatSectionState extends ConsumerState<TaskRepeatSection> {
       _isSubmitting = true;
       _submitError = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .disableRepeat(widget.task.id, locale: Localizations.localeOf(context));
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .disableRepeat(
+            widget.task.id,
+            locale: Localizations.localeOf(context),
+          );
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message):
+        case ActionPersistFailed(:final message):
+          setState(() => _submitError = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _submitError = message;
-        });
+      }
     }
   }
 
@@ -1612,35 +1641,37 @@ class _TaskRepeatSectionState extends ConsumerState<TaskRepeatSection> {
       _leadError = null;
       _submitError = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .saveRepeat(
-          widget.task.id,
-          rawCount: _countController.text,
-          unit: _unit,
-          rawLeadDays: _leadDaysController.text,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .saveRepeat(
+            widget.task.id,
+            rawCount: _countController.text,
+            unit: _unit,
+            rawLeadDays: _leadDaysController.text,
+            locale: Localizations.localeOf(context),
+          );
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message, :final fieldErrors):
+          setState(() {
+            _countError = fieldErrors['repeatCount'];
+            _leadError = fieldErrors['repeatLeadDays'];
+            _submitError = (_countError == null && _leadError == null)
+                ? message
+                : null;
+          });
+        case ActionPersistFailed(:final message):
+          setState(() => _submitError = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message, :final fieldErrors):
-        setState(() {
-          _isSubmitting = false;
-          _countError = fieldErrors['repeatCount'];
-          _leadError = fieldErrors['repeatLeadDays'];
-          _submitError = (_countError == null && _leadError == null)
-              ? message
-              : null;
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _submitError = message;
-        });
+      }
     }
   }
 
@@ -1777,110 +1808,25 @@ class _TaskSuspendedEditCard extends StatelessWidget {
         onSave: onSave,
         isBusy: isBusy,
       ),
-      child: _TaskSuspendedEditFields(
+      child: TaskSuspendedFields(
         indefinitely: indefinitely,
         untilController: untilController,
         noteController: noteController,
         currentLocalDateTimeHint: currentLocalDateTimeHint,
+        autofocus: true,
         untilError: untilError,
         noteError: noteError,
         isBusy: isBusy,
         onModeChanged: onModeChanged,
-        onChanged: onChanged,
-        onSave: onSave,
+        onUntilChanged: onChanged,
+        onNoteChanged: onChanged,
+        onSubmitted: onSave,
       ),
     );
   }
 }
 
-/// Deferral mode toggle, optional until timestamp, and note input inside [_TaskSuspendedEditCard].
-class _TaskSuspendedEditFields extends StatelessWidget {
-  /// Creates a [_TaskSuspendedEditFields].
-  const _TaskSuspendedEditFields({
-    required this.indefinitely,
-    required this.untilController,
-    required this.noteController,
-    required this.currentLocalDateTimeHint,
-    required this.untilError,
-    required this.noteError,
-    required this.isBusy,
-    required this.onModeChanged,
-    required this.onChanged,
-    required this.onSave,
-  });
-
-  /// Current local timestamp seeding pickers.
-  final String currentLocalDateTimeHint;
-
-  /// Whether indefinite suspension is selected.
-  final bool indefinitely;
-
-  /// Whether a save or resume mutation is in flight.
-  final bool isBusy;
-
-  /// Controller for the optional deferral note.
-  final TextEditingController noteController;
-
-  /// Optional deferral note validation error.
-  final String? noteError;
-
-  /// Callback clearing errors when text changes.
-  final ValueChanged<String> onChanged;
-
-  /// Callback toggling between timed (`false`) and indefinite (`true`) suspension.
-  final ValueChanged<bool> onModeChanged;
-
-  /// Callback saving suspension settings.
-  final VoidCallback onSave;
-
-  /// Controller for the timed suspension timestamp.
-  final TextEditingController untilController;
-
-  /// Optional timed suspension timestamp error.
-  final String? untilError;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final spacing = UiThemeTokens.of(context).spacing.space2;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _TaskSuspendedModeControl(
-          indefinitely: indefinitely,
-          isBusy: isBusy,
-          onModeChanged: onModeChanged,
-        ),
-        if (!indefinitely) ...<Widget>[
-          SizedBox(height: spacing),
-          EntityHybridDateTimeField(
-            controller: untilController,
-            label: localizations.taskSuspendedUntilLabel,
-            fallbackLocalDateTime: currentLocalDateTimeHint,
-            autofocus: true,
-            enabled: !isBusy,
-            errorText: untilError,
-            onChanged: onChanged,
-            onSubmitted: (_) => onSave(),
-          ),
-        ],
-        SizedBox(height: spacing),
-        _ScheduleNoteField(
-          controller: noteController,
-          label: localizations.taskSuspendedNoteLabel,
-          hintText: localizations.taskSuspendedNoteHint,
-          enabled: !isBusy,
-          errorText: noteError,
-          onChanged: onChanged,
-        ),
-      ],
-    );
-  }
-}
-
-/// Two-way timed vs indefinite suspension segmented control inside [_TaskSuspendedEditFields].
+/// Two-way timed vs indefinite suspension segmented control inside [TaskSuspendedFields].
 class _TaskSuspendedModeControl extends StatelessWidget {
   /// Creates a [_TaskSuspendedModeControl].
   const _TaskSuspendedModeControl({
@@ -2108,21 +2054,24 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
       _isSubmitting = true;
       _submitError = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .resumeTask(widget.task.id, locale: Localizations.localeOf(context));
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .resumeTask(widget.task.id, locale: Localizations.localeOf(context));
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message):
+        case ActionPersistFailed(:final message):
+          setState(() => _submitError = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _submitError = message;
-        });
+      }
     }
   }
 
@@ -2137,35 +2086,37 @@ class _TaskSuspendedSectionState extends ConsumerState<TaskSuspendedSection> {
       _noteError = null;
       _submitError = null;
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .saveSuspended(
-          widget.task.id,
-          indefinitely: _indefinitely,
-          rawUntil: _untilController.text,
-          rawNote: _noteController.text,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .saveSuspended(
+            widget.task.id,
+            indefinitely: _indefinitely,
+            rawUntil: _untilController.text,
+            rawNote: _noteController.text,
+            locale: Localizations.localeOf(context),
+          );
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message, :final fieldErrors):
+          setState(() {
+            _untilError = fieldErrors['suspended'];
+            _noteError = fieldErrors['suspendedNote'];
+            _submitError = (_untilError == null && _noteError == null)
+                ? message
+                : null;
+          });
+        case ActionPersistFailed(:final message):
+          setState(() => _submitError = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message, :final fieldErrors):
-        setState(() {
-          _isSubmitting = false;
-          _untilError = fieldErrors['suspended'];
-          _noteError = fieldErrors['suspendedNote'];
-          _submitError = (_untilError == null && _noteError == null)
-              ? message
-              : null;
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _submitError = message;
-        });
+      }
     }
   }
 

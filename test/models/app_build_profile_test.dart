@@ -33,11 +33,6 @@ void main() {
               reason: 'Release data directory must remain tiertask',
             );
             expect(
-              profile.legacySettingsStorageKey,
-              equals('t2_settings_v1'),
-              reason: 'Release legacy settings key must remain t2_settings_v1',
-            );
-            expect(
               profile.webdavPasswordKeyPrefix,
               equals('t2_webdav_pw_'),
               reason: 'Release WebDAV password prefix must be t2_webdav_pw_',
@@ -62,11 +57,6 @@ void main() {
               profile.dataDirectoryName,
               equals('tiertask-dev'),
               reason: 'Dev data directory must be isolated as tiertask-dev',
-            );
-            expect(
-              profile.legacySettingsStorageKey,
-              equals('t2_dev_settings_v1'),
-              reason: 'Dev legacy settings key must be isolated as t2_dev_settings_v1',
             );
             expect(
               profile.webdavPasswordKeyPrefix,

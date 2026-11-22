@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -30,7 +31,7 @@ import 'package:tiertask/repositories/settings_repository.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  final fixedDate = DateTime.utc(2026, 11, 2, 10, 0);
+  final fixedDate = DateTime.utc(2026, 11, 2, 10);
 
   group('ActiveWorkspaceNotifier & Single-Workspace Lifecycle', () {
     late Directory tempDir;
@@ -296,7 +297,7 @@ void main() {
       await container.read(activeWorkspaceProvider.future);
       final notifier = container.read(activeWorkspaceProvider.notifier);
 
-      await notifier.createWorkspace('Inactive Workspace', activate: false);
+      await notifier.createWorkspace('Inactive Workspace');
       expect(unloadCount, equals(0));
 
       final sameSwitch = await notifier.switchWorkspace('tasks');
@@ -341,7 +342,7 @@ void main() {
 
   group('LocationNotifier & WebDavConfigNotifier Lifecycle Integration', () {
     test('starts disabled by default, queries on enable, enforces 5-minute resume cooldown, and stops when disabled', () async {
-      var now = DateTime.utc(2026, 3, 29, 12, 0);
+      var now = DateTime.utc(2026, 3, 29, 12);
       final fakeLocationRepository = FakeLocationRepository(
         initialFix: const LocationFix(
           latitude: 50.9787,
@@ -435,11 +436,7 @@ void main() {
 
     test('updateActiveConfig does not invalidate workspaceSummariesProvider when name and localFilePath are unchanged', () async {
       final countingRepo = _CountingSummariesSettingsRepository(
-        const WebDavConfig(
-          language: AppLanguage.english,
-          themePalette: AppThemePalette.calm,
-          localFilePath: 'tasks.tdf',
-        ),
+        const WebDavConfig(language: AppLanguage.english),
       );
       final container = ProviderContainer(
         overrides: [settingsRepositoryProvider.overrideWithValue(countingRepo)],
@@ -456,7 +453,6 @@ void main() {
             const WebDavConfig(
               language: AppLanguage.german,
               themePalette: AppThemePalette.plumUmber,
-              localFilePath: 'tasks.tdf',
             ),
           );
       await container.read(workspaceSummariesProvider.future);
@@ -487,7 +483,208 @@ void main() {
       );
       expect(updatedSummaries.single.localFilePath, equals('renamed.tdf'));
     });
+
+    test('WorkspaceUnloadCoordinator runs multiple hooks in order and honors unregister handles', () async {
+      final coordinator = WorkspaceUnloadCoordinator();
+      final order = <String>[];
+
+      final unregisterFirst = coordinator.register(() async {
+        order.add('first');
+      });
+      final unregisterSecond = coordinator.register(() async {
+        order.add('second');
+      });
+
+      await coordinator.runBeforeUnload();
+      expect(
+        order,
+        equals(<String>['first', 'second']),
+        reason: 'All registered hooks must execute in registration order',
+      );
+
+      order.clear();
+      unregisterFirst();
+      await coordinator.runBeforeUnload();
+      expect(
+        order,
+        equals(<String>['second']),
+        reason: 'Unregistered hook must no longer run or remain retained',
+      );
+
+      order.clear();
+      unregisterSecond();
+      await coordinator.runBeforeUnload();
+      expect(order, isEmpty);
+    });
+
+    test('ActiveWorkspaceNotifier serializes concurrent workspace transitions in FIFO order and guards mid-flight disposal', () async {
+      final activateFirstGate = Completer<void>();
+      final events = <String>[];
+      final repo = _GatedOrderSettingsRepository(
+        const WebDavConfig(),
+        onActivate: (workspaceId) async {
+          events.add('activate.start:$workspaceId');
+          if (workspaceId == 'work') {
+            await activateFirstGate.future;
+          }
+          events.add('activate.end:$workspaceId');
+        },
+        onRename: (workspaceId, name) async {
+          events.add('rename:$workspaceId:$name');
+        },
+      );
+      await repo.createWorkspace(
+        'Work',
+        id: 'work',
+        config: const WebDavConfig(
+          localFilePath: 'work.tdf',
+          filePath: 'work.tdf',
+        ),
+      );
+      await repo.createWorkspace(
+        'Home',
+        id: 'home',
+        config: const WebDavConfig(
+          localFilePath: 'home.tdf',
+          filePath: 'home.tdf',
+        ),
+      );
+
+      final container = ProviderContainer(
+        overrides: [settingsRepositoryProvider.overrideWithValue(repo)],
+      );
+      addTearDown(container.dispose);
+      await container.read(activeWorkspaceProvider.future);
+      final notifier = container.read(activeWorkspaceProvider.notifier);
+
+      final switchWork = notifier.switchWorkspace('work');
+      final renameWork = notifier.renameWorkspace('work', 'Work Renamed');
+      final switchHome = notifier.switchWorkspace('home');
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(
+        events,
+        equals(<String>['activate.start:work']),
+        reason: 'Subsequent rename and switch calls must queue behind in-flight switchWorkspace',
+      );
+
+      activateFirstGate.complete();
+      await Future.wait(<Future<AppWorkspace>>[
+        switchWork,
+        renameWork,
+        switchHome,
+      ]);
+
+      expect(
+        events,
+        equals(<String>[
+          'activate.start:work',
+          'activate.end:work',
+          'rename:work:Work Renamed',
+          'activate.start:home',
+          'activate.end:home',
+        ]),
+        reason: 'ActiveWorkspaceNotifier mutations must execute strictly FIFO',
+      );
+      expect(
+        container.read(activeWorkspaceProvider).requireValue.id,
+        equals('home'),
+      );
+
+      // Mid-flight container disposal during switchWorkspace must not throw UnmountedRefException.
+      final disposeGate = Completer<void>();
+      final disposeRepo = _GatedOrderSettingsRepository(
+        const WebDavConfig(),
+        onActivate: (_) => disposeGate.future,
+      );
+      await disposeRepo.createWorkspace(
+        'Work',
+        id: 'work',
+        config: const WebDavConfig(
+          localFilePath: 'work.tdf',
+          filePath: 'work.tdf',
+        ),
+      );
+      final disposeContainer = ProviderContainer(
+        overrides: [settingsRepositoryProvider.overrideWithValue(disposeRepo)],
+      );
+      await disposeContainer.read(activeWorkspaceProvider.future);
+      final pendingSwitch = disposeContainer
+          .read(activeWorkspaceProvider.notifier)
+          .switchWorkspace('work');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      disposeContainer.dispose();
+      disposeGate.complete();
+      final result = await pendingSwitch;
+      expect(result.id, equals('work'));
+    });
+
+    test('switching, creating-and-activating, and deleting active workspaces transition activeWorkspaceProvider directly without transient AsyncLoading blips', () async {
+      final settingsRepository = InMemorySettingsRepository();
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepository),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(activeWorkspaceProvider.future);
+      final transitions = <AsyncValue<AppWorkspace>>[];
+      final sub = container.listen<AsyncValue<AppWorkspace>>(
+        activeWorkspaceProvider,
+        (_, next) => transitions.add(next),
+      );
+      addTearDown(sub.close);
+
+      final notifier = container.read(activeWorkspaceProvider.notifier);
+      await notifier.createWorkspace('Beta', activate: true);
+      await notifier.switchWorkspace('tasks');
+      await notifier.switchWorkspace('beta');
+      await notifier.deleteWorkspace('beta');
+
+      expect(
+        transitions.any((value) => value is AsyncLoading<AppWorkspace>),
+        isFalse,
+        reason: '_replaceLoadedWorkspace must not emit a synchronous AsyncLoading blip on workspace transitions',
+      );
+      expect(
+        transitions.map((value) => value.asData?.value.id).toList(),
+        equals(<String?>['beta', 'tasks', 'beta', 'tasks']),
+        reason: 'Each workspace switch must emit a single AsyncData transition',
+      );
+    });
   });
+}
+
+class _GatedOrderSettingsRepository extends InMemorySettingsRepository {
+  _GatedOrderSettingsRepository(
+    super.initialConfig, {
+    this.onActivate,
+    this.onRename,
+  });
+
+  final Future<void> Function(String workspaceId)? onActivate;
+  final Future<void> Function(String workspaceId, String newName)? onRename;
+
+  @override
+  Future<AppWorkspace> activateWorkspace(String workspaceId) async {
+    if (onActivate case final hook?) {
+      await hook(workspaceId);
+    }
+    return super.activateWorkspace(workspaceId);
+  }
+
+  @override
+  Future<AppWorkspace> renameWorkspace(
+    String workspaceId,
+    String newName,
+  ) async {
+    if (onRename case final hook?) {
+      await hook(workspaceId, newName);
+    }
+    return super.renameWorkspace(workspaceId, newName);
+  }
 }
 
 class _CountingSummariesSettingsRepository extends InMemorySettingsRepository {
@@ -496,7 +693,7 @@ class _CountingSummariesSettingsRepository extends InMemorySettingsRepository {
   int summaryLoadCount = 0;
 
   @override
-  Future<List<WorkspaceSummary>> loadWorkspaceSummaries() async {
+  Future<List<WorkspaceSummary>> loadWorkspaceSummaries() {
     summaryLoadCount++;
     return super.loadWorkspaceSummaries();
   }

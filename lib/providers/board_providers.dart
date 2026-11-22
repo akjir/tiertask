@@ -14,7 +14,6 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,6 +24,7 @@ import '../models/task_board.dart';
 import '../models/task_board_evaluator.dart';
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
+import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
 import '../repositories/app_version_repository.dart';
 import '../services/app_logger.dart';
@@ -52,13 +52,18 @@ final evaluatedBoardProvider = Provider.autoDispose
     .family<AsyncValue<TaskBoard>, String?>((ref, activeLabelId) {
       ref.watch(boundaryTickProvider);
       final boardAsync = ref.watch(taskNotifierProvider);
-      final activeFix = ref.watch(
-        locationStateProvider.select(
-          (locationState) => locationState.status == LocationStatus.found
-              ? locationState.fix
-              : null,
-        ),
-      );
+      final loadedBoard = boardAsync.asData?.value;
+      final hasLocationConditions =
+          loadedBoard != null && _hasLocationConditions(loadedBoard);
+      final activeFix = hasLocationConditions
+          ? ref.watch(
+              locationStateProvider.select(
+                (locationState) => locationState.status == LocationStatus.found
+                    ? locationState.fix
+                    : null,
+              ),
+            )
+          : null;
       final evaluationSlice =
           ref.watch(
             webDavConfigProvider.select(
@@ -83,6 +88,18 @@ final evaluatedBoardProvider = Provider.autoDispose
                     evaluationSlice.manualTimeZoneOffsetMinutes,
                 dueLeadWindow: evaluationSlice.dueLeadWindow,
               );
+        if (activeLabelId == null &&
+            activeFix == null &&
+            _canReuseEvaluatedBoard(
+              board: board,
+              stamp: ref
+                  .read(taskNotifierProvider.notifier)
+                  .lastEvaluationStamp,
+              evaluationTime: evaluationTime,
+              configuration: timeZoneConfiguration,
+            )) {
+          return board;
+        }
         return board.evaluateForContext(
           activeLabelId: activeLabelId,
           currentLatitude: activeFix?.latitude,
@@ -112,8 +129,7 @@ final rawTdfPreviewProvider = Provider.autoDispose<RawTdfPreview>((ref) {
   final tdfService = ref.watch(tdfServiceProvider);
   try {
     final content = tdfService.serialize(board);
-    final byteCount = utf8.encode(content).length;
-    final lineCount = content.isEmpty ? 0 : '\n'.allMatches(content).length;
+    final (:byteCount, :lineCount) = _measureUtf8BytesAndLines(content);
     final exceeded = byteCount > maxTdfFileBytes || lineCount > maxTdfLineCount;
     if (exceeded) {
       return RawTdfPreview(
@@ -260,8 +276,7 @@ class BoardBoundaryTimer {
     DateTime? candidate;
     if (!task.isSuspendedForever) {
       if (task.suspendedAt case final suspendedAt?
-          when suspendedAt != TaskItem.defaultSuspendedAt &&
-              suspendedAt.isAfter(now)) {
+          when suspendedAt.isAfter(now)) {
         candidate = _minUtc(candidate, suspendedAt);
       }
     }
@@ -291,9 +306,12 @@ class BoardBoundaryTimer {
 /// Manages the lifecycle-aware single wall-clock [Timer] that advances [boundaryTickProvider].
 class BoardBoundaryTimerNotifier extends Notifier<DateTime?> {
   Timer? _boundaryTimer;
+  bool _enteredBackground = false;
   bool _isAppResumed = true;
   bool _isDisposed = false;
   AppLifecycleListener? _lifecycleListener;
+  DateTime? _pausedBoundaryUtc;
+  DateTime? _resumeNowUtc;
   DateTime? _scheduledBoundaryUtc;
 
   @override
@@ -322,16 +340,39 @@ class BoardBoundaryTimerNotifier extends Notifier<DateTime?> {
     return _syncFromProviders(updateState: false);
   }
 
-  /// Pauses the timer in the background and catches up crossed boundaries on foreground resume.
+  /// Pauses the timer in the background and catches up crossed boundaries on foreground resume without spurious ticks when no boundary elapsed.
   void handleAppLifecycleState(AppLifecycleState lifecycleState) {
     if (_isDisposed) {
       return;
     }
     if (lifecycleState == AppLifecycleState.resumed) {
+      final rawUtcNow = ref.read(clockProvider)().toUtc();
+      final normalizedNow = TaskItem.normalizeTimestamp(rawUtcNow);
+      final target = _pausedBoundaryUtc ?? _scheduledBoundaryUtc;
+      final crossedBoundary = target != null && !normalizedNow.isBefore(target);
+      final hadBackgroundPause = _enteredBackground;
+      _enteredBackground = false;
+      _pausedBoundaryUtc = null;
       _isAppResumed = true;
-      ref.read(boundaryTickProvider.notifier).increment();
+      if (crossedBoundary ||
+          (hadBackgroundPause && _hasWallClockConditionsOnCurrentBoard())) {
+        _resumeNowUtc = rawUtcNow;
+        try {
+          ref.read(boundaryTickProvider.notifier).increment();
+        } finally {
+          _resumeNowUtc = null;
+        }
+        return;
+      }
+      _syncFromProviders(updateState: true, currentUtcNow: rawUtcNow);
       return;
     }
+    if (lifecycleState == AppLifecycleState.hidden ||
+        lifecycleState == AppLifecycleState.paused ||
+        lifecycleState == AppLifecycleState.detached) {
+      _enteredBackground = true;
+    }
+    _pausedBoundaryUtc ??= _scheduledBoundaryUtc;
     _isAppResumed = false;
     _cancelBoundaryTimer();
     state = null;
@@ -344,9 +385,19 @@ class BoardBoundaryTimerNotifier extends Notifier<DateTime?> {
     _scheduledBoundaryUtc = null;
   }
 
+  /// Consumes and clears the cached resume timestamp so a single resume event queries [clockProvider] once.
+  DateTime? _consumeResumeNowUtc() {
+    final cached = _resumeNowUtc;
+    _resumeNowUtc = null;
+    return cached;
+  }
+
   /// Disposes the active timer and [AppLifecycleListener].
   void _disposeResources() {
     _isDisposed = true;
+    _enteredBackground = false;
+    _pausedBoundaryUtc = null;
+    _resumeNowUtc = null;
     _cancelBoundaryTimer();
     _lifecycleListener?.dispose();
     _lifecycleListener = null;
@@ -380,8 +431,20 @@ class BoardBoundaryTimerNotifier extends Notifier<DateTime?> {
     ref.read(boundaryTickProvider.notifier).increment();
   }
 
+  /// Returns `true` when the currently loaded board contains any task or label with a `time` or `day` condition.
+  bool _hasWallClockConditionsOnCurrentBoard() {
+    final board = ref.read(taskNotifierProvider).asData?.value;
+    if (board == null) {
+      return false;
+    }
+    return _hasWallClockConditions(board);
+  }
+
   /// Reads the latest board and configuration and schedules or cancels [_boundaryTimer].
-  DateTime? _syncFromProviders({required bool updateState}) {
+  DateTime? _syncFromProviders({
+    required bool updateState,
+    DateTime? currentUtcNow,
+  }) {
     if (_isDisposed || !_isAppResumed) {
       _cancelBoundaryTimer();
       if (updateState) {
@@ -398,7 +461,10 @@ class BoardBoundaryTimerNotifier extends Notifier<DateTime?> {
       return null;
     }
     final configuration = readCurrentConfig(ref);
-    final rawUtcNow = ref.read(clockProvider)().toUtc();
+    final rawUtcNow =
+        currentUtcNow ??
+        _consumeResumeNowUtc() ??
+        ref.read(clockProvider)().toUtc();
     final nextBoundary = BoardBoundaryTimer.nextBoundaryUtc(
       tasks: board.allTasks,
       nowUtc: rawUtcNow,
@@ -577,6 +643,44 @@ List<PrerequisiteCandidate> _buildTaskPrerequisiteCandidates(
   return List<PrerequisiteCandidate>.unmodifiable(candidates);
 }
 
+/// Returns `true` when [board] can be reused directly without re-running [TaskBoard.evaluateForContext] under `activeLabelId == null` and no location fix.
+bool _canReuseEvaluatedBoard({
+  required TaskBoard board,
+  required TaskBoardEvaluationStamp? stamp,
+  required DateTime evaluationTime,
+  required WebDavConfig configuration,
+}) {
+  if (board.allTasks.isEmpty) {
+    return true;
+  }
+  if (_isStaticEvaluatedBoard(board)) {
+    return true;
+  }
+  if (stamp == null || !identical(stamp.board, board)) {
+    return false;
+  }
+  if (stamp.dueLeadWindow != configuration.dueLeadWindow ||
+      stamp.timeZoneMode != configuration.timeZoneMode ||
+      stamp.manualTimeZoneOffsetMinutes !=
+          configuration.manualTimeZoneOffsetMinutes) {
+    return false;
+  }
+  final normalizedNow = TaskItem.normalizeTimestamp(evaluationTime);
+  if (normalizedNow == stamp.evaluatedUtc) {
+    return true;
+  }
+  if (normalizedNow.isBefore(stamp.evaluatedUtc) ||
+      _hasWallClockConditions(board)) {
+    return false;
+  }
+  final nextBoundary = BoardBoundaryTimer.nextBoundaryUtc(
+    tasks: board.allTasks,
+    nowUtc: stamp.evaluatedUtc,
+    dueLeadWindow: configuration.dueLeadWindow.duration,
+  );
+  return nextBoundary == null || normalizedNow.isBefore(nextBoundary);
+}
+
 /// Compares two [PrerequisiteCandidate] items case-insensitively by title.
 int _comparePrerequisiteCandidatesByTitle(
   PrerequisiteCandidate left,
@@ -593,4 +697,121 @@ _EvaluationSlice? _extractEvaluationSlice(WebDavConfig? configuration) {
     manualTimeZoneOffsetMinutes: configuration.manualTimeZoneOffsetMinutes,
     timeZoneMode: configuration.timeZoneMode,
   );
+}
+
+/// Returns `true` when any condition in [conditions] is a [LocationTaskCondition].
+bool _hasLocationConditionInList(List<TaskCondition> conditions) {
+  for (final condition in conditions) {
+    if (condition is LocationTaskCondition) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Returns `true` when any open task or label on [board] declares a [LocationTaskCondition].
+bool _hasLocationConditions(TaskBoard board) {
+  for (final label in board.labels) {
+    if (_hasLocationConditionInList(label.conditions)) {
+      return true;
+    }
+  }
+  for (final task in board.allTasks) {
+    if (task.isCompleted || task.completedAt != null) {
+      continue;
+    }
+    if (_hasLocationConditionInList(task.conditions)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Returns `true` when any condition in [conditions] depends on local wall-clock time or weekday.
+bool _hasWallClockConditionInList(List<TaskCondition> conditions) {
+  for (final condition in conditions) {
+    if (condition is TimeWindowTaskCondition || condition is DayTaskCondition) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Returns `true` when any open task or label on [board] declares a `time` or `day` condition.
+bool _hasWallClockConditions(TaskBoard board) {
+  for (final label in board.labels) {
+    if (_hasWallClockConditionInList(label.conditions)) {
+      return true;
+    }
+  }
+  for (final task in board.allTasks) {
+    if (task.isCompleted || task.completedAt != null) {
+      continue;
+    }
+    if (_hasWallClockConditionInList(task.conditions)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Returns `true` when [board] is already tier-populated and has no scoped labels, deadlines, timed deferrals, or conditions.
+bool _isStaticEvaluatedBoard(TaskBoard board) {
+  final hasPopulatedTier =
+      board.focus.isNotEmpty ||
+      board.ready.isNotEmpty ||
+      board.planned.isNotEmpty ||
+      board.blocked.isNotEmpty ||
+      board.someday.isNotEmpty ||
+      board.completed.isNotEmpty;
+  if (!hasPopulatedTier) {
+    return false;
+  }
+  for (final label in board.labels) {
+    if (label.isScoped || label.conditions.isNotEmpty) {
+      return false;
+    }
+  }
+  for (final task in board.allTasks) {
+    if (task.isCompleted || task.completedAt != null) {
+      continue;
+    }
+    if (task.dueAt != null ||
+        (!task.isSuspendedForever && task.suspendedAt != null) ||
+        task.conditions.isNotEmpty) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/// Measures exact UTF-8 byte length and newline count of [content] in a single zero-allocation pass over UTF-16 code units.
+({int byteCount, int lineCount}) _measureUtf8BytesAndLines(String content) {
+  var byteCount = 0;
+  var lineCount = 0;
+  final length = content.length;
+  for (var i = 0; i < length; i++) {
+    final unit = content.codeUnitAt(i);
+    if (unit == 0x0A) {
+      lineCount++;
+      byteCount++;
+    } else if (unit <= 0x7F) {
+      byteCount++;
+    } else if (unit <= 0x7FF) {
+      byteCount += 2;
+    } else if (unit >= 0xD800 && unit <= 0xDBFF) {
+      if (i + 1 < length) {
+        final nextUnit = content.codeUnitAt(i + 1);
+        if (nextUnit >= 0xDC00 && nextUnit <= 0xDFFF) {
+          byteCount += 4;
+          i++;
+          continue;
+        }
+      }
+      byteCount += 3;
+    } else {
+      byteCount += 3;
+    }
+  }
+  return (byteCount: byteCount, lineCount: lineCount);
 }

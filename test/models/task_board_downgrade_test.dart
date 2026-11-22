@@ -24,11 +24,11 @@ import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
   const tdfService = TdfService();
-  final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
+  final fixedDate = DateTime.utc(2026, 11, 1, 12);
 
   group('TDF 0.5.1 Section 6.3 and 6.11.3 Queue-Driven Task Downgrade Transitions', () {
     test('executes Section 6.3 Focus-to-Ready (< 8 and >= 8 eligible tasks), Ready-to-Planned, and Planned-to-Someday downgrades via shared queue order with strict revision discipline', () {
-      final f1Created = DateTime.utc(2026, 11, 1, 8, 0);
+      final f1Created = DateTime.utc(2026, 11, 1, 8);
       final b2Created = DateTime.utc(2026, 11, 1, 8, 20);
       final board = TaskBoard(
         focus: [
@@ -125,7 +125,7 @@ void main() {
         reason: 'Section 6.3 and 6.11.3: downgrading a non-priority Focus/Ready task already at the end of queue must leave queue.modified unchanged',
       );
 
-      final slot8Time = DateTime.utc(2026, 11, 1, 9, 0, 0);
+      final slot8Time = DateTime.utc(2026, 11, 1, 9);
       final collidingSlot9Time = DateTime.utc(2026, 11, 1, 9, 0, 1);
       final fullBoard = TaskBoard(
         focus: [
@@ -133,7 +133,7 @@ void main() {
             id: 'f10000OkD2',
             title: 'F1',
             isPriority: true,
-            createdAt: DateTime.utc(2026, 11, 1, 8, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 8),
           ),
           TaskItem(
             id: 'f20000OkD2',
@@ -224,7 +224,7 @@ void main() {
             id: 'pf1000OkD2',
             title: 'PF1',
             isPriority: true,
-            createdAt: DateTime.utc(2026, 11, 1, 8, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 8),
           ),
           TaskItem(
             id: 'pf2000OkD2',
@@ -281,8 +281,7 @@ void main() {
           TaskItem(
             id: 'regp20OkD2',
             title: 'Regular Planned Task',
-            isPriority: false,
-            createdAt: DateTime.utc(2026, 11, 1, 8, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 8),
           ),
         ],
       );
@@ -577,7 +576,7 @@ void main() {
 
   group('TDF 0.7.0 Due-Promoted Downgrade Transitions, duePassive Setting & Pure No-Op Cleanup Guard', () {
     test('downgrades due-promoted Focus and Ready tasks using isDuePassive without bounce-back, preserves urgent Focus->Ready when >=7 urgent peers exist, and skips block cleanup on pure no-op', () {
-      final now = DateTime.utc(2026, 11, 1, 12, 0, 0);
+      final now = DateTime.utc(2026, 11, 1, 12);
       final laterNow = now.add(const Duration(hours: 2));
 
       // 1. Focus -> Ready with < 7 other eligible tasks: due-promoted task (due at +25h from now, so +23h <= 24h at laterNow)
@@ -805,9 +804,9 @@ void main() {
     });
 
     test('TDF 0.8.0 downgradeTask preserves dueAnchor across Focus -> Ready (Case A and Case B), Ready -> Planned, and Planned -> Someday', () {
-      final now = DateTime.utc(2026, 2, 28, 10, 0);
-      final dueUtc = DateTime.utc(2026, 2, 28, 17, 0);
-      final anchor = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
+      final now = DateTime.utc(2026, 2, 28, 10);
+      final dueUtc = DateTime.utc(2026, 2, 28, 17);
+      final anchor = TdfLocalDateTime(2026, 1, 31, 18);
 
       // Case B (< 7 urgent peers) chain Focus -> Ready -> Planned -> Someday:
       final fillers = <TaskItem>[

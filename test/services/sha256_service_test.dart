@@ -95,5 +95,69 @@ void main() {
         reason: 'TDF-SER-005 Vector 2 (76 UTF-8 bytes)',
       );
     });
+
+    test('matches exact streaming block boundaries for both Uint8List and non-typed List<int> inputs', () {
+      const boundaryVectors = <({int length, String expectedHex})>[
+        (
+          length: 55,
+          expectedHex: '9f4390f8d30c2dd92ec9f095b65e2b9ae9b0a925a5258e241c9f1e910f734318',
+        ),
+        (
+          length: 56,
+          expectedHex: 'b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a',
+        ),
+        (
+          length: 63,
+          expectedHex: '7d3e74a05d7db15bce4ad9ec0658ea98e3f06eeecf16b4c6fff2da457ddc2f34',
+        ),
+        (
+          length: 64,
+          expectedHex: 'ffe054fe7ae0cb6dc65c3af9b61d5209f439851db43d0ba5997337df154668eb',
+        ),
+        (
+          length: 65,
+          expectedHex: '635361c48bb9eab14198e76ea8ab7f1a41685d6ad62aa9146d301d4f17eb0ae0',
+        ),
+        (
+          length: 119,
+          expectedHex: '31eba51c313a5c08226adf18d4a359cfdfd8d2e816b13f4af952f7ea6584dcfb',
+        ),
+        (
+          length: 120,
+          expectedHex: '2f3d335432c70b580af0e8e1b3674a7c020d683aa5f73aaaedfdc55af904c21c',
+        ),
+        (
+          length: 127,
+          expectedHex: 'c57e9278af78fa3cab38667bef4ce29d783787a2f731d4e12200270f0c32320a',
+        ),
+        (
+          length: 128,
+          expectedHex: '6836cf13bac400e9105071cd6af47084dfacad4e5e302c94bfed24e013afb73e',
+        ),
+        (
+          length: 129,
+          expectedHex: 'c12cb024a2e5551cca0e08fce8f1c5e314555cc3fef6329ee994a3db752166ae',
+        ),
+      ];
+      for (final vector in boundaryVectors) {
+        final typedInput = Uint8List(vector.length)
+          ..fillRange(0, vector.length, 0x61);
+        final listInput = List<int>.filled(vector.length, 0x61);
+        final typedDigest = Sha256Service.hashHex(typedInput);
+        final listDigest = Sha256Service.hashHex(listInput);
+        expect(
+          typedDigest,
+          equals(listDigest),
+          reason:
+              'Uint8List and List<int> must hash identically at length ${vector.length}',
+        );
+        expect(
+          typedDigest,
+          equals(vector.expectedHex),
+          reason:
+              'SHA-256 streaming digest mismatch at ${vector.length} "a" bytes',
+        );
+      }
+    });
   });
 }

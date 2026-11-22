@@ -23,7 +23,7 @@ import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/tdf_timezone.dart';
 
 void main() {
-  final fixedNow = DateTime.utc(2026, 11, 4, 12, 0, 0);
+  final fixedNow = DateTime.utc(2026, 11, 4, 12);
 
   group('TDF 0.5.1 Section 5.5 and 6.11.3 Queue-Driven Tier Derivation', () {
     test('preserves saved queue position across blocking and release (A..J table) without rewriting queue order or revisions', () {
@@ -44,12 +44,12 @@ void main() {
           TaskItem(
             id: ids[i],
             title: 'Task ${ids[i]}',
-            createdAt: DateTime.utc(2026, 11, 1, 8, 0),
-            suspendedAt: i == 0 ? DateTime.utc(2026, 11, 5, 0, 0) : null,
+            createdAt: DateTime.utc(2026, 11, 1, 8),
+            suspendedAt: i == 0 ? DateTime.utc(2026, 11, 5) : null,
           ),
       ];
       final initialQueue = TdfQueueBlock(
-        modifiedAt: DateTime.utc(2026, 11, 1, 9, 0, 0),
+        modifiedAt: DateTime.utc(2026, 11, 1, 9),
         taskIds: ids,
       );
 
@@ -90,7 +90,7 @@ void main() {
       );
 
       final releasedBoard = blockedBoard.applyAutoPull(
-        currentDate: DateTime.utc(2026, 11, 5, 1, 0, 0),
+        currentDate: DateTime.utc(2026, 11, 5, 1),
       );
       expect(
         releasedBoard.focus.map((task) => task.id),
@@ -127,7 +127,7 @@ void main() {
         TaskItem(
           id: 'reg1000001',
           title: 'Regular 1 (later timestamp, earlier in queue)',
-          createdAt: DateTime.utc(2026, 11, 4, 11, 0),
+          createdAt: DateTime.utc(2026, 11, 4, 11),
         ),
         TaskItem(
           id: 'prio100001',
@@ -138,13 +138,13 @@ void main() {
         TaskItem(
           id: 'reg2000002',
           title: 'Regular 2 (earlier timestamp, later in queue)',
-          createdAt: DateTime.utc(2026, 11, 4, 8, 0),
+          createdAt: DateTime.utc(2026, 11, 4, 8),
         ),
         TaskItem(
           id: 'prio200002',
           title: 'Priority 2 (earlier timestamp, later in queue)',
           isPriority: true,
-          createdAt: DateTime.utc(2026, 11, 4, 7, 0),
+          createdAt: DateTime.utc(2026, 11, 4, 7),
         ),
       ];
       final queue = TdfQueueBlock(
@@ -173,9 +173,9 @@ void main() {
       final unqueuedDeferred = TaskItem(
         id: 'unqdefOkD2',
         title: 'Unqueued Deferred Task',
-        createdAt: DateTime.utc(2026, 11, 1, 8, 0),
-        modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
-        suspendedAt: DateTime.utc(2026, 11, 5, 0, 0),
+        createdAt: DateTime.utc(2026, 11, 1, 8),
+        modifiedAt: DateTime.utc(2026, 11, 1, 8),
+        suspendedAt: DateTime.utc(2026, 11, 5),
       );
       final whileSuspended = TaskBoard.evaluate(
         tasks: <TaskItem>[unqueuedDeferred],
@@ -190,7 +190,7 @@ void main() {
       expect(whileSuspended.queueTaskIds, isEmpty);
 
       final afterExpiry = whileSuspended.applyAutoPull(
-        currentDate: DateTime.utc(2026, 11, 5, 1, 0),
+        currentDate: DateTime.utc(2026, 11, 5, 1),
       );
       expect(
         afterExpiry.someday.map((task) => task.id),
@@ -200,12 +200,12 @@ void main() {
       expect(afterExpiry.queueTaskIds, isEmpty);
       expect(
         afterExpiry.findTask('unqdefOkD2')!.suspendedAt,
-        equals(DateTime.utc(2026, 11, 5, 0, 0)),
+        equals(DateTime.utc(2026, 11, 5)),
         reason: 'Section 6.10.1: Read-only evaluation must not strip expired suspended',
       );
       expect(
         afterExpiry.findTask('unqdefOkD2')!.modifiedAt,
-        equals(DateTime.utc(2026, 11, 1, 8, 0)),
+        equals(DateTime.utc(2026, 11, 1, 8)),
         reason:
             'Section 6.10.1: Read-only evaluation must not advance modifiedAt',
       );
@@ -228,7 +228,7 @@ void main() {
         completions: 7,
         isPriority: true,
         isSuspendedForever: true,
-        dueAt: DateTime.utc(2026, 11, 10, 12, 0),
+        dueAt: DateTime.utc(2026, 11, 10, 12),
         origin: const TaskOrigin(namespace: 'github', externalKey: 'issue-99'),
         repeatRule: const TaskRepeatRule(
           count: 2,
@@ -333,20 +333,20 @@ void main() {
       final backupTask = TaskItem(
         id: '8jKaCdOkD2',
         title: 'Create backup',
-        createdAt: DateTime.utc(2026, 11, 1, 8, 0),
-        modifiedAt: DateTime.utc(2026, 11, 4, 8, 0),
+        createdAt: DateTime.utc(2026, 11, 1, 8),
+        modifiedAt: DateTime.utc(2026, 11, 4, 8),
         completions: 7,
         repeatRule: const TaskRepeatRule(
           count: 1,
           unit: RepeatUnit.days,
-          clock: TdfRepeatClock(hour: 9, minute: 0),
+          clock: TdfRepeatClock(hour: 9),
         ),
       );
       final updateTask = TaskItem(
         id: '3nQp7ROkB8',
         title: 'Install update',
-        createdAt: DateTime.utc(2026, 11, 4, 9, 0),
-        modifiedAt: DateTime.utc(2026, 11, 4, 9, 0),
+        createdAt: DateTime.utc(2026, 11, 4, 9),
+        modifiedAt: DateTime.utc(2026, 11, 4, 9),
         dependencies: const <TdfTaskDependency>[
           TdfTaskDependency(taskId: '8jKaCdOkD2', requiredCompletion: 8),
         ],
@@ -357,7 +357,7 @@ void main() {
         tasks: <TaskItem>[backupTask, updateTask],
         evaluationTime: fixedNow,
         queueBlock: TdfQueueBlock(
-          modifiedAt: DateTime.utc(2026, 11, 4, 9, 0),
+          modifiedAt: DateTime.utc(2026, 11, 4, 9),
           taskIds: const <String>['8jKaCdOkD2', '3nQp7ROkB8'],
         ),
       );
@@ -432,7 +432,7 @@ void main() {
 
       // Wake both tasks on 2026-11-05 10:00 UTC -> updateTask's requirement 10 is already satisfied!
       final wokenBoard = board.applyAutoPull(
-        currentDate: DateTime.utc(2026, 11, 5, 10, 0, 0),
+        currentDate: DateTime.utc(2026, 11, 5, 10),
       );
       expect(
         wokenBoard.focus.map((task) => task.id),
@@ -474,14 +474,14 @@ void main() {
       final label = TdfLabel(
         id: 'lbl000OkD2',
         name: 'Work',
-        modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
+        modifiedAt: DateTime.utc(2026, 11, 1, 8),
       );
       final activeTask = TaskItem(
         id: 'act000OkD2',
         title: 'Active Task',
         completions: 3,
-        createdAt: DateTime.utc(2026, 11, 1, 8, 0),
-        modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
+        createdAt: DateTime.utc(2026, 11, 1, 8),
+        modifiedAt: DateTime.utc(2026, 11, 1, 8),
         labelIds: const <String>['lbl000OkD2'],
       );
       final expiredCompleted = TaskItem(
@@ -489,9 +489,9 @@ void main() {
         title: 'Completed 31 Days Ago',
         isCompleted: true,
         completions: 2,
-        createdAt: DateTime.utc(2026, 9, 1, 8, 0),
-        completedAt: DateTime.utc(2026, 10, 1, 8, 0),
-        modifiedAt: DateTime.utc(2026, 10, 1, 8, 0),
+        createdAt: DateTime.utc(2026, 9, 1, 8),
+        completedAt: DateTime.utc(2026, 10, 1, 8),
+        modifiedAt: DateTime.utc(2026, 10, 1, 8),
       );
 
       var board = TaskBoard.evaluate(
@@ -499,7 +499,7 @@ void main() {
         labels: <TdfLabel>[label],
         evaluationTime: fixedNow,
         queueBlock: TdfQueueBlock(
-          modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
+          modifiedAt: DateTime.utc(2026, 11, 1, 8),
           taskIds: const <String>['act000OkD2'],
         ),
       );
@@ -579,8 +579,8 @@ void main() {
             createdAt: fixedNow,
             modifiedAt: fixedNow,
             dependencies: const <TdfTaskDependency>[
-              TdfTaskDependency(taskId: 'oldDelTask', requiredCompletion: 1),
-              TdfTaskDependency(taskId: 'fwdRefTask', requiredCompletion: 1),
+              TdfTaskDependency(taskId: 'oldDelTask'),
+              TdfTaskDependency(taskId: 'fwdRefTask'),
             ],
           ),
         ],
@@ -614,7 +614,7 @@ void main() {
       expect(
         afterPrereqHygiene.findTask('liveDepTask')!.dependencies,
         equals(const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'fwdRefTask', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'fwdRefTask'),
         ]),
         reason: 'Section 6.8.3: Expiring a task tombstone after 30 days must strip blocked references to that expired ID while preserving forward references',
       );
@@ -639,7 +639,7 @@ void main() {
         createdAt: fixedNow,
         modifiedAt: fixedNow,
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'recPrereq1', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'recPrereq1'),
         ],
         repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
       );
@@ -649,7 +649,7 @@ void main() {
         createdAt: fixedNow,
         modifiedAt: fixedNow,
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'recPrereq1', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'recPrereq1'),
         ],
       );
 
@@ -678,7 +678,7 @@ void main() {
       expect(
         board.findTask('recDep0001')!.dependencies,
         equals(const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'recPrereq1', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'recPrereq1'),
         ]),
         reason: 'Recurring-to-recurring pipeline must preserve blocked directive so dependent can rearm on completion',
       );
@@ -700,7 +700,7 @@ void main() {
     });
 
     test('TDF 0.8.0 TDF-PUB-004 strips expired task blocked refs on Completed tasks, prunes scopedHidden Completed tasks, and rejects maxTdfSyncGeneration overflow', () {
-      final tDel = DateTime.utc(2026, 10, 1, 12, 0, 0);
+      final tDel = DateTime.utc(2026, 10, 1, 12);
       final exact30d = tDel.add(const Duration(seconds: 2592000));
       final over30d = tDel.add(const Duration(seconds: 2592001));
       final scopedLabel = TdfLabel(
@@ -720,7 +720,7 @@ void main() {
         createdAt: tDel,
         dependencies: const <TdfTaskDependency>[
           TdfTaskDependency(taskId: 'expTomb001', requiredCompletion: 2),
-          TdfTaskDependency(taskId: 'fwdKeep001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'fwdKeep001'),
         ],
       );
       final scopedDoneExpired = TaskItem(
@@ -742,7 +742,7 @@ void main() {
         createdAt: tDel,
         labelIds: const <String>['scpLbl0001'],
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'expTomb001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'expTomb001'),
         ],
       );
 
@@ -764,7 +764,6 @@ void main() {
           ],
         ),
         evaluationTime: exact30d,
-        pruneExpiredCompleted: false,
       );
 
       // Exact 30 days (2,592,000s) retains both scoped completed task and tombstone:
@@ -823,7 +822,7 @@ void main() {
       expect(
         cleanedDone.dependencies,
         equals(const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'fwdKeep001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'fwdKeep001'),
         ]),
         reason: 'TDF-PUB-004: expiring task tombstone must strip blocked reference even on Completed tasks while preserving forward refs',
       );
@@ -862,7 +861,7 @@ void main() {
     });
 
     test('editing a Completed recurring task with subtasksAutoFinish via updateTask keeps it Completed', () {
-      final t0 = DateTime.utc(2026, 8, 1, 9, 0, 0);
+      final t0 = DateTime.utc(2026, 8, 1, 9);
       final t1 = t0.add(const Duration(minutes: 5));
       final t2 = t1.add(const Duration(minutes: 5));
       final completedRecurring = TaskItem(
@@ -898,7 +897,7 @@ void main() {
         note: 'Updated retrospective note',
         subtasks: const <SubtaskItem>[
           SubtaskItem(title: 'Step A', isCompleted: true),
-          SubtaskItem(title: 'Step B', isCompleted: false),
+          SubtaskItem(title: 'Step B'),
         ],
         currentDate: t2,
       );
@@ -921,7 +920,7 @@ void main() {
 
     test('nextModifiedTimestamp, computeNextMode2Schedule, and nextDueUtc map out-of-bounds timestamps to TdfException(invalidTimestamp)', () {
       final maxUtc = DateTime.utc(9999, 12, 31, 23, 59, 59);
-      final minUtc = DateTime.utc(1, 1, 1, 0, 0, 0);
+      final minUtc = DateTime.utc(1);
       final tdfInvalidTimestamp = isA<TdfException>().having(
         (error) => error.kind,
         'kind',
@@ -935,10 +934,7 @@ void main() {
         reason: 'nextModifiedTimestamp +1s past 9999 must throw TdfException(invalidTimestamp)',
       );
       expect(
-        () => TaskItem.nextModifiedTimestamp(
-          DateTime.utc(10000, 1, 1, 0, 0, 0),
-          null,
-        ),
+        () => TaskItem.nextModifiedTimestamp(DateTime.utc(10000), null),
         throwsA(tdfInvalidTimestamp),
       );
 
@@ -946,7 +942,7 @@ void main() {
       const daily = TaskRepeatRule(count: 1, unit: RepeatUnit.days);
       expect(
         () => daily.computeNextMode2Schedule(
-          completedAtUtc: DateTime.utc(2026, 1, 1, 0, 0, 0),
+          completedAtUtc: DateTime.utc(2026),
           oldDueUtc: minUtc,
           timeZone: TdfTimeZoneContext.fixedOffset(const Duration(hours: -5)),
         ),
@@ -974,7 +970,7 @@ void main() {
       );
       expect(
         () => daily.nextDueUtc(
-          completedAtUtc: DateTime.utc(10000, 1, 1, 0, 0, 0),
+          completedAtUtc: DateTime.utc(10000),
           timeZone: TdfTimeZoneContext.utc,
         ),
         throwsA(tdfInvalidTimestamp),

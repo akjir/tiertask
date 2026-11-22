@@ -34,6 +34,7 @@ import 'floating_notice_providers.dart';
 import 'location_providers.dart';
 import 'location_source_resolver.dart';
 import 'shell_providers.dart';
+import 'sync_error_formatter.dart';
 import 'sync_providers.dart';
 import 'task_providers.dart';
 import 'task_schedule_helper.dart';
@@ -64,9 +65,11 @@ const double _defaultQuickCreateRadiusMeters = 200.0;
 /// Coordinates Label and Location creation, inline saves, deletion, GPS seeding, and source resolution.
 class EntityActionsNotifier extends Notifier<EntityActionsState> {
   String? _activeWorkspaceId;
+  int _operationToken = 0;
 
   @override
   EntityActionsState build() {
+    _operationToken = 0;
     _activeWorkspaceId = ref.read(activeWorkspaceProvider).asData?.value.id;
     ref.listen<String?>(
       activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
@@ -102,52 +105,52 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
   }
 
   /// Clears the custom `#RRGGBB` color on label [labelId].
-  Future<ActionResult> clearLabelColor(String labelId, {Locale? locale}) {
-    return _saveLabelSection(
-      labelId: labelId,
-      section: LabelSectionKind.color,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateLabel(labelId, clearColor: true),
-    );
-  }
+  Future<ActionResult> clearLabelColor(String labelId, {Locale? locale}) =>
+      _saveEntitySection(
+        kind: EntityKind.label,
+        entityId: labelId,
+        sectionName: LabelSectionKind.color.name,
+        locale: locale,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateLabel(labelId, clearColor: true),
+      );
 
   /// Clears all inherited activation conditions on label [labelId].
-  Future<ActionResult> clearLabelConditions(String labelId, {Locale? locale}) {
-    return _saveLabelSection(
-      labelId: labelId,
-      section: LabelSectionKind.conditions,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateLabel(labelId, conditions: const <TaskCondition>[]),
-    );
-  }
+  Future<ActionResult> clearLabelConditions(String labelId, {Locale? locale}) =>
+      _saveEntitySection(
+        kind: EntityKind.label,
+        entityId: labelId,
+        sectionName: LabelSectionKind.conditions.name,
+        locale: locale,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateLabel(labelId, conditions: const <TaskCondition>[]),
+      );
 
   /// Clears the optional note on label [labelId].
-  Future<ActionResult> clearLabelNote(String labelId, {Locale? locale}) {
-    return _saveLabelSection(
-      labelId: labelId,
-      section: LabelSectionKind.note,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateLabel(labelId, clearNote: true),
-    );
-  }
+  Future<ActionResult> clearLabelNote(String labelId, {Locale? locale}) =>
+      _saveEntitySection(
+        kind: EntityKind.label,
+        entityId: labelId,
+        sectionName: LabelSectionKind.note.name,
+        locale: locale,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateLabel(labelId, clearNote: true),
+      );
 
   /// Clears the optional note on location [locationId].
-  Future<ActionResult> clearLocationNote(String locationId, {Locale? locale}) {
-    return _saveLocationSection(
-      locationId: locationId,
-      section: LocationSectionKind.note,
-      locale: locale,
-      persist: () => ref
-          .read(taskNotifierProvider.notifier)
-          .updateLocation(locationId, clearNote: true),
-    );
-  }
+  Future<ActionResult> clearLocationNote(String locationId, {Locale? locale}) =>
+      _saveEntitySection(
+        kind: EntityKind.location,
+        entityId: locationId,
+        sectionName: LocationSectionKind.note.name,
+        locale: locale,
+        persist: () => ref
+            .read(taskNotifierProvider.notifier)
+            .updateLocation(locationId, clearNote: true),
+      );
 
   /// Validates and commits an uncommitted [LabelDraftInput], closes the draft, expands and reveals the card, and emits a notice.
   Future<ActionResult> createLabelDraft(
@@ -211,45 +214,22 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
       timestamp: _nowUtc(),
       existingIds: TaskScheduleHelper.collectAllUsedEntityIds(board),
     );
-    return _runBusyMutation(
+    return _commitCreatedEntity(
+      kind: EntityKind.label,
+      entityId: newId,
       localizations: localizations,
-      action: (startingWorkspaceId) async {
-        await ref
-            .read(taskNotifierProvider.notifier)
-            .addLabel(
-              validatedName.trimmed,
-              id: newId,
-              color: validatedColor.normalizedHex,
-              note: validatedNote.normalizedNote,
-              isScoped: input.isScoped,
-              links: validatedLinks.links,
-              conditions: validatedConditions.conditions,
-            );
-        if (!_isStillActiveWorkspace(startingWorkspaceId)) {
-          return ActionSucceeded(
-            entityId: newId,
-            noticeMessage: localizations.labelSavedNotice,
-          );
-        }
-        if (_buildUncommittedError(localizations: localizations)
-            case final failure?) {
-          return failure;
-        }
-        final shellNotifier = ref.read(shellProvider.notifier);
-        shellNotifier.cancelDraft();
-        UiTelemetry.logEntityDraftCommitted(EntityDraftKind.label.name);
-        shellNotifier.expandEntity(
-          EntityRef(kind: EntityKind.label, id: newId),
-          reveal: true,
-        );
-        ref
-            .read(floatingNoticeProvider.notifier)
-            .showNotice(localizations.labelSavedNotice);
-        return ActionSucceeded(
-          entityId: newId,
-          noticeMessage: localizations.labelSavedNotice,
-        );
-      },
+      closeDraft: true,
+      persist: () => ref
+          .read(taskNotifierProvider.notifier)
+          .addLabel(
+            validatedName.trimmed,
+            id: newId,
+            color: validatedColor.normalizedHex,
+            note: validatedNote.normalizedNote,
+            isScoped: input.isScoped,
+            links: validatedLinks.links,
+            conditions: validatedConditions.conditions,
+          ),
     );
   }
 
@@ -266,38 +246,20 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
       fieldErrors['limit'] = localizations.errorLocalFileTooLarge;
     }
 
-    final validatedName = TaskScheduleHelper.validateSingleLineText(
-      rawText: input.name,
-      emptyError: localizations.locationNameErrorEmpty,
-      invalidError: localizations.locationNameErrorEmpty,
-      tooLongError: localizations.locationNameErrorEmpty,
-    );
+    final validatedName = _validateLocationName(input.name, localizations);
     if (validatedName.error case final nameError?) {
       fieldErrors['name'] = nameError;
     }
 
-    final validatedCoordinates = TaskScheduleHelper.parseCoordinates(
-      rawLatitude: input.rawLatitude,
-      rawLongitude: input.rawLongitude,
-      localizations: localizations,
-    );
-    if (validatedCoordinates.error case final coordinatesError?) {
-      fieldErrors['coordinates'] = coordinatesError;
-    }
-
-    final radiusMeters = TaskScheduleHelper.parseRadiusMeters(input.rawRadius);
-    if (radiusMeters == null) {
-      fieldErrors['radius'] = localizations.locationRadiusErrorInvalid;
-    }
-
-    final validatedSource = TaskScheduleHelper.validateLocationSource(
+    final validatedCoordinates = _validateLocationCoordinates(
       sourceType: input.sourceType,
       rawSource: input.rawSource,
+      rawLatitude: input.rawLatitude,
+      rawLongitude: input.rawLongitude,
+      rawRadius: input.rawRadius,
       localizations: localizations,
+      fieldErrors: fieldErrors,
     );
-    if (validatedSource.error case final sourceError?) {
-      fieldErrors['source'] = sourceError;
-    }
 
     final validatedNote = _validateOptionalNote(input.note, localizations);
     if (validatedNote.error case final noteError?) {
@@ -313,6 +275,7 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
 
     final latitude = validatedCoordinates.latitude;
     final longitude = validatedCoordinates.longitude;
+    final radiusMeters = validatedCoordinates.radiusMeters;
     if (latitude == null || longitude == null || radiusMeters == null) {
       return ActionValidationFailed(
         message: localizations.locationCoordinatesErrorInvalid,
@@ -323,120 +286,44 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
       timestamp: _nowUtc(),
       existingIds: TaskScheduleHelper.collectAllUsedEntityIds(board),
     );
-    return _runBusyMutation(
+    return _commitCreatedEntity(
+      kind: EntityKind.location,
+      entityId: newId,
       localizations: localizations,
-      action: (startingWorkspaceId) async {
-        await ref
-            .read(taskNotifierProvider.notifier)
-            .addLocation(
-              validatedName.trimmed,
-              id: newId,
-              latitude: latitude,
-              longitude: longitude,
-              radiusMeters: radiusMeters,
-              source: validatedSource.normalizedSource ?? '',
-              note: validatedNote.normalizedNote,
-            );
-        if (!_isStillActiveWorkspace(startingWorkspaceId)) {
-          return ActionSucceeded(
-            entityId: newId,
-            noticeMessage: localizations.locationSavedNotice,
-          );
-        }
-        if (_buildUncommittedError(localizations: localizations)
-            case final failure?) {
-          return failure;
-        }
-        final shellNotifier = ref.read(shellProvider.notifier);
-        shellNotifier.cancelDraft();
-        UiTelemetry.logEntityDraftCommitted(EntityDraftKind.location.name);
-        shellNotifier.expandEntity(
-          EntityRef(kind: EntityKind.location, id: newId),
-          reveal: true,
-        );
-        ref
-            .read(floatingNoticeProvider.notifier)
-            .showNotice(localizations.locationSavedNotice);
-        return ActionSucceeded(
-          entityId: newId,
-          noticeMessage: localizations.locationSavedNotice,
-        );
-      },
+      closeDraft: true,
+      persist: () => ref
+          .read(taskNotifierProvider.notifier)
+          .addLocation(
+            validatedName.trimmed,
+            id: newId,
+            latitude: latitude,
+            longitude: longitude,
+            radiusMeters: radiusMeters,
+            source: validatedCoordinates.normalizedSource ?? '',
+            note: validatedNote.normalizedNote,
+          ),
     );
   }
 
   /// Deletes label [labelId] under local-mutation suppression, collapses the card, and emits `labelDeletedNotice` without Undo.
-  Future<ActionResult> deleteLabel(String labelId, {Locale? locale}) {
-    final localizations = _localizations(locale);
-    final target = EntityRef(kind: EntityKind.label, id: labelId);
-    return _runBusyMutation(
-      localizations: localizations,
-      action: (startingWorkspaceId) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(
-              target,
-              () =>
-                  ref.read(taskNotifierProvider.notifier).deleteLabel(labelId),
-            );
-        if (!_isStillActiveWorkspace(startingWorkspaceId)) {
-          return ActionSucceeded(
-            entityId: labelId,
-            noticeMessage: localizations.labelDeletedNotice,
-          );
-        }
-        if (_buildUncommittedError(localizations: localizations)
-            case final failure?) {
-          return failure;
-        }
-        ref.read(shellProvider.notifier).collapseEntity();
-        ref
-            .read(floatingNoticeProvider.notifier)
-            .showNotice(localizations.labelDeletedNotice);
-        return ActionSucceeded(
-          entityId: labelId,
-          noticeMessage: localizations.labelDeletedNotice,
-        );
-      },
-    );
-  }
+  Future<ActionResult> deleteLabel(String labelId, {Locale? locale}) =>
+      _deleteEntity(
+        kind: EntityKind.label,
+        entityId: labelId,
+        locale: locale,
+        persist: () =>
+            ref.read(taskNotifierProvider.notifier).deleteLabel(labelId),
+      );
 
   /// Deletes location [locationId] under local-mutation suppression, collapses the card, and emits `locationDeletedNotice` without Undo.
-  Future<ActionResult> deleteLocation(String locationId, {Locale? locale}) {
-    final localizations = _localizations(locale);
-    final target = EntityRef(kind: EntityKind.location, id: locationId);
-    return _runBusyMutation(
-      localizations: localizations,
-      action: (startingWorkspaceId) async {
-        await ref
-            .read(shellProvider.notifier)
-            .runLocalEntityMutation(
-              target,
-              () => ref
-                  .read(taskNotifierProvider.notifier)
-                  .deleteLocation(locationId),
-            );
-        if (!_isStillActiveWorkspace(startingWorkspaceId)) {
-          return ActionSucceeded(
-            entityId: locationId,
-            noticeMessage: localizations.locationDeletedNotice,
-          );
-        }
-        if (_buildUncommittedError(localizations: localizations)
-            case final failure?) {
-          return failure;
-        }
-        ref.read(shellProvider.notifier).collapseEntity();
-        ref
-            .read(floatingNoticeProvider.notifier)
-            .showNotice(localizations.locationDeletedNotice);
-        return ActionSucceeded(
-          entityId: locationId,
-          noticeMessage: localizations.locationDeletedNotice,
-        );
-      },
-    );
-  }
+  Future<ActionResult> deleteLocation(String locationId, {Locale? locale}) =>
+      _deleteEntity(
+        kind: EntityKind.location,
+        entityId: locationId,
+        locale: locale,
+        persist: () =>
+            ref.read(taskNotifierProvider.notifier).deleteLocation(locationId),
+      );
 
   /// Quick-creates a label named [rawName] with the next rotating preset color, expands and reveals it, and emits `labelSavedNotice`.
   Future<ActionResult> quickCreateLabel(
@@ -470,36 +357,14 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
       timestamp: _nowUtc(),
       existingIds: TaskScheduleHelper.collectAllUsedEntityIds(board),
     );
-    return _runBusyMutation(
+    return _commitCreatedEntity(
+      kind: EntityKind.label,
+      entityId: newId,
       localizations: localizations,
-      action: (startingWorkspaceId) async {
-        await ref
-            .read(taskNotifierProvider.notifier)
-            .addLabel(validatedName.trimmed, id: newId, color: colorHex);
-        if (!_isStillActiveWorkspace(startingWorkspaceId)) {
-          return ActionSucceeded(
-            entityId: newId,
-            noticeMessage: localizations.labelSavedNotice,
-          );
-        }
-        if (_buildUncommittedError(localizations: localizations)
-            case final failure?) {
-          return failure;
-        }
-        ref
-            .read(shellProvider.notifier)
-            .expandEntity(
-              EntityRef(kind: EntityKind.label, id: newId),
-              reveal: true,
-            );
-        ref
-            .read(floatingNoticeProvider.notifier)
-            .showNotice(localizations.labelSavedNotice);
-        return ActionSucceeded(
-          entityId: newId,
-          noticeMessage: localizations.labelSavedNotice,
-        );
-      },
+      closeDraft: false,
+      persist: () => ref
+          .read(taskNotifierProvider.notifier)
+          .addLabel(validatedName.trimmed, id: newId, color: colorHex),
     );
   }
 
@@ -510,12 +375,7 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
   }) async {
     final localizations = _localizations(locale);
     final board = _currentBoard();
-    final validatedName = TaskScheduleHelper.validateSingleLineText(
-      rawText: rawName,
-      emptyError: localizations.locationNameErrorEmpty,
-      invalidError: localizations.locationNameErrorEmpty,
-      tooLongError: localizations.locationNameErrorEmpty,
-    );
+    final validatedName = _validateLocationName(rawName, localizations);
     if (validatedName.error case final nameError?) {
       return ActionValidationFailed(
         message: nameError,
@@ -539,43 +399,21 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
       timestamp: _nowUtc(),
       existingIds: TaskScheduleHelper.collectAllUsedEntityIds(board),
     );
-    return _runBusyMutation(
+    return _commitCreatedEntity(
+      kind: EntityKind.location,
+      entityId: newId,
       localizations: localizations,
-      action: (startingWorkspaceId) async {
-        await ref
-            .read(taskNotifierProvider.notifier)
-            .addLocation(
-              validatedName.trimmed,
-              id: newId,
-              latitude: seededCoordinates.latitude,
-              longitude: seededCoordinates.longitude,
-              radiusMeters: _defaultQuickCreateRadiusMeters,
-              source: '',
-            );
-        if (!_isStillActiveWorkspace(startingWorkspaceId)) {
-          return ActionSucceeded(
-            entityId: newId,
-            noticeMessage: localizations.locationSavedNotice,
-          );
-        }
-        if (_buildUncommittedError(localizations: localizations)
-            case final failure?) {
-          return failure;
-        }
-        ref
-            .read(shellProvider.notifier)
-            .expandEntity(
-              EntityRef(kind: EntityKind.location, id: newId),
-              reveal: true,
-            );
-        ref
-            .read(floatingNoticeProvider.notifier)
-            .showNotice(localizations.locationSavedNotice);
-        return ActionSucceeded(
-          entityId: newId,
-          noticeMessage: localizations.locationSavedNotice,
-        );
-      },
+      closeDraft: false,
+      persist: () => ref
+          .read(taskNotifierProvider.notifier)
+          .addLocation(
+            validatedName.trimmed,
+            id: newId,
+            latitude: seededCoordinates.latitude,
+            longitude: seededCoordinates.longitude,
+            radiusMeters: _defaultQuickCreateRadiusMeters,
+            source: '',
+          ),
     );
   }
 
@@ -587,14 +425,11 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
     }
     final localizations = _localizations(locale);
     final locationResolver = ref.read(locationSourceResolverProvider);
-    final startingWorkspaceId =
-        _activeWorkspaceId ??
-        ref.read(activeWorkspaceProvider).asData?.value.id;
+    final token = _operationToken;
     state = state.copyWith(isResolvingLocation: true);
     try {
       final coordinates = await locationResolver.resolveCurrentGpsPosition();
-      if (!_isStillActiveWorkspace(startingWorkspaceId) ||
-          coordinates == null) {
+      if (!_isOperationActive(token) || coordinates == null) {
         return null;
       }
       final formattedLatitude = locationResolver.formatGpsCoordinate(
@@ -611,7 +446,7 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
         longitudeText: formattedLongitude,
       );
     } finally {
-      if (_isStillActiveWorkspace(startingWorkspaceId)) {
+      if (_isOperationActive(token)) {
         state = state.copyWith(isResolvingLocation: false);
       }
     }
@@ -646,9 +481,7 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
     }
 
     final locationResolver = ref.read(locationSourceResolverProvider);
-    final startingWorkspaceId =
-        _activeWorkspaceId ??
-        ref.read(activeWorkspaceProvider).asData?.value.id;
+    final token = _operationToken;
     state = state.copyWith(isResolvingLocation: true);
     try {
       final result = await locationResolver.resolveSource(
@@ -656,7 +489,7 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
         rawSource: rawSource,
         locale: locale,
       );
-      if (!_isStillActiveWorkspace(startingWorkspaceId)) {
+      if (!_isOperationActive(token)) {
         return LocationSourceResolutionError(
           localizations.locationResolveErrorNotFound,
         );
@@ -680,7 +513,7 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
         localizations.locationResolveErrorNotFound,
       );
     } finally {
-      if (_isStillActiveWorkspace(startingWorkspaceId)) {
+      if (_isOperationActive(token)) {
         state = state.copyWith(isResolvingLocation: false);
       }
     }
@@ -704,9 +537,10 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
       );
     }
     final normalizedHex = validatedColor.normalizedHex;
-    return _saveLabelSection(
-      labelId: labelId,
-      section: LabelSectionKind.color,
+    return _saveEntitySection(
+      kind: EntityKind.label,
+      entityId: labelId,
+      sectionName: LabelSectionKind.color.name,
       locale: locale,
       persist: () => ref
           .read(taskNotifierProvider.notifier)
@@ -725,10 +559,9 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
     Locale? locale,
   }) async {
     final localizations = _localizations(locale);
-    final board = _currentBoard();
     final validated = TaskScheduleHelper.compileConditionDraft(
       draft: draft,
-      board: board,
+      board: _currentBoard(),
       isTask: false,
       localizations: localizations,
     );
@@ -738,9 +571,10 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
         fieldErrors: <String, String>{'conditions': conditionsError},
       );
     }
-    return _saveLabelSection(
-      labelId: labelId,
-      section: LabelSectionKind.conditions,
+    return _saveEntitySection(
+      kind: EntityKind.label,
+      entityId: labelId,
+      sectionName: LabelSectionKind.conditions.name,
       locale: locale,
       persist: () => ref
           .read(taskNotifierProvider.notifier)
@@ -766,9 +600,10 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
         fieldErrors: <String, String>{'links': linksError},
       );
     }
-    return _saveLabelSection(
-      labelId: labelId,
-      section: LabelSectionKind.links,
+    return _saveEntitySection(
+      kind: EntityKind.label,
+      entityId: labelId,
+      sectionName: LabelSectionKind.links.name,
       locale: locale,
       persist: () => ref
           .read(taskNotifierProvider.notifier)
@@ -799,9 +634,10 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
         fieldErrors: <String, String>{'name': nameError},
       );
     }
-    return _saveLabelSection(
-      labelId: labelId,
-      section: LabelSectionKind.title,
+    return _saveEntitySection(
+      kind: EntityKind.label,
+      entityId: labelId,
+      sectionName: LabelSectionKind.title.name,
       locale: locale,
       persist: () => ref
           .read(taskNotifierProvider.notifier)
@@ -824,9 +660,10 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
       );
     }
     final normalizedNote = validated.normalizedNote;
-    return _saveLabelSection(
-      labelId: labelId,
-      section: LabelSectionKind.note,
+    return _saveEntitySection(
+      kind: EntityKind.label,
+      entityId: labelId,
+      sectionName: LabelSectionKind.note.name,
       locale: locale,
       persist: () => ref
           .read(taskNotifierProvider.notifier)
@@ -850,48 +687,34 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
   }) async {
     final localizations = _localizations(locale);
     final fieldErrors = <String, String>{};
-
-    final validatedCoordinates = TaskScheduleHelper.parseCoordinates(
-      rawLatitude: rawLatitude,
-      rawLongitude: rawLongitude,
-      localizations: localizations,
-    );
-    if (validatedCoordinates.error case final coordinatesError?) {
-      fieldErrors['coordinates'] = coordinatesError;
-    }
-
-    final radiusMeters = TaskScheduleHelper.parseRadiusMeters(rawRadius);
-    if (radiusMeters == null) {
-      fieldErrors['radius'] = localizations.locationRadiusErrorInvalid;
-    }
-
-    final validatedSource = TaskScheduleHelper.validateLocationSource(
+    final validatedCoordinates = _validateLocationCoordinates(
       sourceType: sourceType,
       rawSource: rawSource,
+      rawLatitude: rawLatitude,
+      rawLongitude: rawLongitude,
+      rawRadius: rawRadius,
       localizations: localizations,
+      fieldErrors: fieldErrors,
     );
-    if (validatedSource.error case final sourceError?) {
-      fieldErrors['source'] = sourceError;
-    }
-
     if (fieldErrors.isNotEmpty) {
       return ActionValidationFailed(
         message: fieldErrors.values.first,
         fieldErrors: fieldErrors,
       );
     }
-
     final latitude = validatedCoordinates.latitude;
     final longitude = validatedCoordinates.longitude;
+    final radiusMeters = validatedCoordinates.radiusMeters;
     if (latitude == null || longitude == null || radiusMeters == null) {
       return ActionValidationFailed(
         message: localizations.locationCoordinatesErrorInvalid,
       );
     }
-    final normalizedSource = validatedSource.normalizedSource;
-    return _saveLocationSection(
-      locationId: locationId,
-      section: LocationSectionKind.coordinates,
+    final normalizedSource = validatedCoordinates.normalizedSource;
+    return _saveEntitySection(
+      kind: EntityKind.location,
+      entityId: locationId,
+      sectionName: LocationSectionKind.coordinates.name,
       locale: locale,
       persist: () => ref
           .read(taskNotifierProvider.notifier)
@@ -913,21 +736,17 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
     Locale? locale,
   }) async {
     final localizations = _localizations(locale);
-    final validatedName = TaskScheduleHelper.validateSingleLineText(
-      rawText: rawName,
-      emptyError: localizations.locationNameErrorEmpty,
-      invalidError: localizations.locationNameErrorEmpty,
-      tooLongError: localizations.locationNameErrorEmpty,
-    );
+    final validatedName = _validateLocationName(rawName, localizations);
     if (validatedName.error case final nameError?) {
       return ActionValidationFailed(
         message: nameError,
         fieldErrors: <String, String>{'name': nameError},
       );
     }
-    return _saveLocationSection(
-      locationId: locationId,
-      section: LocationSectionKind.title,
+    return _saveEntitySection(
+      kind: EntityKind.location,
+      entityId: locationId,
+      sectionName: LocationSectionKind.title.name,
       locale: locale,
       persist: () => ref
           .read(taskNotifierProvider.notifier)
@@ -950,9 +769,10 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
       );
     }
     final normalizedNote = validated.normalizedNote;
-    return _saveLocationSection(
-      locationId: locationId,
-      section: LocationSectionKind.note,
+    return _saveEntitySection(
+      kind: EntityKind.location,
+      entityId: locationId,
+      sectionName: LocationSectionKind.note.name,
       locale: locale,
       persist: () => ref
           .read(taskNotifierProvider.notifier)
@@ -976,19 +796,18 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
     }
     return _runBusyMutation(
       localizations: localizations,
-      action: (startingWorkspaceId) async {
-        await ref
+      action: (token) async {
+        final committed = await ref
             .read(taskNotifierProvider.notifier)
             .updateLabel(labelId, isScoped: isScoped);
-        if (!_isStillActiveWorkspace(startingWorkspaceId)) {
+        if (!_isOperationActive(token)) {
           return ActionSucceeded(
             entityId: labelId,
             noticeMessage: localizations.labelSavedNotice,
           );
         }
-        if (_buildUncommittedError(localizations: localizations)
-            case final failure?) {
-          return failure;
+        if (!committed) {
+          return _buildUncommittedError(localizations: localizations);
         }
         if (AppLogger.shouldLog(LogLevel.info)) {
           AppLogger.event(
@@ -1009,16 +828,13 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
     );
   }
 
-  /// Checks whether the latest [TaskNotifier] mutation committed locally, returning [ActionPersistFailed] on rollback.
-  ActionPersistFailed? _buildUncommittedError({
+  /// Builds a sanitized [ActionPersistFailed] outcome and logs telemetry after a rolled-back [TaskNotifier] mutation.
+  ActionPersistFailed _buildUncommittedError({
     required AppLocalizations localizations,
     String? inlineEntityKind,
     String? inlineEntityId,
     String? inlineSection,
   }) {
-    if (ref.read(taskNotifierProvider.notifier).lastMutationCommitted) {
-      return null;
-    }
     final syncState = ref.read(syncStateProvider);
     _logPersistenceFailure(
       inlineEntityKind: inlineEntityKind,
@@ -1034,9 +850,93 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
     );
   }
 
+  /// Persists a newly validated label or location identified by [entityId], optionally closing the active draft, expanding the card, and showing its saved notice.
+  Future<ActionResult> _commitCreatedEntity({
+    required EntityKind kind,
+    required String entityId,
+    required AppLocalizations localizations,
+    required bool closeDraft,
+    required Future<bool> Function() persist,
+  }) {
+    final noticeMessage = _savedNoticeForKind(kind, localizations);
+    return _runBusyMutation(
+      localizations: localizations,
+      action: (token) async {
+        final committed = await persist();
+        if (!_isOperationActive(token)) {
+          return ActionSucceeded(
+            entityId: entityId,
+            noticeMessage: noticeMessage,
+          );
+        }
+        if (!committed) {
+          return _buildUncommittedError(localizations: localizations);
+        }
+        final shellNotifier = ref.read(shellProvider.notifier);
+        if (closeDraft) {
+          shellNotifier.cancelDraft();
+          UiTelemetry.logEntityDraftCommitted(kind.name);
+        }
+        shellNotifier.expandEntity(EntityRef(kind: kind, id: entityId));
+        ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
+        return ActionSucceeded(
+          entityId: entityId,
+          noticeMessage: noticeMessage,
+        );
+      },
+    );
+  }
+
   /// Returns the currently loaded [TaskBoard] or an empty board before initialization completes.
   TaskBoard _currentBoard() =>
       ref.read(taskNotifierProvider).asData?.value ?? TaskBoard.empty();
+
+  /// Deletes a label or location under local-mutation suppression, collapses the card, and emits its deletion notice.
+  Future<ActionResult> _deleteEntity({
+    required EntityKind kind,
+    required String entityId,
+    required Locale? locale,
+    required Future<bool> Function() persist,
+  }) {
+    final localizations = _localizations(locale);
+    final noticeMessage = kind == EntityKind.label
+        ? localizations.labelDeletedNotice
+        : localizations.locationDeletedNotice;
+    final target = EntityRef(kind: kind, id: entityId);
+    return _runBusyMutation(
+      localizations: localizations,
+      action: (token) async {
+        final committed = await ref
+            .read(shellProvider.notifier)
+            .runLocalEntityMutation(target, persist);
+        if (!_isOperationActive(token)) {
+          return ActionSucceeded(
+            entityId: entityId,
+            noticeMessage: noticeMessage,
+          );
+        }
+        if (!committed) {
+          return _buildUncommittedError(localizations: localizations);
+        }
+        ref.read(shellProvider.notifier).collapseEntity();
+        ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
+        return ActionSucceeded(
+          entityId: entityId,
+          noticeMessage: noticeMessage,
+        );
+      },
+    );
+  }
+
+  /// Returns `true` when the label or location with [entityId] exists on the active board.
+  bool _entityExists(EntityKind kind, String entityId) {
+    final board = _currentBoard();
+    return switch (kind) {
+      EntityKind.label => board.findLabel(entityId) != null,
+      EntityKind.location => board.findLocation(entityId) != null,
+      EntityKind.task => board.findTask(entityId) != null,
+    };
+  }
 
   /// Closes any active inline edit and returns a localized missing-entity validation error.
   ActionValidationFailed _handleMissingEntity(AppLocalizations localizations) {
@@ -1046,7 +946,7 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
     );
   }
 
-  /// Resets transient busy and geocoding flags on actual workspace switch while ignoring transient `AsyncLoading`.
+  /// Resets transient busy and geocoding flags and invalidates stale tokens on actual workspace switch while ignoring transient `AsyncLoading`.
   void _handleWorkspaceIdChanged(
     String? previousWorkspaceId,
     String? nextWorkspaceId,
@@ -1058,20 +958,13 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
         _activeWorkspaceId != null && _activeWorkspaceId != nextWorkspaceId;
     _activeWorkspaceId = nextWorkspaceId;
     if (switchedWorkspace) {
+      _operationToken++;
       state = const EntityActionsState();
     }
   }
 
-  /// Returns `true` when this notifier is still mounted and on [startingWorkspaceId].
-  bool _isStillActiveWorkspace(String? startingWorkspaceId) {
-    if (!ref.mounted) {
-      return false;
-    }
-    if (startingWorkspaceId == null) {
-      return true;
-    }
-    return _activeWorkspaceId == startingWorkspaceId;
-  }
+  /// Returns `true` when this notifier is still mounted and [token] belongs to the active workspace session.
+  bool _isOperationActive(int token) => ref.mounted && _operationToken == token;
 
   /// Resolves [AppLocalizations] from [locale] or the active [appLocaleProvider].
   AppLocalizations _localizations(Locale? locale) =>
@@ -1110,24 +1003,18 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
   /// Executes [action] under a serialized `isBusy` guard and maps persistence exceptions into sanitized [ActionPersistFailed] outcomes.
   Future<ActionResult> _runBusyMutation({
     required AppLocalizations localizations,
-    required Future<ActionResult> Function(String? startingWorkspaceId) action,
+    required Future<ActionResult> Function(int token) action,
     String? inlineEntityKind,
     String? inlineEntityId,
     String? inlineSection,
   }) async {
     if (state.isBusy) {
-      return ActionPersistFailed(
-        message: localizations.errorSaveLocalFileFailed(
-          localizations.fileReadStatusUnreadable,
-        ),
-      );
+      return ActionPersistFailed(message: localizations.syncStatusSyncing);
     }
-    final startingWorkspaceId =
-        _activeWorkspaceId ??
-        ref.read(activeWorkspaceProvider).asData?.value.id;
+    final token = _operationToken;
     state = state.copyWith(isBusy: true);
     try {
-      return await action(startingWorkspaceId);
+      return await action(token);
     } on TdfException catch (error) {
       _logPersistenceFailure(
         inlineEntityKind: inlineEntityKind,
@@ -1136,7 +1023,7 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
         errorKind: error.kind.name,
       );
       return ActionPersistFailed(
-        message: TaskScheduleHelper.mapTdfExceptionMessage(
+        message: SyncErrorFormatter.mapTdfExceptionMessage(
           error.kind,
           localizations,
         ),
@@ -1154,107 +1041,64 @@ class EntityActionsNotifier extends Notifier<EntityActionsState> {
         ),
       );
     } finally {
-      if (_isStillActiveWorkspace(startingWorkspaceId)) {
+      if (_isOperationActive(token)) {
         state = state.copyWith(isBusy: false);
       }
     }
   }
 
-  /// Persists a single inline section update on label [labelId], closing the inline editor and emitting telemetry and notice.
-  Future<ActionResult> _saveLabelSection({
-    required String labelId,
-    required LabelSectionKind section,
-    required Locale? locale,
-    required Future<void> Function() persist,
-  }) async {
-    final localizations = _localizations(locale);
-    if (_currentBoard().findLabel(labelId) == null) {
-      return _handleMissingEntity(localizations);
-    }
-    return _runBusyMutation(
-      localizations: localizations,
-      inlineEntityKind: EntityKind.label.name,
-      inlineEntityId: labelId,
-      inlineSection: section.name,
-      action: (startingWorkspaceId) async {
-        await persist();
-        if (!_isStillActiveWorkspace(startingWorkspaceId)) {
-          return ActionSucceeded(
-            entityId: labelId,
-            noticeMessage: localizations.labelSavedNotice,
-          );
-        }
-        if (_buildUncommittedError(
-              localizations: localizations,
-              inlineEntityKind: EntityKind.label.name,
-              inlineEntityId: labelId,
-              inlineSection: section.name,
-            )
-            case final failure?) {
-          return failure;
-        }
-        ref.read(shellProvider.notifier).closeInlineEdit();
-        UiTelemetry.logInlineEditSaved(
-          kind: EntityKind.label.name,
-          entityId: labelId,
-          section: section.name,
-        );
-        ref
-            .read(floatingNoticeProvider.notifier)
-            .showNotice(localizations.labelSavedNotice);
-        return ActionSucceeded(
-          entityId: labelId,
-          noticeMessage: localizations.labelSavedNotice,
-        );
-      },
-    );
-  }
+  /// Resolves the localized save notice message for [kind].
+  String _savedNoticeForKind(EntityKind kind, AppLocalizations localizations) =>
+      switch (kind) {
+        EntityKind.label => localizations.labelSavedNotice,
+        EntityKind.location => localizations.locationSavedNotice,
+        EntityKind.task => localizations.noticeTaskSaved,
+      };
 
-  /// Persists a single inline section update on location [locationId], closing the inline editor and emitting telemetry and notice.
-  Future<ActionResult> _saveLocationSection({
-    required String locationId,
-    required LocationSectionKind section,
+  /// Persists a single inline section update on a label or location, closing the inline editor and emitting telemetry and notice.
+  Future<ActionResult> _saveEntitySection({
+    required EntityKind kind,
+    required String entityId,
+    required String sectionName,
     required Locale? locale,
-    required Future<void> Function() persist,
+    required Future<bool> Function() persist,
   }) async {
     final localizations = _localizations(locale);
-    if (_currentBoard().findLocation(locationId) == null) {
+    if (!_entityExists(kind, entityId)) {
       return _handleMissingEntity(localizations);
     }
+    final noticeMessage = _savedNoticeForKind(kind, localizations);
     return _runBusyMutation(
       localizations: localizations,
-      inlineEntityKind: EntityKind.location.name,
-      inlineEntityId: locationId,
-      inlineSection: section.name,
-      action: (startingWorkspaceId) async {
-        await persist();
-        if (!_isStillActiveWorkspace(startingWorkspaceId)) {
+      inlineEntityKind: kind.name,
+      inlineEntityId: entityId,
+      inlineSection: sectionName,
+      action: (token) async {
+        final committed = await persist();
+        if (!_isOperationActive(token)) {
           return ActionSucceeded(
-            entityId: locationId,
-            noticeMessage: localizations.locationSavedNotice,
+            entityId: entityId,
+            noticeMessage: noticeMessage,
           );
         }
-        if (_buildUncommittedError(
-              localizations: localizations,
-              inlineEntityKind: EntityKind.location.name,
-              inlineEntityId: locationId,
-              inlineSection: section.name,
-            )
-            case final failure?) {
-          return failure;
+        if (!committed) {
+          return _buildUncommittedError(
+            localizations: localizations,
+            inlineEntityKind: kind.name,
+            inlineEntityId: entityId,
+            inlineSection: sectionName,
+          );
         }
         ref.read(shellProvider.notifier).closeInlineEdit();
         UiTelemetry.logInlineEditSaved(
-          kind: EntityKind.location.name,
-          entityId: locationId,
-          section: section.name,
+          kind: kind.name,
+          entityId: entityId,
+          section: sectionName,
         );
-        ref
-            .read(floatingNoticeProvider.notifier)
-            .showNotice(localizations.locationSavedNotice);
+        ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
         return ActionSucceeded(
-          entityId: locationId,
-          noticeMessage: localizations.locationSavedNotice,
+          entityId: entityId,
+          noticeMessage: noticeMessage,
         );
       },
     );
@@ -1477,9 +1321,11 @@ class LocationDraftInput {
 /// Coordinates manual synchronization, foreground location refresh, and conflict or recovery resolution actions.
 class SyncActionsNotifier extends Notifier<SyncActionsState> {
   String? _activeWorkspaceId;
+  int _operationToken = 0;
 
   @override
   SyncActionsState build() {
+    _operationToken = 0;
     _activeWorkspaceId = ref.read(activeWorkspaceProvider).asData?.value.id;
     ref.listen<String?>(
       activeWorkspaceProvider.select((workspace) => workspace.asData?.value.id),
@@ -1494,62 +1340,22 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
     required Map<String, TdfDeletionResolution> labelDecisions,
     required Map<String, TdfDeletionResolution> locationDecisions,
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    final startingWorkspaceId =
-        _activeWorkspaceId ??
-        ref.read(activeWorkspaceProvider).asData?.value.id;
-    state = state.copyWith(isBusy: true);
-    try {
-      await ref
-          .read(taskNotifierProvider.notifier)
-          .resolveDeletionConflicts(
-            taskResolutions: taskDecisions,
-            labelResolutions: labelDecisions,
-            locationResolutions: locationDecisions,
-          );
-      if (!_isStillActiveWorkspace(startingWorkspaceId)) {
-        return const ActionSucceeded();
-      }
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.sync,
-        'sync.conflict_resolved',
-        fields: <String, Object?>{
-          'tasks': taskDecisions.length,
-          'labels': labelDecisions.length,
-          'locations': locationDecisions.length,
-        },
-      );
-      ref.read(shellProvider.notifier).openView(ShellView.tasks);
-      final noticeMessage = localizations.conflictResolvedNotice;
-      ref
-          .read(floatingNoticeProvider.notifier)
-          .showNotice(noticeMessage, tone: FloatingNoticeTone.success);
-      return ActionSucceeded(noticeMessage: noticeMessage);
-    } on Object catch (error) {
-      AppLogger.event(
-        LogLevel.warn,
-        LogTag.sync,
-        'sync.conflict_resolve_failed',
-        error: error,
-      );
-      return ActionPersistFailed(
-        message: TaskScheduleHelper.formatSyncError(
-          error,
-          localizations,
-          isSave: true,
+  }) => _applyResolutions(
+    locale: locale,
+    taskCount: taskDecisions.length,
+    labelCount: labelDecisions.length,
+    locationCount: locationDecisions.length,
+    successEvent: 'sync.conflict_resolved',
+    failureEvent: 'sync.conflict_resolve_failed',
+    noticeBuilder: (localizations) => localizations.conflictResolvedNotice,
+    resolve: () => ref
+        .read(taskNotifierProvider.notifier)
+        .resolveDeletionConflicts(
+          taskResolutions: taskDecisions,
+          labelResolutions: labelDecisions,
+          locationResolutions: locationDecisions,
         ),
-      );
-    } finally {
-      if (_isStillActiveWorkspace(startingWorkspaceId)) {
-        state = state.copyWith(isBusy: false);
-      }
-    }
-  }
+  );
 
   /// Applies `TDF-REC-002` generation recovery choices, returns to Tasks, and announces completion.
   Future<ActionResult> applyRecoveryResolutions({
@@ -1557,62 +1363,22 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
     required Map<String, TdfRecoveryResolution> labelDecisions,
     required Map<String, TdfRecoveryResolution> locationDecisions,
     Locale? locale,
-  }) async {
-    final localizations = _resolveLocalizations(locale);
-    if (state.isBusy) {
-      return ActionPersistFailed(message: localizations.syncStatusSyncing);
-    }
-    final startingWorkspaceId =
-        _activeWorkspaceId ??
-        ref.read(activeWorkspaceProvider).asData?.value.id;
-    state = state.copyWith(isBusy: true);
-    try {
-      await ref
-          .read(taskNotifierProvider.notifier)
-          .resolveRecovery(
-            taskResolutions: taskDecisions,
-            labelResolutions: labelDecisions,
-            locationResolutions: locationDecisions,
-          );
-      if (!_isStillActiveWorkspace(startingWorkspaceId)) {
-        return const ActionSucceeded();
-      }
-      AppLogger.event(
-        LogLevel.info,
-        LogTag.sync,
-        'sync.recovery_resolved',
-        fields: <String, Object?>{
-          'tasks': taskDecisions.length,
-          'labels': labelDecisions.length,
-          'locations': locationDecisions.length,
-        },
-      );
-      ref.read(shellProvider.notifier).openView(ShellView.tasks);
-      final noticeMessage = localizations.recoveryResolvedNotice;
-      ref
-          .read(floatingNoticeProvider.notifier)
-          .showNotice(noticeMessage, tone: FloatingNoticeTone.success);
-      return ActionSucceeded(noticeMessage: noticeMessage);
-    } on Object catch (error) {
-      AppLogger.event(
-        LogLevel.warn,
-        LogTag.sync,
-        'sync.recovery_resolve_failed',
-        error: error,
-      );
-      return ActionPersistFailed(
-        message: TaskScheduleHelper.formatSyncError(
-          error,
-          localizations,
-          isSave: true,
+  }) => _applyResolutions(
+    locale: locale,
+    taskCount: taskDecisions.length,
+    labelCount: labelDecisions.length,
+    locationCount: locationDecisions.length,
+    successEvent: 'sync.recovery_resolved',
+    failureEvent: 'sync.recovery_resolve_failed',
+    noticeBuilder: (localizations) => localizations.recoveryResolvedNotice,
+    resolve: () => ref
+        .read(taskNotifierProvider.notifier)
+        .resolveRecovery(
+          taskResolutions: taskDecisions,
+          labelResolutions: labelDecisions,
+          locationResolutions: locationDecisions,
         ),
-      );
-    } finally {
-      if (_isStillActiveWorkspace(startingWorkspaceId)) {
-        state = state.copyWith(isBusy: false);
-      }
-    }
-  }
+  );
 
   /// Triggers an immediate foreground location refresh via [locationStateProvider].
   Future<ActionResult> refreshLocation() async {
@@ -1628,7 +1394,7 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
         error: error,
       );
       return ActionPersistFailed(
-        message: TaskScheduleHelper.formatSyncError(error, localizations),
+        message: SyncErrorFormatter.formatSyncError(error, localizations),
       );
     }
   }
@@ -1639,9 +1405,7 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
     if (state.isBusy) {
       return ActionPersistFailed(message: localizations.syncStatusSyncing);
     }
-    final startingWorkspaceId =
-        _activeWorkspaceId ??
-        ref.read(activeWorkspaceProvider).asData?.value.id;
+    final token = _operationToken;
     state = state.copyWith(isBusy: true);
     try {
       final currentWorkspaceState = ref.read(activeWorkspaceProvider);
@@ -1649,6 +1413,9 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
       if (currentWorkspaceState.hasError) {
         ref.invalidate(activeWorkspaceProvider);
         await ref.read(activeWorkspaceProvider.future);
+        if (!_isOperationActive(token)) {
+          return const ActionSucceeded();
+        }
         if (ref.read(taskNotifierProvider).hasError &&
             !ref.read(taskNotifierProvider).hasValue) {
           ref.invalidate(taskNotifierProvider);
@@ -1660,7 +1427,7 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
       } else {
         await ref.read(taskNotifierProvider.notifier).syncFromRemote();
       }
-      if (!_isStillActiveWorkspace(startingWorkspaceId)) {
+      if (!_isOperationActive(token)) {
         return const ActionSucceeded();
       }
       return _inspectPostSyncResult(localizations);
@@ -1672,16 +1439,70 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
         error: error,
       );
       return ActionPersistFailed(
-        message: TaskScheduleHelper.formatSyncError(error, localizations),
+        message: SyncErrorFormatter.formatSyncError(error, localizations),
       );
     } finally {
-      if (_isStillActiveWorkspace(startingWorkspaceId)) {
+      if (_isOperationActive(token)) {
         state = state.copyWith(isBusy: false);
       }
     }
   }
 
-  /// Resets transient busy state when switching workspaces while ignoring transient `AsyncLoading`.
+  /// Executes a guarded conflict or recovery resolution pass, logs telemetry, returns to Tasks, and announces completion.
+  Future<ActionResult> _applyResolutions({
+    required Locale? locale,
+    required int taskCount,
+    required int labelCount,
+    required int locationCount,
+    required String successEvent,
+    required String failureEvent,
+    required String Function(AppLocalizations localizations) noticeBuilder,
+    required Future<TaskBoard> Function() resolve,
+  }) async {
+    final localizations = _resolveLocalizations(locale);
+    if (state.isBusy) {
+      return ActionPersistFailed(message: localizations.syncStatusSyncing);
+    }
+    final token = _operationToken;
+    state = state.copyWith(isBusy: true);
+    try {
+      await resolve();
+      if (!_isOperationActive(token)) {
+        return const ActionSucceeded();
+      }
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.sync,
+        successEvent,
+        fields: <String, Object?>{
+          'tasks': taskCount,
+          'labels': labelCount,
+          'locations': locationCount,
+        },
+      );
+      ref.read(shellProvider.notifier).openView(ShellView.tasks);
+      final noticeMessage = noticeBuilder(localizations);
+      ref
+          .read(floatingNoticeProvider.notifier)
+          .showNotice(noticeMessage, tone: FloatingNoticeTone.success);
+      return ActionSucceeded(noticeMessage: noticeMessage);
+    } on Object catch (error) {
+      AppLogger.event(LogLevel.warn, LogTag.sync, failureEvent, error: error);
+      return ActionPersistFailed(
+        message: SyncErrorFormatter.formatSyncError(
+          error,
+          localizations,
+          isSave: true,
+        ),
+      );
+    } finally {
+      if (_isOperationActive(token)) {
+        state = state.copyWith(isBusy: false);
+      }
+    }
+  }
+
+  /// Resets transient busy state and invalidates stale tokens when switching workspaces while ignoring transient `AsyncLoading`.
   void _handleWorkspaceIdChanged(
     String? previousWorkspaceId,
     String? nextWorkspaceId,
@@ -1693,6 +1514,7 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
         _activeWorkspaceId != null && _activeWorkspaceId != nextWorkspaceId;
     _activeWorkspaceId = nextWorkspaceId;
     if (switchedWorkspace) {
+      _operationToken++;
       state = const SyncActionsState();
     }
   }
@@ -1702,7 +1524,7 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
     final latestSyncState = ref.read(syncStateProvider);
     if (latestSyncState.syncOutcome case final outcome?) {
       return ActionPersistFailed(
-        message: TaskScheduleHelper.formatSyncOutcomeMessage(
+        message: SyncErrorFormatter.formatSyncOutcomeMessage(
           outcome,
           localizations,
         ),
@@ -1726,23 +1548,15 @@ class SyncActionsNotifier extends Notifier<SyncActionsState> {
       final error = latestTaskState.error;
       return ActionPersistFailed(
         message: error != null
-            ? TaskScheduleHelper.formatSyncError(error, localizations)
+            ? SyncErrorFormatter.formatSyncError(error, localizations)
             : localizations.syncStatusError,
       );
     }
     return const ActionSucceeded();
   }
 
-  /// Returns `true` when this notifier is still mounted and on [startingWorkspaceId].
-  bool _isStillActiveWorkspace(String? startingWorkspaceId) {
-    if (!ref.mounted) {
-      return false;
-    }
-    if (startingWorkspaceId == null) {
-      return true;
-    }
-    return _activeWorkspaceId == startingWorkspaceId;
-  }
+  /// Returns `true` when this notifier is still mounted and [token] belongs to the active workspace session.
+  bool _isOperationActive(int token) => ref.mounted && _operationToken == token;
 
   /// Resolves [AppLocalizations] from an explicit [locale] override or [appLocaleProvider].
   AppLocalizations _resolveLocalizations(Locale? locale) =>
@@ -1799,9 +1613,7 @@ class WorkspaceActionsNotifier extends Notifier<WorkspaceActionsState> {
           created.name,
         );
         if (ref.mounted) {
-          ref
-              .read(floatingNoticeProvider.notifier)
-              .showNotice(noticeMessage, tone: FloatingNoticeTone.neutral);
+          ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
         }
         return ActionSucceeded(
           entityId: created.id,
@@ -1861,9 +1673,7 @@ class WorkspaceActionsNotifier extends Notifier<WorkspaceActionsState> {
           nextWorkspace.name,
         );
         if (ref.mounted) {
-          ref
-              .read(floatingNoticeProvider.notifier)
-              .showNotice(noticeMessage, tone: FloatingNoticeTone.neutral);
+          ref.read(floatingNoticeProvider.notifier).showNotice(noticeMessage);
         }
         return ActionSucceeded(
           entityId: nextWorkspace.id,
@@ -1890,7 +1700,9 @@ class WorkspaceActionsNotifier extends Notifier<WorkspaceActionsState> {
     required Future<ActionSucceeded> Function(Locale fallbackLocale) action,
   }) async {
     if (state.isBusy) {
-      return ActionValidationFailed(message: '');
+      final Locale fallbackLocale = locale ?? ref.read(appLocaleProvider);
+      final localizations = _resolveLocalizations(locale, fallbackLocale);
+      return ActionValidationFailed(message: localizations.syncStatusSyncing);
     }
     final Locale fallbackLocale = locale ?? ref.read(appLocaleProvider);
     state = const WorkspaceActionsState(isBusy: true);
@@ -1916,7 +1728,7 @@ class WorkspaceActionsNotifier extends Notifier<WorkspaceActionsState> {
       );
     } finally {
       if (ref.mounted) {
-        state = const WorkspaceActionsState(isBusy: false);
+        state = const WorkspaceActionsState();
       }
     }
   }
@@ -2015,6 +1827,61 @@ ActionResult _mapWorkspaceException(
   }
   return (trimmed: validatedText.trimmed, error: null, isDuplicate: false);
 }
+
+/// Validates location coordinates, geofence radius, and source metadata, recording any failures into [fieldErrors].
+({
+  double? latitude,
+  double? longitude,
+  double? radiusMeters,
+  String? normalizedSource,
+})
+_validateLocationCoordinates({
+  required LocationSourceType sourceType,
+  required String rawSource,
+  required String rawLatitude,
+  required String rawLongitude,
+  required String rawRadius,
+  required AppLocalizations localizations,
+  required Map<String, String> fieldErrors,
+}) {
+  final validatedCoordinates = TaskScheduleHelper.parseCoordinates(
+    rawLatitude: rawLatitude,
+    rawLongitude: rawLongitude,
+    localizations: localizations,
+  );
+  if (validatedCoordinates.error case final coordinatesError?) {
+    fieldErrors['coordinates'] = coordinatesError;
+  }
+  final radiusMeters = TaskScheduleHelper.parseRadiusMeters(rawRadius);
+  if (radiusMeters == null) {
+    fieldErrors['radius'] = localizations.locationRadiusErrorInvalid;
+  }
+  final validatedSource = TaskScheduleHelper.validateLocationSource(
+    sourceType: sourceType,
+    rawSource: rawSource,
+    localizations: localizations,
+  );
+  if (validatedSource.error case final sourceError?) {
+    fieldErrors['source'] = sourceError;
+  }
+  return (
+    latitude: validatedCoordinates.latitude,
+    longitude: validatedCoordinates.longitude,
+    radiusMeters: radiusMeters,
+    normalizedSource: validatedSource.normalizedSource,
+  );
+}
+
+/// Validates a location display name against single-line `<text>` bounds.
+({String trimmed, String? error}) _validateLocationName(
+  String rawName,
+  AppLocalizations localizations,
+) => TaskScheduleHelper.validateSingleLineText(
+  rawText: rawName,
+  emptyError: localizations.locationNameErrorEmpty,
+  invalidError: localizations.locationNameErrorEmpty,
+  tooLongError: localizations.locationNameErrorEmpty,
+);
 
 /// Normalizes and validates an optional multi-line `<note>` string against `maxTdfNoteLength` (`2000`) and control-char rules.
 ({String? normalizedNote, String? error}) _validateOptionalNote(

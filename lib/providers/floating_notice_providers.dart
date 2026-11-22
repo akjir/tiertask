@@ -133,6 +133,7 @@ class FloatingNoticeNotifier extends Notifier<FloatingNotice?> {
   int _lastUndoSequenceShown = 0;
   int _nextNoticeId = 1;
   int _undoInFlightCount = 0;
+  int _workspaceGeneration = 0;
 
   /// Whether an Undo mutation initiated by [undoLatest] is currently executing.
   bool get _isApplyingUndo => _undoInFlightCount > 0;
@@ -142,6 +143,7 @@ class FloatingNoticeNotifier extends Notifier<FloatingNotice?> {
     _cancelTimer();
     _lastUndoSequenceShown = 0;
     _undoInFlightCount = 0;
+    _workspaceGeneration = 0;
     ref.onDispose(_cancelTimer);
 
     final initialWorkspaceId = ref
@@ -234,6 +236,9 @@ class FloatingNoticeNotifier extends Notifier<FloatingNotice?> {
 
   /// Executes the latest undoable task mutation and announces remaining Undo stack depth.
   Future<bool> undoLatest({bool fromShortcut = false, Locale? locale}) async {
+    if (_isApplyingUndo) {
+      return false;
+    }
     final undoState = ref.read(taskUndoStateProvider);
     if (!undoState.canUndo) {
       return false;
@@ -250,6 +255,7 @@ class FloatingNoticeNotifier extends Notifier<FloatingNotice?> {
     }
 
     final expectedSequence = fromShortcut ? null : state?.undoSequence;
+    final generation = _workspaceGeneration;
     _undoInFlightCount++;
     final bool applied;
     try {
@@ -259,8 +265,8 @@ class FloatingNoticeNotifier extends Notifier<FloatingNotice?> {
     } finally {
       _undoInFlightCount--;
     }
-    if (!ref.mounted) {
-      return applied;
+    if (!ref.mounted || _workspaceGeneration != generation) {
+      return false;
     }
     if (!applied) {
       if ((state?.hasUndoAction ?? false) &&
@@ -277,7 +283,7 @@ class FloatingNoticeNotifier extends Notifier<FloatingNotice?> {
     final message = remaining > 0
         ? localizations.actionUndoneRemainingNotice('$remaining')
         : localizations.actionUndoneNotice;
-    showNotice(message, tone: FloatingNoticeTone.neutral);
+    showNotice(message);
     return true;
   }
 
@@ -327,6 +333,7 @@ class FloatingNoticeNotifier extends Notifier<FloatingNotice?> {
         _activeWorkspaceId != null && _activeWorkspaceId != nextWorkspaceId;
     _activeWorkspaceId = nextWorkspaceId;
     if (switchedWorkspace) {
+      _workspaceGeneration++;
       _lastUndoSequenceShown = 0;
       dismiss();
     }

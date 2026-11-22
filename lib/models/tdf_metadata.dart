@@ -21,14 +21,13 @@ import 'tdf_error.dart';
 import 'tdf_location.dart';
 
 /// Canonical Base62 character alphabet (`0-9`, `A-Z`, `a-z`) defined in `TDF_SPEC.md` Section 2.9.
-const String tdfBase62Alphabet =
-    '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+const String tdfBase62Alphabet = TdfEntityId.alphabet;
 
 /// Modulo divisor `62^4` (`14,776,336` seconds) for the 4-character Base62 timestamp suffix.
-const int tdfBase62TimeModulo = 14776336;
+const int tdfBase62TimeModulo = TdfEntityId.timeModulo;
 
 /// Fixed total character length of a TDF `<task-id>` or `<label-id>`.
-const int tdfEntityIdLength = 10;
+const int tdfEntityIdLength = TdfEntityId.idLength;
 
 /// Sole normative TDF version supported by this implementation (`TDF-COMPAT-001`, `TDF-ENT-001`).
 const String tdfSupportedVersion = '0.8.0';
@@ -255,31 +254,13 @@ class GroupResetTaskCondition extends TaskCondition {
   String toString() => 'condition ${toTdfDirectiveArgs()}';
 }
 
-/// Geographic proximity activation condition (`location <loc-1> [<loc-2> ...]` in TDF `0.6.0`, or legacy inline `location <lat> <lon> <radius>`).
+/// Geographic proximity activation condition (`location <loc-1> [<loc-2> ...]`).
 @immutable
 class LocationTaskCondition extends TaskCondition {
-  /// Creates a [LocationTaskCondition] for [locationIds] (or legacy inline [latitude], [longitude], and [radiusMeters]).
-  const LocationTaskCondition({
-    this.locationIds = const <String>[],
-    this.latitude = 0.0,
-    this.longitude = 0.0,
-    this.radiusMeters = 0.0,
-  }) : _latitudeText = null,
-       _longitudeText = null,
-       _radiusText = null;
+  /// Creates a [LocationTaskCondition] referencing [locationIds].
+  const LocationTaskCondition({this.locationIds = const <String>[]});
 
-  /// Creates a [LocationTaskCondition] preserving canonical raw decimal token texts.
-  const LocationTaskCondition._(
-    this.locationIds,
-    this.latitude,
-    this.longitude,
-    this.radiusMeters,
-    this._latitudeText,
-    this._longitudeText,
-    this._radiusText,
-  );
-
-  /// Creates a `0.6.0` ID-referenced [LocationTaskCondition] by deduplicating [rawLocationIds] in first-seen declaration order.
+  /// Creates an ID-referenced [LocationTaskCondition] by deduplicating [rawLocationIds] in first-seen declaration order.
   factory LocationTaskCondition.fromIds(Iterable<String> rawLocationIds) {
     final deduplicated = <String>[];
     final seen = <String>{};
@@ -293,36 +274,14 @@ class LocationTaskCondition extends TaskCondition {
     );
   }
 
-  /// Mean Earth radius in meters used for Haversine distance evaluation (`spec/TDF_SPEC_0.6.0.md` Section 4.4.2).
+  /// Mean Earth radius in meters used for Haversine distance evaluation (`spec/TDF_SPEC_0.8.0.md` Section 4.4.2).
   static const double earthRadiusMeters = 6371000.0;
-
-  /// Legacy target WGS-84 latitude in decimal degrees (`-90.0..90.0`) for historical `0.2.0..0.5.1` rules.
-  final double latitude;
 
   /// Referenced 10-character Base62 `<location-id>` tokens (`1..63`, deduplicated in first-seen declaration order).
   final List<String> locationIds;
 
-  /// Legacy target WGS-84 longitude in decimal degrees (`-180.0..180.0`) for historical `0.2.0..0.5.1` rules.
-  final double longitude;
-
-  /// Legacy inclusive geofencing radius in meters (`> 0.0`) for historical `0.2.0..0.5.1` rules.
-  final double radiusMeters;
-
-  final String? _latitudeText;
-  final String? _longitudeText;
-  final String? _radiusText;
-
   @override
   ConditionGroup get group => ConditionGroup.location;
-
-  /// Normalized decimal string representation of [latitude] per `TDF_SPEC.md` Section 6.7.3.
-  String get latitudeText => _latitudeText ?? _formatDecimal(latitude);
-
-  /// Normalized decimal string representation of [longitude] per `TDF_SPEC.md` Section 6.7.3.
-  String get longitudeText => _longitudeText ?? _formatDecimal(longitude);
-
-  /// Normalized decimal string representation of [radiusMeters] per `TDF_SPEC.md` Section 6.7.3.
-  String get radiusText => _radiusText ?? _formatDecimal(radiusMeters);
 
   /// Computes the great-circle Haversine distance in meters between two WGS-84 coordinates.
   static double haversineDistanceMeters(
@@ -356,118 +315,38 @@ class LocationTaskCondition extends TaskCondition {
     if (currentLatitude == null || currentLongitude == null) {
       return true;
     }
-    if (locationIds.isNotEmpty) {
-      for (final id in locationIds) {
-        if (locations[id] case final location?) {
-          final distance = haversineDistanceMeters(
-            location.latitude,
-            location.longitude,
-            currentLatitude,
-            currentLongitude,
-          );
-          if (distance <= location.radius) {
-            return true;
-          }
+    for (final id in locationIds) {
+      if (locations[id] case final location?) {
+        final distance = haversineDistanceMeters(
+          location.latitude,
+          location.longitude,
+          currentLatitude,
+          currentLongitude,
+        );
+        if (distance <= location.radius) {
+          return true;
         }
       }
-      return false;
     }
-    final distance = haversineDistanceMeters(
-      latitude,
-      longitude,
-      currentLatitude,
-      currentLongitude,
-    );
-    return distance <= radiusMeters;
+    return false;
   }
-
-  /// Normalizes a valid ASCII decimal literal per `TDF_SPEC.md` Section 6.7.3
-  /// (strips redundant leading integer zeros, trailing fractional zeros, empty
-  /// fractional part, and normalizes `-0` to `0`).
-  static String normalizeDecimalText(String raw) =>
-      TdfLocation.normalizeDecimalText(raw);
 
   @override
-  String toTdfDirectiveArgs() {
-    if (locationIds.isNotEmpty) {
-      return 'location ${locationIds.join(' ')}';
-    }
-    return 'location $latitudeText $longitudeText $radiusText';
-  }
-
-  /// Parses and validates [rawLatitude], [rawLongitude], and [rawRadius] into a legacy inline [LocationTaskCondition].
-  static LocationTaskCondition? tryParse(
-    String rawLatitude,
-    String rawLongitude,
-    String rawRadius,
-  ) {
-    final trimmedLat = rawLatitude.trim();
-    final trimmedLon = rawLongitude.trim();
-    final trimmedRad = rawRadius.trim();
-    final latitude = _tryParseDecimal(trimmedLat);
-    final longitude = _tryParseDecimal(trimmedLon);
-    final radius = _tryParseDecimal(trimmedRad);
-    if (latitude == null || longitude == null || radius == null) {
-      return null;
-    }
-    if (latitude < -90.0 ||
-        latitude > 90.0 ||
-        longitude < -180.0 ||
-        longitude > 180.0 ||
-        radius <= 0.0) {
-      return null;
-    }
-    return LocationTaskCondition._(
-      const <String>[],
-      latitude == 0.0 ? 0.0 : latitude,
-      longitude == 0.0 ? 0.0 : longitude,
-      radius,
-      normalizeDecimalText(trimmedLat),
-      normalizeDecimalText(trimmedLon),
-      normalizeDecimalText(trimmedRad),
-    );
-  }
+  String toTdfDirectiveArgs() => 'location ${locationIds.join(' ')}';
 
   /// Converts [degrees] to radians.
   static double _degreesToRadians(double degrees) =>
       degrees * (math.pi / 180.0);
 
-  /// Formats [value] without a trailing `.0` suffix when it represents an exact integer.
-  static String _formatDecimal(double value) {
-    if (value == 0.0) {
-      return '0';
-    }
-    final truncated = value.truncateToDouble();
-    if (value == truncated) {
-      return value.toInt().toString();
-    }
-    return normalizeDecimalText(value.toString());
-  }
-
-  /// Parses a strict ASCII decimal literal (`-?[0-9]+(\.[0-9]+)?`) without regular expressions.
-  static double? _tryParseDecimal(String raw) {
-    if (!TdfLocation.isValidNumberToken(raw)) {
-      return null;
-    }
-    return double.tryParse(raw);
-  }
-
   @override
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
-    if (other is! LocationTaskCondition) return false;
-    if (locationIds.isNotEmpty || other.locationIds.isNotEmpty) {
-      return listEquals(other.locationIds, locationIds);
-    }
-    return other.latitudeText == latitudeText &&
-        other.longitudeText == longitudeText &&
-        other.radiusText == radiusText;
+    return other is LocationTaskCondition &&
+        listEquals(other.locationIds, locationIds);
   }
 
   @override
-  int get hashCode => locationIds.isNotEmpty
-      ? Object.hashAll(locationIds)
-      : Object.hash(latitudeText, longitudeText, radiusText);
+  int get hashCode => Object.hashAll(locationIds);
 
   @override
   String toString() => 'condition ${toTdfDirectiveArgs()}';
@@ -520,8 +399,8 @@ class TimeWindowTaskCondition extends TaskCondition {
   static TimeWindowTaskCondition? tryParse(String rawStart, String rawEnd) {
     final startToken = rawStart.trim();
     final endToken = rawEnd.trim();
-    final startMinutes = _tryParseTimeMinutes(startToken);
-    final endMinutes = _tryParseTimeMinutes(endToken);
+    final startMinutes = TdfMetadata.tryParseTimeMinutes(startToken);
+    final endMinutes = TdfMetadata.tryParseTimeMinutes(endToken);
     if (startMinutes == null ||
         endMinutes == null ||
         startMinutes == endMinutes) {
@@ -533,34 +412,6 @@ class TimeWindowTaskCondition extends TaskCondition {
       startToken: startToken,
       endToken: endToken,
     );
-  }
-
-  /// Parses a two-digit ASCII number at `input[start..start+2]`, or `null` if non-digit.
-  static int? _parseTwoDigits(String input, int start) {
-    final tens = input.codeUnitAt(start) - 0x30;
-    final ones = input.codeUnitAt(start + 1) - 0x30;
-    if (tens < 0 || tens > 9 || ones < 0 || ones > 9) {
-      return null;
-    }
-    return tens * 10 + ones;
-  }
-
-  /// Parses a strict 24-hour `HH:MM` string into minutes from `00:00`, or `null` if invalid.
-  static int? _tryParseTimeMinutes(String rawTime) {
-    if (rawTime.length != 5 || rawTime.codeUnitAt(2) != 0x3A) {
-      return null;
-    }
-    final hour = _parseTwoDigits(rawTime, 0);
-    final minute = _parseTwoDigits(rawTime, 3);
-    if (hour == null ||
-        minute == null ||
-        hour < 0 ||
-        hour > 23 ||
-        minute < 0 ||
-        minute > 59) {
-      return null;
-    }
-    return hour * 60 + minute;
   }
 
   @override
@@ -648,6 +499,161 @@ class TdfColor {
   }
 }
 
+/// Shared TDF primitive validation, time parsing, and location-condition coalescing utilities.
+class TdfMetadata {
+  /// Prevents instantiation of [TdfMetadata].
+  const TdfMetadata._();
+
+  /// Coalesces multiple [LocationTaskCondition] rules in [conditions] into one canonical rule in first-seen `<location-id>` order (`TDF-MODEL-006`).
+  static List<TaskCondition> coalesceLocationConditions(
+    List<TaskCondition> conditions,
+  ) {
+    final orderedLocationIds = collectDistinctLocationIds(conditions);
+    if (orderedLocationIds.isEmpty) {
+      return conditions;
+    }
+    final coalesced = <TaskCondition>[];
+    var emittedLocation = false;
+    for (final condition in conditions) {
+      if (condition is LocationTaskCondition) {
+        if (!emittedLocation) {
+          coalesced.add(LocationTaskCondition(locationIds: orderedLocationIds));
+          emittedLocation = true;
+        }
+      } else {
+        coalesced.add(condition);
+      }
+    }
+    return coalesced;
+  }
+
+  /// Coalesces [LocationTaskCondition] rules into a single canonical rule referencing deduplicated `<location-id>` tokens, or returns an empty list.
+  static List<LocationTaskCondition> coalesceLocationRules(
+    Iterable<LocationTaskCondition> rules,
+  ) {
+    final orderedLocationIds = collectDistinctLocationIds(rules);
+    if (orderedLocationIds.isEmpty) {
+      return const <LocationTaskCondition>[];
+    }
+    return <LocationTaskCondition>[
+      LocationTaskCondition(locationIds: orderedLocationIds),
+    ];
+  }
+
+  /// Collects unique `<location-id>` tokens across all [LocationTaskCondition] entries in [conditions] in first-seen order.
+  static List<String> collectDistinctLocationIds(
+    Iterable<TaskCondition> conditions,
+  ) {
+    final seen = <String>{};
+    final ordered = <String>[];
+    for (final condition in conditions) {
+      if (condition case final LocationTaskCondition locationCondition) {
+        _appendDistinctIds(locationCondition.locationIds, seen, ordered);
+      }
+    }
+    return ordered;
+  }
+
+  /// Checks whether [value] contains any ASCII control character (`0x00..0x1F` or `0x7F`).
+  static bool containsAsciiControlChar(String value) {
+    for (var i = 0; i < value.length; i++) {
+      final unit = value.codeUnitAt(i);
+      if (unit <= 0x1F || unit == 0x7F) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Counts total `<location-id>` references across all [LocationTaskCondition] rules in [conditions].
+  static int countLocationRefs(List<TaskCondition> conditions) {
+    var count = 0;
+    for (final rule in conditions) {
+      if (rule is LocationTaskCondition) {
+        count += rule.locationIds.length;
+      }
+    }
+    return count;
+  }
+
+  /// Counts decoded Unicode scalar values in [value], returning `null` if an unpaired UTF-16 surrogate (`U+D800..U+DFFF`) is present.
+  static int? countUnicodeScalars(String value) {
+    var count = 0;
+    var index = 0;
+    while (index < value.length) {
+      final unit = value.codeUnitAt(index);
+      if (unit >= 0xD800 && unit <= 0xDBFF) {
+        if (index + 1 >= value.length) {
+          return null;
+        }
+        final low = value.codeUnitAt(index + 1);
+        if (low < 0xDC00 || low > 0xDFFF) {
+          return null;
+        }
+        count++;
+        index += 2;
+      } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
+        return null;
+      } else {
+        count++;
+        index++;
+      }
+    }
+    return count;
+  }
+
+  /// Returns whether [conditions] contains a non-empty [LocationTaskCondition].
+  static bool hasLocationConditionRule(List<TaskCondition> conditions) {
+    for (final rule in conditions) {
+      if (rule is LocationTaskCondition && rule.locationIds.isNotEmpty) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Parses a strict 24-hour `<HH:MM>` token into minutes from `00:00` (`0..1439`), or `null` if invalid.
+  static int? tryParseTimeMinutes(String rawTime) {
+    if (rawTime.length != 5 || rawTime.codeUnitAt(2) != 0x3A) {
+      return null;
+    }
+    final hour = _parseTwoDigits(rawTime, 0);
+    final minute = _parseTwoDigits(rawTime, 3);
+    if (hour == null ||
+        minute == null ||
+        hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59) {
+      return null;
+    }
+    return hour * 60 + minute;
+  }
+
+  /// Appends non-empty unseen IDs from [source] into [ordered].
+  static void _appendDistinctIds(
+    List<String> source,
+    Set<String> seen,
+    List<String> ordered,
+  ) {
+    for (final id in source) {
+      if (id.isNotEmpty && seen.add(id)) {
+        ordered.add(id);
+      }
+    }
+  }
+
+  /// Parses a two-digit ASCII number at `input[start..start+2]`, or `null` if non-digit.
+  static int? _parseTwoDigits(String input, int start) {
+    final tens = input.codeUnitAt(start) - 0x30;
+    final ones = input.codeUnitAt(start + 1) - 0x30;
+    if (tens < 0 || tens > 9 || ones < 0 || ones > 9) {
+      return null;
+    }
+    return tens * 10 + ones;
+  }
+}
+
 /// Immutable representation of a TDF `link "<title>" "<uri>"` directive belonging to a task or [TdfLabel].
 @immutable
 class TaskLink {
@@ -677,7 +683,7 @@ class TaskLink {
     if (rawUri.isEmpty) {
       return false;
     }
-    final scalarCount = _countUnicodeScalars(rawUri);
+    final scalarCount = TdfMetadata.countUnicodeScalars(rawUri);
     if (scalarCount == null || scalarCount > maxUriLength) {
       return false;
     }
@@ -719,13 +725,13 @@ class TaskLink {
     required String rawUri,
     int maxTextLength = maxTdfTextLength,
   }) {
-    if (_containsAsciiControlChar(rawTitle) ||
-        _containsAsciiControlChar(rawUri)) {
+    if (TdfMetadata.containsAsciiControlChar(rawTitle) ||
+        TdfMetadata.containsAsciiControlChar(rawUri)) {
       return null;
     }
     final trimmedTitle = rawTitle.trim();
     final trimmedUri = rawUri.trim();
-    final titleScalarCount = _countUnicodeScalars(trimmedTitle);
+    final titleScalarCount = TdfMetadata.countUnicodeScalars(trimmedTitle);
     if (titleScalarCount == null ||
         titleScalarCount == 0 ||
         titleScalarCount > maxTextLength ||
@@ -736,39 +742,6 @@ class TaskLink {
       return null;
     }
     return TaskLink(title: trimmedTitle, uri: trimmedUri);
-  }
-
-  /// Checks whether [value] contains any ASCII control character (`0x00..0x1F` or `0x7F`).
-  static bool _containsAsciiControlChar(String value) {
-    for (var i = 0; i < value.length; i++) {
-      final unit = value.codeUnitAt(i);
-      if (unit <= 0x1F || unit == 0x7F) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// Counts decoded Unicode scalar values in [value], returning `null` if an unpaired UTF-16 surrogate is present.
-  static int? _countUnicodeScalars(String value) {
-    var count = 0;
-    var i = 0;
-    while (i < value.length) {
-      final unit = value.codeUnitAt(i);
-      if (unit >= 0xD800 && unit <= 0xDBFF) {
-        if (i + 1 >= value.length) return null;
-        final low = value.codeUnitAt(i + 1);
-        if (low < 0xDC00 || low > 0xDFFF) return null;
-        count++;
-        i += 2;
-      } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
-        return null;
-      } else {
-        count++;
-        i++;
-      }
-    }
-    return count;
   }
 
   /// Checks whether [value] contains at least one non-space graphic code unit (`!= 0x20`).
@@ -805,7 +778,7 @@ class TaskLink {
   int get hashCode => Object.hash(title, uri);
 
   @override
-  String toString() => 'link "$title" "$uri"';
+  String toString() => 'TaskLink(title: <redacted>, uri: <redacted>)';
 }
 
 /// Immutable representation of a TDF `label` root block (`TDF_SPEC.md` Section 4.2).
@@ -824,7 +797,7 @@ class TdfLabel {
   });
 
   /// Fallback UTC modification timestamp (`1970-01-01 00:00:00` UTC) when a `label` block omits `modified` (`TDF_SPEC.md` Section 6.7.2).
-  static final DateTime defaultModifiedAt = DateTime.utc(1970, 1, 1, 0, 0, 0);
+  static final DateTime defaultModifiedAt = DateTime.utc(1970);
 
   /// Maximum number of `link` directives permitted on a single label (`20`).
   static const int maxLinksPerLabel = maxTdfLinksPerLabel;
@@ -934,93 +907,23 @@ class TdfLabel {
 }
 
 /// Encodes the UTC seconds of [timestamp] modulo `62^4` (`14,776,336`) as a 4-character Base62 string.
-String encodeTdfBase62Time(DateTime timestamp) {
-  final milliseconds = timestamp.toUtc().millisecondsSinceEpoch;
-  final utcSeconds = milliseconds >= 0
-      ? milliseconds ~/ 1000
-      : (milliseconds - 999) ~/ 1000;
-  final normalized =
-      ((utcSeconds % tdfBase62TimeModulo) + tdfBase62TimeModulo) %
-      tdfBase62TimeModulo;
-  return _encodeBase62Fixed(normalized, 4);
-}
+String encodeTdfBase62Time(DateTime timestamp) =>
+    TdfEntityId.encodeBase62Time(timestamp);
 
 /// Generates a unique 10-character TDF label identifier (`<6xBase62Random><4xBase62Time>`).
 String generateLabelId({
   DateTime? timestamp,
   Set<String> existingIds = const <String>{},
-}) {
-  return _generateEntityId(timestamp: timestamp, existingIds: existingIds);
-}
+}) => TdfEntityId.generate(timestamp: timestamp, existingIds: existingIds);
 
 /// Generates a unique 10-character TDF task identifier (`<6xBase62Random><4xBase62Time>`).
 String generateTaskId({
   DateTime? timestamp,
   Set<String> existingIds = const <String>{},
-}) {
-  return _generateEntityId(timestamp: timestamp, existingIds: existingIds);
-}
+}) => TdfEntityId.generate(timestamp: timestamp, existingIds: existingIds);
 
 /// Checks whether [value] is a canonical 10-character TDF label identifier (`[0-9A-Za-z]{10}`).
-bool isValidLabelId(String value) => _isValidEntityId(value);
+bool isValidLabelId(String value) => TdfEntityId.isValid(value);
 
 /// Checks whether [value] is a canonical 10-character TDF task identifier (`[0-9A-Za-z]{10}`).
-bool isValidTaskId(String value) => _isValidEntityId(value);
-
-/// Encodes non-negative integer [value] into a fixed-width Base62 string of [width] characters, left-padded with `'0'`.
-String _encodeBase62Fixed(int value, int width) {
-  final units = List<int>.filled(width, 0x30);
-  var remaining = value < 0 ? 0 : value;
-  for (var i = width - 1; i >= 0; i--) {
-    final digit = remaining % 62;
-    units[i] = tdfBase62Alphabet.codeUnitAt(digit);
-    remaining ~/= 62;
-  }
-  return String.fromCharCodes(units);
-}
-
-/// Generates a unique 10-character `<6xBase62Random><4xBase62Time>` identifier not present in [existingIds].
-String _generateEntityId({
-  DateTime? timestamp,
-  Set<String> existingIds = const <String>{},
-}) {
-  final resolvedTime = timestamp ?? DateTime.now().toUtc();
-  final timePart = encodeTdfBase62Time(resolvedTime);
-  while (true) {
-    final randomPart = _randomBase62Segment();
-    final candidate = '$randomPart$timePart';
-    if (!existingIds.contains(candidate)) {
-      return candidate;
-    }
-  }
-}
-
-/// Checks whether [unit] is an ASCII Base62 character (`0-9`, `A-Z`, `a-z`).
-bool _isBase62CodeUnit(int unit) {
-  return (unit >= 0x30 && unit <= 0x39) ||
-      (unit >= 0x41 && unit <= 0x5A) ||
-      (unit >= 0x61 && unit <= 0x7A);
-}
-
-/// Validates a 10-character `<6xBase62Random><4xBase62Time>` identifier without regular expressions.
-bool _isValidEntityId(String value) {
-  if (value.length != tdfEntityIdLength) {
-    return false;
-  }
-  for (var i = 0; i < tdfEntityIdLength; i++) {
-    if (!_isBase62CodeUnit(value.codeUnitAt(i))) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/// Generates 6 cryptographically random Base62 characters (`62^6` possibilities).
-String _randomBase62Segment() {
-  final random = math.Random.secure();
-  final units = List<int>.filled(6, 0x30);
-  for (var i = 0; i < 6; i++) {
-    units[i] = tdfBase62Alphabet.codeUnitAt(random.nextInt(62));
-  }
-  return String.fromCharCodes(units);
-}
+bool isValidTaskId(String value) => TdfEntityId.isValid(value);

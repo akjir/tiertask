@@ -17,6 +17,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/tdf_metadata.dart';
 import 'package:tiertask/repositories/link_launcher_repository.dart';
+import 'package:tiertask/services/app_logger.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -134,6 +135,256 @@ void main() {
         () => fake.openLink('https://example.com'),
         throwsA(isA<LinkLaunchException>()),
       );
+    });
+
+    test('isLaunchableUri permits valid RFC 3986 custom schemes and rejects blocked schemes, backslashes, and Unicode BiDi controls', () async {
+      const allowedUris = <String>[
+        'https://example.com/path?q=1#top',
+        '  http://localhost:8080/board  ',
+        'HTTPS://EXAMPLE.COM/UPPER',
+        'mailto:ops@example.com',
+        'tel:+49123456789',
+        'geo:48.137154,11.576124',
+        'obsidian://open?vault=Notes&file=Task',
+        'notion://www.notion.so/page-id',
+        'vscode://file/home/user/project/main.dart',
+        'custom+scheme-1.0://resource/item',
+      ];
+
+      const platformRepo = PlatformLinkLauncherRepository();
+      final fakeRepo = FakeLinkLauncherRepository();
+
+      for (final uri in allowedUris) {
+        expect(
+          LinkLauncherRepository.isLaunchableUri(uri),
+          isTrue,
+          reason: 'Allowed URI "$uri" must pass isLaunchableUri',
+        );
+        await platformRepo.openLink(uri);
+        expect(
+          lastLaunchedUri,
+          equals(uri.trim()),
+          reason: 'Allowed URI "$uri" must reach native channel',
+        );
+        await fakeRepo.openLink(uri);
+      }
+      expect(
+        fakeRepo.launchedUris,
+        equals(allowedUris.map((uri) => uri.trim()).toList()),
+      );
+
+      lastLaunchedUri = null;
+      fakeRepo.launchedUris.clear();
+
+      const blockedSchemes = <String>[
+        'javascript',
+        'vbscript',
+        'jscript',
+        'livescript',
+        'data',
+        'blob',
+        'about',
+        'view-source',
+        'file',
+        'smb',
+        'cifs',
+        'nfs',
+        'jar',
+        'shell',
+        'cmd',
+        'powershell',
+        'wscript',
+        'cscript',
+        'ms-msdt',
+        'search-ms',
+        'ms-appinstaller',
+        'mhtml',
+        'its',
+        'mk',
+        'hcp',
+        'res',
+        'intent',
+        'content',
+      ];
+      expect(
+        blockedSchemes.length,
+        equals(28),
+        reason: 'Policy must cover all 28 blocked dangerous schemes',
+      );
+
+      for (final scheme in blockedSchemes) {
+        for (final variant in <String>[
+          '$scheme://host/payload',
+          '${scheme.toUpperCase()}:payload',
+          '${scheme[0].toUpperCase()}${scheme.substring(1)}://mixed',
+        ]) {
+          expect(
+            LinkLauncherRepository.isLaunchableUri(variant),
+            isFalse,
+            reason: 'Blocked scheme URI "$variant" must be rejected',
+          );
+          await expectLater(
+            () => platformRepo.openLink(variant),
+            throwsA(isA<LinkLaunchException>()),
+            reason: 'PlatformLinkLauncherRepository must reject "$variant"',
+          );
+          await expectLater(
+            () => fakeRepo.openLink(variant),
+            throwsA(isA<LinkLaunchException>()),
+            reason: 'FakeLinkLauncherRepository must reject "$variant"',
+          );
+        }
+      }
+
+      const maliciousUris = <String>[
+        r'https://example.com\evil',
+        r'obsidian://open?file=a\b',
+        'https://example.com/\u200Eleft',
+        'https://example.com/\u200Fright',
+        'https://example.com/\u202Alre',
+        'https://example.com/\u202Brle',
+        'https://example.com/\u202Cpdf',
+        'https://example.com/\u202Dlro',
+        'https://example.com/\u202Etxt.exe',
+        'https://example.com/\u2066lri',
+        'https://example.com/\u2067rli',
+        'https://example.com/\u2068fsi',
+        'https://example.com/\u2069pdi',
+        '\nhttps://example.com/leading-lf',
+        'https://example.com/trailing-cr\r',
+        'https://example.com/c1\u0085nel',
+        'https:',
+      ];
+
+      for (final uri in maliciousUris) {
+        expect(
+          LinkLauncherRepository.isLaunchableUri(uri),
+          isFalse,
+          reason: 'Malicious URI "$uri" must fail isLaunchableUri',
+        );
+        await expectLater(
+          () => platformRepo.openLink(uri),
+          throwsA(isA<LinkLaunchException>()),
+          reason:
+              'PlatformLinkLauncherRepository must reject malicious URI "$uri"',
+        );
+        await expectLater(
+          () => fakeRepo.openLink(uri),
+          throwsA(isA<LinkLaunchException>()),
+          reason: 'FakeLinkLauncherRepository must reject malicious URI "$uri"',
+        );
+      }
+
+      expect(
+        lastLaunchedUri,
+        isNull,
+        reason: 'Blocked and malicious URIs must never reach platform channel',
+      );
+      expect(
+        fakeRepo.launchedUris,
+        isEmpty,
+        reason: 'Blocked and malicious URIs must never be recorded by FakeLinkLauncherRepository',
+      );
+    });
+
+    test('rejects single-character schemes (Windows drive paths), Arabic Letter Mark, and Unicode line/paragraph separators', () async {
+      const platformRepo = PlatformLinkLauncherRepository();
+      final fakeRepo = FakeLinkLauncherRepository();
+
+      const rejectedUris = <String>[
+        'C:/Windows/System32/calc.exe',
+        'c:payload.bat',
+        'D:/Users/Alice/secret.txt',
+        'a:opaque',
+        'https://example.com/\u061Calm',
+        'https://example.com/\u2028line-sep',
+        'https://example.com/\u2029para-sep',
+      ];
+
+      for (final uri in rejectedUris) {
+        expect(
+          LinkLauncherRepository.isLaunchableUri(uri),
+          isFalse,
+          reason: 'URI "$uri" must fail isLaunchableUri',
+        );
+        await expectLater(
+          () => platformRepo.openLink(uri),
+          throwsA(isA<LinkLaunchException>()),
+          reason: 'PlatformLinkLauncherRepository must reject "$uri"',
+        );
+        await expectLater(
+          () => fakeRepo.openLink(uri),
+          throwsA(isA<LinkLaunchException>()),
+          reason: 'FakeLinkLauncherRepository must reject "$uri"',
+        );
+      }
+
+      expect(lastLaunchedUri, isNull);
+      expect(fakeRepo.launchedUris, isEmpty);
+    });
+
+    test('logs only validated RFC 3986 schemes and masks malformed prefixes with <invalid> in AppLogger', () async {
+      AppLogger.resetForTesting();
+      AppLogger.setEnabled(true, persistToDisk: false);
+      addTearDown(AppLogger.resetForTesting);
+
+      const repository = PlatformLinkLauncherRepository();
+
+      const malformedWithSensitivePrefix = <String>[
+        'secret bank note: 12345',
+        '/home/alice/private:secret',
+        '//internal-host.corp:8443/path',
+        '123bad://host/item',
+        'C:/Windows/System32/calc.exe',
+        'bad_token_prefix:value',
+        'bad\nsecret_prefix:value',
+      ];
+      final overlongPrefix = '${'a' * 80}:${'b' * TaskLink.maxUriLength}';
+
+      for (final uri in <String>[
+        ...malformedWithSensitivePrefix,
+        overlongPrefix,
+      ]) {
+        await expectLater(
+          () => repository.openLink(uri),
+          throwsA(isA<LinkLaunchException>()),
+          reason: 'Malformed URI "$uri" must be rejected',
+        );
+      }
+
+      final logAfterMalformed = AppLogger.fullLogText;
+      expect(
+        logAfterMalformed,
+        contains('scheme=<invalid>'),
+        reason: 'Malformed URI prefixes must be logged as scheme=<invalid>',
+      );
+      for (final leakedFragment in const <String>[
+        'secret bank note',
+        '/home/alice/private',
+        'internal-host.corp',
+        '123bad',
+        'bad_token_prefix',
+        'secret_prefix',
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      ]) {
+        expect(
+          logAfterMalformed,
+          isNot(contains(leakedFragment)),
+          reason:
+              'Unvalidated URI prefix "$leakedFragment" must never leak into AppLogger',
+        );
+      }
+
+      // A blocked URI with syntactically valid RFC 3986 scheme still logs the normalized scheme only.
+      AppLogger.resetForTesting();
+      AppLogger.setEnabled(true, persistToDisk: false);
+      await expectLater(
+        () => repository.openLink('JavaScript:alert("secret-payload")'),
+        throwsA(isA<LinkLaunchException>()),
+      );
+      final blockedLog = AppLogger.fullLogText;
+      expect(blockedLog, contains('scheme=javascript'));
+      expect(blockedLog, isNot(contains('secret-payload')));
     });
   });
 }

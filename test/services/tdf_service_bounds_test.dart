@@ -27,7 +27,7 @@ import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
   const tdfService = TdfService();
-  final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
+  final fixedDate = DateTime.utc(2026, 11, 1, 12);
 
   void expectRawTdfError(
     String input,
@@ -702,7 +702,7 @@ void main() {
       // Standalone TdfSubtasksBuilder closure guard:
       final state = TdfParserState();
       final subtasksBuilder = TdfSubtasksBuilder(true)
-        ..steps.add(const SubtaskItem(title: 'Step 1', isCompleted: false));
+        ..steps.add(const SubtaskItem(title: 'Step 1'));
       state.blockStack.add(subtasksBuilder);
       expect(() => TdfBlockParser.closeCurrentBlock(state, 1), returnsNormally);
       expect(state.blockStack, isEmpty);
@@ -1533,9 +1533,7 @@ void main() {
             history: <TaskHistoryEntry>[
               TaskHistoryEntry(timestampUtc: fixedDate, text: text500),
             ],
-            subtasks: <SubtaskItem>[
-              SubtaskItem(title: text500, isCompleted: false),
-            ],
+            subtasks: <SubtaskItem>[SubtaskItem(title: text500)],
             conditions: <TaskCondition>[
               DayTaskCondition(
                 weekdays: const <int>[1],
@@ -1674,9 +1672,7 @@ void main() {
               id: '000001OkD2',
               title: 'T',
               createdAt: fixedDate,
-              subtasks: <SubtaskItem>[
-                SubtaskItem(title: text501, isCompleted: false),
-              ],
+              subtasks: <SubtaskItem>[SubtaskItem(title: text501)],
             ),
           ],
         ),

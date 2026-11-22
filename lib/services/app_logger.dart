@@ -213,13 +213,15 @@ class LogMetadata {
     );
     final safeStorage = AppLogger.formatFieldValue(storageMode);
     final safeLogStorage = AppLogger.formatFieldValue(logStorageMode);
+    final workspaceMeta =
+        '@meta workspace_id=$safeWsId workspace_name=$safeWsName '
+        'storage_mode=$safeStorage log_storage=$safeLogStorage '
+        'min_level=${minimumLevel.label}';
     return <String>[
       AppLogger.headerStartBanner,
       '@meta format=1 app_version=$safeVersion platform=$safePlatform os=$safeOs',
       '@meta locale=$safeLocale timezone=$safeTz session_start=$startIso',
-      '@meta workspace_id=$safeWsId workspace_name=$safeWsName '
-          'storage_mode=$safeStorage log_storage=$safeLogStorage '
-          'min_level=${minimumLevel.label}',
+      workspaceMeta,
       AppLogger.headerEndBanner,
     ];
   }
@@ -324,6 +326,9 @@ final class AppLogger {
   /// Maximum byte size (2 MiB) allowed for the persistent diagnostic log file.
   static const int maxFileBytes = 2097152;
 
+  /// Maximum number of distinct dynamic secrets retained simultaneously for redaction.
+  static const int maxRegisteredSecrets = 64;
+
   /// Maximum age in days for retained local workspace log files.
   static const int maxRetainedLogDays = 7;
 
@@ -333,6 +338,8 @@ final class AppLogger {
   /// Trailing debounce duration before uploading updated logs to WebDAV.
   static const Duration webDavFlushDebounce = Duration(seconds: 5);
 
+  static int _activeByteLength = 0;
+  static String _activeUtcDateKey = '';
   static final RegExp _authHeaderPattern = RegExp(
     r'(authorization\s*[:=]\s*(?:basic|bearer)\s+)[^\s,;"]+',
     caseSensitive: false,
@@ -350,14 +357,26 @@ final class AppLogger {
     caseSensitive: false,
   );
   static String _lastEvalSummarySignature = '';
+  static final List<int> _lineByteLengths = <int>[];
   static final List<String> _lines = <String>[];
   static String _logFilePath = '';
   static int _maxLines = defaultMaxLines;
   static LogMetadata _metadata = LogMetadata.empty;
   static LogLevel _minimumLevel = LogLevel.info;
+  static List<String> _orderedSecrets = const <String>[];
   static bool _persistToDisk = true;
+  static final LinkedHashSet<String> _registeredSecrets =
+      LinkedHashSet<String>();
   static final ValueNotifier<int> _revision = ValueNotifier<int>(0);
-  static String? _secretToRedact;
+  static const Set<String> _secretFieldNames = <String>{
+    'authorization',
+    'credential',
+    'credentials',
+    'passwd',
+    'password',
+    'secret',
+    'token',
+  };
   static DateTime _sessionStartUtc = DateTime.fromMillisecondsSinceEpoch(
     0,
     isUtc: true,
@@ -419,7 +438,7 @@ final class AppLogger {
 
   /// Clears all in-memory log lines and truncates or removes local workspace logs.
   static void clear() {
-    _lines.clear();
+    _clearBuffer();
     _crashedInCurrentSession = false;
     _lastEvalSummarySignature = '';
     final sink = _sink;
@@ -438,27 +457,37 @@ final class AppLogger {
     _revision.value++;
   }
 
+  /// Clears all dynamically registered secret strings retained for log redaction.
+  static void clearSecrets() {
+    _registeredSecrets.clear();
+    _orderedSecrets = const <String>[];
+  }
+
   /// Records an unhandled framework or isolate crash and flushes it synchronously.
   static void crash(Object error, StackTrace stackTrace) {
     if (!_enabled) return;
     _crashedInCurrentSession = true;
-    final timestamp = formatIsoUtcTimestamp(_clock().toUtc());
+    final nowUtc = _clock().toUtc();
+    final timestamp = formatIsoUtcTimestamp(nowUtc);
     final sanitizedError = formatFieldValue(
-      sanitize(error.toString()),
+      error.toString(),
       alwaysQuote: true,
     );
     final sanitizedTrace = sanitize(stackTrace.toString()).trimRight();
-    final batch = <String>[
-      '$timestamp [${LogLevel.crash.paddedLabel}] '
-          '[${LogTag.lifecycle.paddedLabel}] '
-          'crash.unhandled | error=$sanitizedError',
-    ];
+    final crashLine =
+        '$timestamp [${LogLevel.crash.paddedLabel}] '
+        '[${LogTag.lifecycle.paddedLabel}] '
+        'crash.unhandled | error=$sanitizedError';
+    final batch = <String>[crashLine];
     if (sanitizedTrace.isNotEmpty) {
       var frameIndex = 0;
       for (final rawLine in sanitizedTrace.split('\n')) {
         final trimmed = rawLine.trimRight();
         if (trimmed.isNotEmpty) {
-          final quotedFrame = formatFieldValue(trimmed, alwaysQuote: true);
+          final quotedFrame = _quoteSanitizedValue(
+            _collapseControlChars(trimmed),
+            alwaysQuote: true,
+          );
           batch.add(
             '$timestamp [${LogLevel.crash.paddedLabel}] '
             '[${LogTag.lifecycle.paddedLabel}] '
@@ -468,7 +497,7 @@ final class AppLogger {
         }
       }
     }
-    _appendLines(batch, forceFullWrite: true, flush: true);
+    _appendLines(batch, nowUtc: nowUtc, forceFullWrite: true, flush: true);
   }
 
   /// Logs a `DEBUG` message under [tag] when [shouldLog] permits `LogLevel.debug`.
@@ -493,7 +522,7 @@ final class AppLogger {
     StackTrace? stackTrace,
   ]) {
     if (!shouldLog(LogLevel.error)) return;
-    final buffer = StringBuffer(message);
+    final buffer = StringBuffer(_collapseControlChars(sanitize(message)));
     if (error != null) {
       buffer
         ..write(' | error=')
@@ -507,7 +536,7 @@ final class AppLogger {
           ..write(formatFieldValue(firstFrame, alwaysQuote: true));
       }
     }
-    _log(LogLevel.error, tag, buffer.toString());
+    _appendFormattedLine(LogLevel.error, tag, buffer.toString());
   }
 
   /// Logs a structured `<event> | <key=value ...>` entry at [level] and [tag].
@@ -520,7 +549,7 @@ final class AppLogger {
     StackTrace? stackTrace,
   }) {
     if (!shouldLog(level)) return;
-    _log(
+    _appendFormattedLine(
       level,
       tag,
       _formatEventPayload(
@@ -539,15 +568,15 @@ final class AppLogger {
     Iterable<({String event, Map<String, Object?> fields})> entries,
   ) {
     if (!shouldLog(level)) return;
-    final timestamp = formatIsoUtcTimestamp(_clock().toUtc());
+    final nowUtc = _clock().toUtc();
+    final timestamp = formatIsoUtcTimestamp(nowUtc);
     final prefix = '$timestamp [${level.paddedLabel}] [${tag.paddedLabel}] ';
     final batch = <String>[];
     for (final entry in entries) {
       final payload = _formatEventPayload(entry.event, fields: entry.fields);
-      final sanitizedMessage = _collapseControlChars(sanitize(payload));
-      batch.add('$prefix$sanitizedMessage');
+      batch.add('$prefix$payload');
     }
-    _appendLines(batch);
+    _appendLines(batch, nowUtc: nowUtc);
   }
 
   /// Formats a structured field [value] with secret sanitization and quoting.
@@ -555,11 +584,7 @@ final class AppLogger {
     if (value == null) return '""';
     if (value is bool || value is num) return value.toString();
     final sanitized = _collapseControlChars(sanitize(value.toString()));
-    if (!alwaysQuote && sanitized.isNotEmpty && !_needsQuotes(sanitized)) {
-      return sanitized;
-    }
-    final escaped = sanitized.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
-    return '"$escaped"';
+    return _quoteSanitizedValue(sanitized, alwaysQuote: alwaysQuote);
   }
 
   /// Formats [timestamp] as canonical UTC ISO-8601 (`YYYY-MM-DDTHH:MM:SS.mmmZ`).
@@ -652,16 +677,33 @@ final class AppLogger {
     return parsedTag != null && tags.contains(parsedTag);
   }
 
+  /// Registers a dynamic secret [secret] to redact from all future log lines, retaining up to [maxRegisteredSecrets] entries.
+  static void registerSecret(String? secret) {
+    if (secret == null || secret.isEmpty) return;
+    if (_registeredSecrets.remove(secret)) {
+      _registeredSecrets.add(secret);
+      return;
+    }
+    while (_registeredSecrets.length >= maxRegisteredSecrets) {
+      _registeredSecrets.remove(_registeredSecrets.first);
+    }
+    _registeredSecrets.add(secret);
+    _orderedSecrets = List<String>.unmodifiable(
+      _registeredSecrets.toList()..sort((a, b) => b.length.compareTo(a.length)),
+    );
+  }
+
   /// Resets all static logger state for isolated unit and widget tests.
   @visibleForTesting
   static void resetForTesting({DateTime Function()? clock, AppLogSink? sink}) {
     _enabled = false;
     _crashedInCurrentSession = false;
     _lastEvalSummarySignature = '';
-    _lines.clear();
+    _clearBuffer();
+    _activeUtcDateKey = '';
     _logFilePath = '';
     _baseDirectoryPath = '';
-    _secretToRedact = null;
+    clearSecrets();
     _minimumLevel = LogLevel.info;
     _metadata = LogMetadata.empty;
     _persistToDisk = true;
@@ -671,30 +713,47 @@ final class AppLogger {
     _revision.value = 0;
   }
 
-  /// Redacts passwords, Bearer/Basic tokens, and embedded URL userinfo from [input].
+  /// Redacts passwords, Bearer/Basic tokens, and embedded URL userinfo from [input] using a zero-allocation fast path when clean.
   static String sanitize(String input) {
     if (input.isEmpty) return input;
     var sanitized = input;
-    final secret = _secretToRedact;
-    if (secret != null && secret.isNotEmpty) {
-      sanitized = sanitized.replaceAll(secret, '[REDACTED]');
+    if (_orderedSecrets.isNotEmpty) {
+      for (final secret in _orderedSecrets) {
+        if (sanitized.contains(secret)) {
+          sanitized = sanitized.replaceAll(secret, '[REDACTED]');
+        }
+      }
     }
-    sanitized = sanitized.replaceAllMapped(
-      _authHeaderPattern,
-      (match) => '${match.group(1)}[REDACTED]',
-    );
-    sanitized = sanitized.replaceAllMapped(
-      _basicTokenPattern,
-      (match) => '${match.group(1)}[REDACTED]',
-    );
-    sanitized = sanitized.replaceAllMapped(
-      _urlUserInfoPattern,
-      (match) => '${match.group(1)}[REDACTED]${match.group(3)}',
-    );
-    sanitized = sanitized.replaceAllMapped(
-      _keyValueSecretPattern,
-      (match) => '${match.group(1)}[REDACTED]',
-    );
+    final markers = _scanSanitizeMarkers(sanitized);
+    if (!markers.hasColonOrEquals && !markers.hasWhitespace) {
+      return sanitized;
+    }
+    if (markers.hasColonOrEquals &&
+        markers.hasWhitespace &&
+        sanitized.length >= 21) {
+      sanitized = sanitized.replaceAllMapped(
+        _authHeaderPattern,
+        (match) => '${match.group(1)}[REDACTED]',
+      );
+    }
+    if (markers.hasWhitespace && sanitized.length >= 12) {
+      sanitized = sanitized.replaceAllMapped(
+        _basicTokenPattern,
+        (match) => '${match.group(1)}[REDACTED]',
+      );
+    }
+    if (markers.hasAt && markers.hasColonOrEquals && sanitized.length >= 11) {
+      sanitized = sanitized.replaceAllMapped(
+        _urlUserInfoPattern,
+        (match) => '${match.group(1)}[REDACTED]${match.group(3)}',
+      );
+    }
+    if (markers.hasColonOrEquals && sanitized.length >= 7) {
+      sanitized = sanitized.replaceAllMapped(
+        _keyValueSecretPattern,
+        (match) => '${match.group(1)}[REDACTED]',
+      );
+    }
     return sanitized;
   }
 
@@ -717,9 +776,7 @@ final class AppLogger {
     if (sink != null) {
       _sink = sink;
     }
-    if (secretToRedact != null) {
-      _secretToRedact = secretToRedact.isEmpty ? null : secretToRedact;
-    }
+    registerSecret(secretToRedact);
     if (minimumLevel != null) {
       _minimumLevel = minimumLevel;
     }
@@ -774,9 +831,9 @@ final class AppLogger {
     }
   }
 
-  /// Updates the dynamic WebDAV password string to redact from all future log lines.
+  /// Registers [secret] for redaction across all future log lines via [registerSecret].
   static void setSecretToRedact(String? secret) {
-    _secretToRedact = (secret == null || secret.isEmpty) ? null : secret;
+    registerSecret(secret);
   }
 
   /// Returns `true` when [ isEnabled ] is `true` and [level] meets [minimumLevel].
@@ -827,19 +884,40 @@ final class AppLogger {
     _log(LogLevel.warn, tag, message);
   }
 
-  /// Appends [newLines] to the in-memory ring buffer and writes or rewrites the disk file.
+  /// Formats a pre-sanitized [sanitizedPayload] with timestamp, [level], and [tag] and appends it to the active log buffer.
+  static void _appendFormattedLine(
+    LogLevel level,
+    LogTag tag,
+    String sanitizedPayload,
+  ) {
+    final nowUtc = _clock().toUtc();
+    final timestamp = formatIsoUtcTimestamp(nowUtc);
+    final formatted =
+        '$timestamp [${level.paddedLabel}] [${tag.paddedLabel}] '
+        '$sanitizedPayload';
+    _appendLines(<String>[formatted], nowUtc: nowUtc);
+  }
+
+  /// Appends [newLines] to the in-memory ring buffer, rolling across UTC midnight and enforcing line and byte limits.
   static void _appendLines(
     List<String> newLines, {
+    required DateTime nowUtc,
     bool forceFullWrite = false,
     bool flush = false,
   }) {
     if (newLines.isEmpty) return;
-    _lines.addAll(newLines);
-    final trimmed = _trimToMaxLinesIfNeeded();
+    var needsFullWrite = forceFullWrite;
+    if (_rollOverUtcDayIfNeeded(nowUtc)) {
+      needsFullWrite = true;
+    }
+    for (final line in newLines) {
+      _pushLine(line);
+    }
+    final trimmed = _trimToLimitsIfNeeded();
     final sink = _sink;
     final path = _logFilePath;
     if (_persistToDisk && sink != null && path.isNotEmpty) {
-      if (trimmed || forceFullWrite) {
+      if (trimmed || needsFullWrite) {
         _writeFullFile(flush: flush);
       } else {
         final chunk = '${newLines.join('\n')}\n';
@@ -864,21 +942,36 @@ final class AppLogger {
       }
       return;
     }
-    final pruned = sink.pruneExpiredLogFilesSync(
+    sink.pruneExpiredLogFilesSync(
       directoryPath: _baseDirectoryPath,
       platform: _metadata.platform,
       workspaceId: _metadata.workspaceId,
       utcNow: _clock().toUtc(),
     );
-    if (pruned > 0) {
-      // Recorded after session initialization if needed.
-    }
   }
 
-  /// Replaces CR, LF, and ASCII control characters with single spaces.
+  /// Empties the in-memory log buffer and resets its tracked UTF-8 byte length.
+  static void _clearBuffer() {
+    _lines.clear();
+    _lineByteLengths.clear();
+    _activeByteLength = 0;
+  }
+
+  /// Replaces CR, LF, and ASCII control characters with single spaces, returning [input] unchanged when clean.
   static String _collapseControlChars(String input) {
-    final buffer = StringBuffer();
     for (var i = 0; i < input.length; i++) {
+      final code = input.codeUnitAt(i);
+      if (code < 0x20 || code == 0x7F) {
+        return _collapseControlCharsSlow(input, i);
+      }
+    }
+    return input;
+  }
+
+  /// Copies [input] from [firstControlIndex] replacing ASCII control characters with single spaces.
+  static String _collapseControlCharsSlow(String input, int firstControlIndex) {
+    final buffer = StringBuffer(input.substring(0, firstControlIndex));
+    for (var i = firstControlIndex; i < input.length; i++) {
       final code = input.codeUnitAt(i);
       if (code < 0x20 || code == 0x7F) {
         buffer.write(' ');
@@ -894,7 +987,8 @@ final class AppLogger {
     _enabled = false;
     _crashedInCurrentSession = false;
     _lastEvalSummarySignature = '';
-    _lines.clear();
+    _activeUtcDateKey = '';
+    _clearBuffer();
     final sink = _sink;
     if (sink != null) {
       if (resolvedPath.isNotEmpty) {
@@ -910,6 +1004,34 @@ final class AppLogger {
     }
     _logFilePath = resolvedPath;
     _revision.value++;
+  }
+
+  /// Drops oldest non-header lines when protected entries alone still exceed [maxFileBytes].
+  static int _dropOverflowNonHeaderBytes(
+    List<String> lines,
+    List<int> lengths,
+    int initialBytes,
+  ) {
+    final retainedLines = <String>[];
+    final retainedLengths = <int>[];
+    var remainingBytes = initialBytes;
+    for (var i = 0; i < lines.length; i++) {
+      final line = lines[i];
+      final byteLength = lengths[i];
+      if (remainingBytes > maxFileBytes && !_isHeaderLine(line)) {
+        remainingBytes -= byteLength;
+      } else {
+        retainedLines.add(line);
+        retainedLengths.add(byteLength);
+      }
+    }
+    lines
+      ..clear()
+      ..addAll(retainedLines);
+    lengths
+      ..clear()
+      ..addAll(retainedLengths);
+    return remainingBytes;
   }
 
   /// Extracts the [LogLevel] from a formatted log [line], or returns `null`.
@@ -950,22 +1072,27 @@ final class AppLogger {
     return '';
   }
 
-  /// Formats a structured `<event> | <key=value ...>` message body with optional [error] and [stackTrace].
+  /// Formats a structured `<event> | <key=value ...>` message body with single-pass secret sanitization.
   static String _formatEventPayload(
     String event, {
     Map<String, Object?> fields = const <String, Object?>{},
     Object? error,
     StackTrace? stackTrace,
   }) {
-    final buffer = StringBuffer(event)..write(' |');
+    final sanitizedEvent = _collapseControlChars(sanitize(event));
+    final buffer = StringBuffer(sanitizedEvent)..write(' |');
     for (final entry in fields.entries) {
       final value = entry.value;
       if (value != null) {
+        final safeKey = _collapseControlChars(sanitize(entry.key));
+        final safeValue = _isSecretFieldName(safeKey)
+            ? '[REDACTED]'
+            : formatFieldValue(value);
         buffer
           ..write(' ')
-          ..write(entry.key)
+          ..write(safeKey)
           ..write('=')
-          ..write(formatFieldValue(value));
+          ..write(safeValue);
       }
     }
     if (error != null) {
@@ -984,6 +1111,14 @@ final class AppLogger {
     return buffer.toString();
   }
 
+  /// Formats the UTC calendar date of [utc] as `YYYY-MM-DD`.
+  static String _formatUtcDateKey(DateTime utc) {
+    final year = utc.year.toString().padLeft(4, '0');
+    final month = utc.month.toString().padLeft(2, '0');
+    final day = utc.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+
   /// Returns `true` if [previousBodyLines] ended without a clean `crashed=false` exit.
   static bool _hadUncleanPreviousExit(List<String> previousBodyLines) {
     for (var i = previousBodyLines.length - 1; i >= 0; i--) {
@@ -997,46 +1132,38 @@ final class AppLogger {
 
   /// Initializes the session log buffer, preserving prior entries and detecting crashes.
   static void _initializeSessionFile() {
-    _lines.clear();
-    final sink = _sink;
+    _clearBuffer();
     final path = _logFilePath;
     final nowUtc = _sessionStartUtc;
+    _activeUtcDateKey = _formatUtcDateKey(nowUtc);
     final nowIso = formatIsoUtcTimestamp(nowUtc);
 
     final headerLines = _metadata.toHeaderLines(
       minimumLevel: _minimumLevel,
       sessionStartUtc: nowUtc,
     );
-    final previousBodyLines = <String>[];
-    if (_persistToDisk && sink != null && path.isNotEmpty) {
-      final existing = sink.readLogFileSync(path, maxBytes: maxFileBytes);
-      if (existing.trim().isNotEmpty) {
-        for (final line in existing.split('\n')) {
-          if (line.isNotEmpty && !_isHeaderLine(line)) {
-            previousBodyLines.add(line);
-          }
-        }
-      }
-    }
+    final previousBodyLines = _readExistingBodyLines(path);
 
-    _lines
-      ..addAll(headerLines)
-      ..addAll(previousBodyLines);
+    for (final line in headerLines) {
+      _pushLine(line);
+    }
+    for (final line in previousBodyLines) {
+      _pushLine(line);
+    }
 
     if (_hadUncleanPreviousExit(previousBodyLines)) {
-      _lines
-        ..add(
-          '=== RECOVERED UNCLEAN EXIT / CRASH LOG ABOVE | '
-          'NEW SESSION START $nowIso ===',
-        )
-        ..add(
-          '$nowIso [${LogLevel.warn.paddedLabel}] '
-          '[${LogTag.lifecycle.paddedLabel}] '
-          'session.recover | reason=unclean_exit_or_crash',
-        );
+      _pushLine(
+        '=== RECOVERED UNCLEAN EXIT / CRASH LOG ABOVE | '
+        'NEW SESSION START $nowIso ===',
+      );
+      _pushLine(
+        '$nowIso [${LogLevel.warn.paddedLabel}] '
+        '[${LogTag.lifecycle.paddedLabel}] '
+        'session.recover | reason=unclean_exit_or_crash',
+      );
     }
 
-    _lines.add(
+    _pushLine(
       '$nowIso [${LogLevel.info.paddedLabel}] '
       '[${LogTag.lifecycle.paddedLabel}] '
       'session.start | '
@@ -1046,10 +1173,14 @@ final class AppLogger {
       'level=${_minimumLevel.label} '
       'storage=${formatFieldValue(_metadata.logStorageMode)}',
     );
-    _trimToMaxLinesIfNeeded();
+    _trimToLimitsIfNeeded();
     _writeFullFile();
     _revision.value++;
   }
+
+  /// Returns `true` when [codeUnit] is an ASCII decimal digit (`0-9`).
+  static bool _isAsciiDigit(int codeUnit) =>
+      codeUnit >= 0x30 && codeUnit <= 0x39;
 
   /// Returns `true` when [line] is part of the 5-line `@meta` header block.
   static bool _isHeaderLine(String line) {
@@ -1065,15 +1196,15 @@ final class AppLogger {
         line.contains('RECOVERED UNCLEAN EXIT / CRASH LOG ABOVE');
   }
 
+  /// Returns `true` when structured field [key] names a secret credential field.
+  static bool _isSecretFieldName(String key) =>
+      _secretFieldNames.contains(key.toLowerCase());
+
   /// Formats and records a single log line when [shouldLog] permits [level].
   static void _log(LogLevel level, LogTag tag, String message) {
     if (!shouldLog(level)) return;
-    final timestamp = formatIsoUtcTimestamp(_clock().toUtc());
     final sanitizedMessage = _collapseControlChars(sanitize(message));
-    final formatted =
-        '$timestamp [${level.paddedLabel}] [${tag.paddedLabel}] '
-        '$sanitizedMessage';
-    _appendLines(<String>[formatted]);
+    _appendFormattedLine(level, tag, sanitizedMessage);
   }
 
   /// Returns `true` when [value] contains spaces, quotes, or `=` requiring quotes.
@@ -1085,6 +1216,42 @@ final class AppLogger {
       }
     }
     return false;
+  }
+
+  /// Appends a single [line] to [_lines] and updates tracked UTF-8 byte length.
+  static void _pushLine(String line) {
+    final byteLength = _utf8LineByteLength(line);
+    _lines.add(line);
+    _lineByteLengths.add(byteLength);
+    _activeByteLength += byteLength;
+  }
+
+  /// Escapes and quotes an already-sanitized [sanitized] string when required.
+  static String _quoteSanitizedValue(
+    String sanitized, {
+    required bool alwaysQuote,
+  }) {
+    if (!alwaysQuote && sanitized.isNotEmpty && !_needsQuotes(sanitized)) {
+      return sanitized;
+    }
+    final escaped = sanitized.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+    return '"$escaped"';
+  }
+
+  /// Reads existing non-header lines from the persisted log file at [path], or returns an empty list.
+  static List<String> _readExistingBodyLines(String path) {
+    final sink = _sink;
+    if (!_persistToDisk || sink == null || path.isEmpty) {
+      return const <String>[];
+    }
+    final existing = sink.readLogFileSync(path, maxBytes: maxFileBytes);
+    if (existing.trim().isEmpty) {
+      return const <String>[];
+    }
+    return <String>[
+      for (final line in existing.split('\n'))
+        if (line.isNotEmpty && !_isHeaderLine(line)) line,
+    ];
   }
 
   /// Replaces the 5-line `@meta` header at the top of [_lines] and rewrites the file.
@@ -1100,12 +1267,18 @@ final class AppLogger {
       bodyStartIndex++;
     }
     final body = _lines.sublist(bodyStartIndex);
-    _lines
-      ..clear()
-      ..addAll(updatedHeader)
-      ..addAll(body);
+    _replaceBuffer(<String>[...updatedHeader, ...body]);
+    _trimToLimitsIfNeeded();
     _writeFullFile();
     _revision.value++;
+  }
+
+  /// Replaces [_lines], [_lineByteLengths], and [_activeByteLength] with [nextLines].
+  static void _replaceBuffer(List<String> nextLines) {
+    _clearBuffer();
+    for (final line in nextLines) {
+      _pushLine(line);
+    }
   }
 
   /// Resolves the target log file path from [explicitPath] or the configured sink.
@@ -1129,6 +1302,69 @@ final class AppLogger {
       baseDirectoryPath: _baseDirectoryPath.isEmpty ? null : _baseDirectoryPath,
       fileName: fileName,
     );
+  }
+
+  /// Replaces the `YYYY-MM-DD` date segment inside a dated `tiertask_<YYYY-MM-DD>_*.log` [currentPath], or returns `null` for non-dated paths.
+  static String? _rollDatedLogPath(String currentPath, String nextDateKey) {
+    final slashIndex = currentPath.lastIndexOf('/');
+    final backslashIndex = currentPath.lastIndexOf(r'\');
+    final splitIndex = slashIndex > backslashIndex
+        ? slashIndex
+        : backslashIndex;
+    final prefix = splitIndex >= 0
+        ? currentPath.substring(0, splitIndex + 1)
+        : '';
+    final fileName = splitIndex >= 0
+        ? currentPath.substring(splitIndex + 1)
+        : currentPath;
+    if (!fileName.startsWith('tiertask_') ||
+        !fileName.endsWith('.log') ||
+        fileName.length < 24) {
+      return null;
+    }
+    if (fileName.codeUnitAt(13) != 0x2D ||
+        fileName.codeUnitAt(16) != 0x2D ||
+        fileName.codeUnitAt(19) != 0x5F) {
+      return null;
+    }
+    const digitPositions = <int>[9, 10, 11, 12, 14, 15, 17, 18];
+    for (final index in digitPositions) {
+      if (!_isAsciiDigit(fileName.codeUnitAt(index))) {
+        return null;
+      }
+    }
+    return '${prefix}tiertask_$nextDateKey${fileName.substring(19)}';
+  }
+
+  /// Rolls dated log file paths and buffers cleanly when [nowUtc] crosses a UTC calendar day boundary.
+  static bool _rollOverUtcDayIfNeeded(DateTime nowUtc) {
+    final nextDateKey = _formatUtcDateKey(nowUtc);
+    if (_activeUtcDateKey.isEmpty) {
+      _activeUtcDateKey = nextDateKey;
+      return false;
+    }
+    if (_activeUtcDateKey == nextDateKey) {
+      return false;
+    }
+    _activeUtcDateKey = nextDateKey;
+    if (_logFilePath.isEmpty) {
+      return false;
+    }
+    final rolledPath = _rollDatedLogPath(_logFilePath, nextDateKey);
+    if (rolledPath == null || rolledPath == _logFilePath) {
+      return false;
+    }
+    _logFilePath = rolledPath;
+    _sessionStartUtc = nowUtc;
+    _applyLocalStoragePolicy();
+
+    final headerLines = _metadata.toHeaderLines(
+      minimumLevel: _minimumLevel,
+      sessionStartUtc: nowUtc,
+    );
+    final existingBodyLines = _readExistingBodyLines(rolledPath);
+    _replaceBuffer(<String>[...headerLines, ...existingBodyLines]);
+    return true;
   }
 
   /// Sanitizes a platform or workspace identifier into a safe filename slug token.
@@ -1158,36 +1394,156 @@ final class AppLogger {
     return result.isEmpty ? fallback : result;
   }
 
-  /// Trims the oldest 20% of non-protected entries when [_lines] exceeds [_maxLines].
-  static bool _trimToMaxLinesIfNeeded() {
-    if (_lines.length <= _maxLines) {
-      return false;
+  /// Scans [input] in a single pass for character markers required by secret-redaction patterns.
+  static ({bool hasAt, bool hasColonOrEquals, bool hasWhitespace})
+  _scanSanitizeMarkers(String input) {
+    var hasAt = false;
+    var hasColonOrEquals = false;
+    var hasWhitespace = false;
+    for (var i = 0; i < input.length; i++) {
+      final code = input.codeUnitAt(i);
+      if (code == 0x3A || code == 0x3D) {
+        hasColonOrEquals = true;
+      } else if (code == 0x40) {
+        hasAt = true;
+      } else if (code <= 0x20 ||
+          code == 0x85 ||
+          code == 0xA0 ||
+          code > 0x1000) {
+        hasWhitespace = true;
+      }
+      if (hasAt && hasColonOrEquals && hasWhitespace) {
+        break;
+      }
     }
+    return (
+      hasAt: hasAt,
+      hasColonOrEquals: hasColonOrEquals,
+      hasWhitespace: hasWhitespace,
+    );
+  }
+
+  /// Trims the oldest non-protected lines until [_activeByteLength] fits within [maxFileBytes].
+  static void _trimLinesByBytes() {
+    final overflowBytes = _activeByteLength - maxFileBytes;
+    final twentyPercentBytes = (maxFileBytes * 0.2).ceil();
+    final targetDropBytes = overflowBytes + twentyPercentBytes;
+
+    final retainedLines = <String>[];
+    final retainedLengths = <int>[];
+    var droppedBytes = 0;
+    var totalBytes = 0;
+
+    for (var i = 0; i < _lines.length; i++) {
+      final line = _lines[i];
+      final byteLength = _lineByteLengths[i];
+      if (droppedBytes < targetDropBytes && !_isProtectedLine(line)) {
+        droppedBytes += byteLength;
+      } else {
+        retainedLines.add(line);
+        retainedLengths.add(byteLength);
+        totalBytes += byteLength;
+      }
+    }
+
+    if (totalBytes > maxFileBytes) {
+      totalBytes = _dropOverflowNonHeaderBytes(
+        retainedLines,
+        retainedLengths,
+        totalBytes,
+      );
+    }
+
+    _lines
+      ..clear()
+      ..addAll(retainedLines);
+    _lineByteLengths
+      ..clear()
+      ..addAll(retainedLengths);
+    _activeByteLength = totalBytes;
+  }
+
+  /// Trims the oldest 20% of non-protected entries when [_lines] exceeds [_maxLines].
+  static void _trimLinesByCount() {
     final overflow = _lines.length - _maxLines;
     final twentyPercent = (_maxLines * 0.2).ceil();
     final targetDrop = overflow + (twentyPercent > 1 ? twentyPercent : 1);
 
-    final retained = <String>[];
+    final retainedLines = <String>[];
+    final retainedLengths = <int>[];
     var dropped = 0;
+    var totalBytes = 0;
     for (var i = 0; i < _lines.length; i++) {
       final line = _lines[i];
+      final byteLength = _lineByteLengths[i];
       if (dropped < targetDrop && !_isProtectedLine(line)) {
         dropped++;
       } else {
-        retained.add(line);
+        retainedLines.add(line);
+        retainedLengths.add(byteLength);
+        totalBytes += byteLength;
       }
     }
-    if (retained.length > _maxLines) {
-      final start = retained.length - _maxLines;
-      final tail = retained.sublist(start);
-      retained
+    if (retainedLines.length > _maxLines) {
+      final start = retainedLines.length - _maxLines;
+      final tailLines = retainedLines.sublist(start);
+      final tailLengths = retainedLengths.sublist(start);
+      retainedLines
         ..clear()
-        ..addAll(tail);
+        ..addAll(tailLines);
+      retainedLengths
+        ..clear()
+        ..addAll(tailLengths);
+      totalBytes = 0;
+      for (final byteLength in retainedLengths) {
+        totalBytes += byteLength;
+      }
     }
     _lines
       ..clear()
-      ..addAll(retained);
+      ..addAll(retainedLines);
+    _lineByteLengths
+      ..clear()
+      ..addAll(retainedLengths);
+    _activeByteLength = totalBytes;
+  }
+
+  /// Enforces both [_maxLines] and [maxFileBytes] bounds on the active log buffer.
+  static bool _trimToLimitsIfNeeded() {
+    if (_lines.length <= _maxLines && _activeByteLength <= maxFileBytes) {
+      return false;
+    }
+    if (_lines.length > _maxLines) {
+      _trimLinesByCount();
+    }
+    if (_activeByteLength > maxFileBytes) {
+      _trimLinesByBytes();
+    }
     return true;
+  }
+
+  /// Computes the UTF-8 byte length of [line] plus its trailing newline without allocating a byte buffer.
+  static int _utf8LineByteLength(String line) {
+    var byteLength = 1;
+    for (var i = 0; i < line.length; i++) {
+      final unit = line.codeUnitAt(i);
+      if (unit <= 0x7F) {
+        byteLength += 1;
+      } else if (unit <= 0x7FF) {
+        byteLength += 2;
+      } else if (unit >= 0xD800 && unit <= 0xDBFF && i + 1 < line.length) {
+        final next = line.codeUnitAt(i + 1);
+        if (next >= 0xDC00 && next <= 0xDFFF) {
+          byteLength += 4;
+          i++;
+        } else {
+          byteLength += 3;
+        }
+      } else {
+        byteLength += 3;
+      }
+    }
+    return byteLength;
   }
 
   /// Overwrites the persistent log file with the current contents of [_lines].

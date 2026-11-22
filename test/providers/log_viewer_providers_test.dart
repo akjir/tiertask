@@ -24,7 +24,7 @@ import 'package:tiertask/services/app_logger.dart';
 class _SpyWebDavRepository extends WebDavRepository {
   _SpyWebDavRepository({required super.config});
 
-  Object? syncError;
+  Error? syncError;
   int syncCalls = 0;
 
   @override
@@ -237,7 +237,7 @@ void main() {
       AppLogger.error(LogTag.storage, 'storage error');
 
       final configurationNotifier = _TestWebDavConfigNotifier(
-        initialConfig: const WebDavConfig(logStorageMode: StorageMode.local),
+        initialConfig: const WebDavConfig(),
       );
       final container = ProviderContainer(
         overrides: [
@@ -350,11 +350,8 @@ void main() {
       final container = ProviderContainer(
         overrides: [
           webDavConfigProvider.overrideWith(
-            () => _TestWebDavConfigNotifier(
-              initialConfig: const WebDavConfig(
-                logStorageMode: StorageMode.local,
-              ),
-            ),
+            () =>
+                _TestWebDavConfigNotifier(initialConfig: const WebDavConfig()),
           ),
         ],
       );
@@ -461,6 +458,71 @@ void main() {
         }
       },
     );
+
+    test('refuses WebDAV log upload when logStorageMode is local even with storageMode both and diagnostics enabled', () async {
+      const localOnlyLogConfig = WebDavConfig(
+        serverUrl: 'https://cloud.example.com/dav/',
+        username: 'user',
+        password: 'secret',
+        storageMode: StorageMode.both,
+        diagnosticsEnabled: true,
+      );
+      final configurationNotifier = _TestWebDavConfigNotifier(
+        initialConfig: localOnlyLogConfig,
+      );
+      final spyRepository = _SpyWebDavRepository(config: localOnlyLogConfig);
+      final container = ProviderContainer(
+        overrides: [
+          webDavConfigProvider.overrideWith(() => configurationNotifier),
+          webDavRepositoryProvider.overrideWithValue(spyRepository),
+        ],
+      );
+      addTearDown(container.dispose);
+      await container.read(webDavConfigProvider.future);
+      final subscription = container.listen(logViewerProvider, (_, _) {});
+      addTearDown(subscription.close);
+
+      expect(
+        container.read(logViewerProvider).canSyncWebDav,
+        isFalse,
+        reason: 'canSyncWebDav must be false when logStorageMode is StorageMode.local',
+      );
+
+      final notifier = container.read(logViewerProvider.notifier);
+      expect(await notifier.syncLogToWebDav(), isA<LogSyncSucceeded>());
+      expect(
+        spyRepository.syncCalls,
+        equals(0),
+        reason: 'syncLogToWebDav must not upload logs to WebDAV when logStorageMode is local',
+      );
+
+      // Switching logStorageMode to StorageMode.both enables upload.
+      configurationNotifier.emitConfig(
+        localOnlyLogConfig.copyWith(logStorageMode: StorageMode.both),
+      );
+      expect(container.read(logViewerProvider).canSyncWebDav, isTrue);
+      expect(await notifier.syncLogToWebDav(), isA<LogSyncSucceeded>());
+      expect(
+        spyRepository.syncCalls,
+        equals(1),
+        reason: 'syncLogToWebDav must upload when diagnosticsEnabled, logStorageMode.usesWebDav, and isWebDavConfigured are all true',
+      );
+
+      // Disabling diagnostics prevents upload even when logStorageMode uses WebDAV.
+      configurationNotifier.emitConfig(
+        localOnlyLogConfig.copyWith(
+          diagnosticsEnabled: false,
+          logStorageMode: StorageMode.both,
+        ),
+      );
+      expect(await notifier.syncLogToWebDav(), isA<LogSyncSucceeded>());
+      expect(
+        spyRepository.syncCalls,
+        equals(1),
+        reason:
+            'syncLogToWebDav must skip upload when diagnosticsEnabled is false',
+      );
+    });
 
     test('activeLogFileNameProvider reacts to AppLogger.revision and cleans up on dispose', () async {
       AppLogger.setEnabled(

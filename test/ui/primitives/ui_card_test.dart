@@ -61,10 +61,7 @@ void main() {
         );
         final box = decorated.decoration as BoxDecoration?;
         expect(box?.color, equals(tokens.colors.soft));
-        expect(
-          box?.border,
-          equals(Border.all(color: tokens.colors.accent, width: 1.0)),
-        );
+        expect(box?.border, equals(Border.all(color: tokens.colors.accent)));
       },
     );
 
@@ -83,7 +80,6 @@ void main() {
               UiCard.inset(
                 key: const ValueKey<String>('inset_read'),
                 headerTitle: 'Note',
-                isEditing: false,
                 child: Builder(
                   builder: (context) {
                     readSurfaceLevel = UiSurfaceScope.of(context);
@@ -127,10 +123,7 @@ void main() {
                     .decoration
                 as BoxDecoration?;
         expect(readBox?.color, equals(tokens.colors.bg));
-        expect(
-          readBox?.border,
-          equals(Border.all(color: tokens.colors.line, width: 1.0)),
-        );
+        expect(readBox?.border, equals(Border.all(color: tokens.colors.line)));
 
         final editBox =
             tester
@@ -149,7 +142,7 @@ void main() {
         expect(editBox?.color, equals(tokens.colors.bg));
         expect(
           editBox?.border,
-          equals(Border.all(color: tokens.colors.accent, width: 1.0)),
+          equals(Border.all(color: tokens.colors.accent)),
         );
       },
     );
@@ -217,7 +210,6 @@ void main() {
           tester,
           buildExpandable(isCompleted: true),
           tokens: tokens,
-          surfaceSize: const Size(1280, 800),
         );
 
         final titleText = tester.widget<Text>(find.text('Prepare release'));
@@ -257,7 +249,7 @@ void main() {
                 as BoxDecoration?;
         expect(
           hoveredBox?.border,
-          equals(Border.all(color: tokens.colors.accent, width: 1.0)),
+          equals(Border.all(color: tokens.colors.accent)),
         );
 
         // Tap header to expand: hides collapsed metadata, reveals panel, suppresses hover accent border.
@@ -281,7 +273,7 @@ void main() {
                 as BoxDecoration?;
         expect(
           expandedBox?.border,
-          equals(Border.all(color: tokens.colors.line, width: 1.0)),
+          equals(Border.all(color: tokens.colors.line)),
         );
 
         // Title editor swap when isEditingTitle is true.
@@ -354,6 +346,94 @@ void main() {
           childBuilds,
           equals(initialBuilds),
           reason: 'Hovering an expanded card must not trigger setState rebuilds of expandedChild',
+        );
+      },
+    );
+
+    testWidgets(
+      'omits idle AnimatedContainer on static standard/draft cards and omits AnimatedSize on collapsed expandable cards',
+      (tester) async {
+        var expanded = false;
+        late StateSetter setOuterState;
+
+        await pumpUiWidget(
+          tester,
+          StatefulBuilder(
+            builder: (context, setState) {
+              setOuterState = setState;
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  const UiCard.standard(
+                    key: ValueKey<String>('static_std_card'),
+                    child: Text('Static standard'),
+                  ),
+                  const UiCard.draft(
+                    key: ValueKey<String>('static_draft_card'),
+                    title: 'Draft title',
+                    child: Text('Draft body'),
+                  ),
+                  UiCard.expandable(
+                    key: const ValueKey<String>('lazy_exp_card'),
+                    title: 'Collapsible item',
+                    isExpanded: expanded,
+                    onToggleExpand: () => setState(() => expanded = !expanded),
+                    expandedChild: const Text('Expanded detail'),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('static_std_card')),
+            matching: find.byType(AnimatedContainer),
+          ),
+          findsNothing,
+          reason: 'Non-highlighted UiCard.standard must not allocate an idle AnimatedContainer',
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('static_draft_card')),
+            matching: find.byType(AnimatedContainer),
+          ),
+          findsNothing,
+          reason: 'UiCard.draft must not allocate an idle AnimatedContainer',
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('lazy_exp_card')),
+            matching: find.byType(AnimatedSize),
+          ),
+          findsNothing,
+          reason:
+              'Collapsed UiCard.expandable must not mount an idle AnimatedSize',
+        );
+
+        setOuterState(() => expanded = true);
+        await tester.pumpAndSettle();
+        expect(find.text('Expanded detail'), findsOneWidget);
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('lazy_exp_card')),
+            matching: find.byType(AnimatedSize),
+          ),
+          findsOneWidget,
+          reason: 'Expanded UiCard.expandable mounts AnimatedSize while open',
+        );
+
+        setOuterState(() => expanded = false);
+        await tester.pumpAndSettle();
+        expect(find.text('Expanded detail'), findsNothing);
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('lazy_exp_card')),
+            matching: find.byType(AnimatedSize),
+          ),
+          findsNothing,
+          reason: 'Collapsed UiCard.expandable unmounts AnimatedSize once collapse settles',
         );
       },
     );

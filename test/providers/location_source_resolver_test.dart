@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -25,10 +26,15 @@ import 'package:tiertask/repositories/location_repository.dart';
 import 'package:tiertask/services/plus_code_service.dart';
 
 class _RecordingLocationNotifier extends LocationNotifier {
-  _RecordingLocationNotifier(this._initialState, {this.refreshedFix});
+  _RecordingLocationNotifier(
+    this._initialState, {
+    this.refreshedFix,
+    this.refreshGate,
+  });
 
   final LocationState _initialState;
   final LocationFix? refreshedFix;
+  final Completer<void>? refreshGate;
   int refreshCalls = 0;
 
   @override
@@ -37,6 +43,12 @@ class _RecordingLocationNotifier extends LocationNotifier {
   @override
   Future<void> refreshLocation() async {
     refreshCalls++;
+    if (refreshGate case final gate?) {
+      await gate.future;
+    }
+    if (!ref.mounted) {
+      return;
+    }
     if (refreshedFix case final fix?) {
       state = LocationState(
         status: LocationStatus.found,
@@ -398,5 +410,43 @@ void main() {
       expect(missingNotifier.refreshCalls, equals(1));
       expect(missingCoordinates, isNull);
     });
+
+    test(
+      'returns null cleanly when ProviderContainer is disposed mid-GPS refresh',
+      () async {
+        final refreshGate = Completer<void>();
+        final locationNotifier = _RecordingLocationNotifier(
+          const LocationState(status: LocationStatus.unavailable),
+          refreshedFix: const LocationFix(
+            latitude: 52.5200089,
+            longitude: 13.4049541,
+          ),
+          refreshGate: refreshGate,
+        );
+        final container = ProviderContainer(
+          overrides: [
+            locationStateProvider.overrideWith(() => locationNotifier),
+          ],
+        );
+
+        final resolver = container.read(locationSourceResolverProvider);
+        final resolutionFuture = resolver.resolveCurrentGpsPosition();
+        expect(locationNotifier.refreshCalls, equals(1));
+
+        container.dispose();
+        refreshGate.complete();
+
+        expect(
+          await resolutionFuture,
+          isNull,
+          reason: 'Disposing ProviderContainer mid-refresh must return null instead of throwing on unmounted Ref',
+        );
+        expect(
+          await resolver.resolveCurrentGpsPosition(),
+          isNull,
+          reason: 'Calling resolveCurrentGpsPosition after disposal must return null cleanly',
+        );
+      },
+    );
   });
 }

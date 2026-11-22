@@ -126,6 +126,113 @@ void main() {
         _runRestoreVector(vector);
       }
     });
+
+    test('guards year 0000 roll-under and year 10000 roll-over in Mode 2 monthly/daily and Mode 1 recurrence (TDF-CAL-003, TDF-TYPE-004)', () {
+      final utcMinusTwo = TdfTimeZoneContext.fixedOffset(
+        const Duration(hours: -2),
+      );
+      final utcPlusTwo = TdfTimeZoneContext.fixedOffset(
+        const Duration(hours: 2),
+      );
+      const monthlyRule = TaskRepeatRule(count: 1, unit: RepeatUnit.months);
+      const dailyRule = TaskRepeatRule(count: 1, unit: RepeatUnit.days);
+      final invalidTimestampMatcher = isA<TdfException>().having(
+        (error) => error.kind,
+        'kind',
+        TdfErrorKind.invalidTimestamp,
+      );
+
+      // 0. TdfTimeZoneContext.toLocalDateTime rejects local wall clocks outside 0001..9999:
+      expect(
+        () => utcMinusTwo.toLocalDateTime(DateTime.utc(1)),
+        throwsFormatException,
+        reason: '0001-01-01 00:00Z in UTC-02:00 rolls under to year 0000',
+      );
+      expect(
+        () => utcMinusTwo.toLocalDateTime(DateTime.utc(1, 1, 1, 1, 59, 59)),
+        throwsFormatException,
+        reason: '0001-01-01 01:59:59Z in UTC-02:00 rolls under to year 0000',
+      );
+      expect(
+        utcMinusTwo.toLocalDateTime(DateTime.utc(1, 1, 1, 2)),
+        equals(TdfLocalDateTime(1, 1, 1)),
+        reason: '0001-01-01 02:00:00Z in UTC-02:00 equals exact lower bound 0001-01-01 00:00:00',
+      );
+      expect(
+        () => utcPlusTwo.toLocalDateTime(DateTime.utc(9999, 12, 31, 23)),
+        throwsFormatException,
+        reason: '9999-12-31 23:00Z in UTC+02:00 rolls over to year 10000',
+      );
+
+      // 1. Mode 2 monthly with explicit dueAnchor at 0001-01-01 00:00Z in UTC-02:00 must reject year 0000 roll-under
+      // instead of wrapping (0 * 12 + 11 + 1) into a bogus 2-hour advance to 0001-01-01 02:00Z:
+      expect(
+        () => monthlyRule.computeNextMode2Schedule(
+          completedAtUtc: DateTime.utc(1),
+          oldDueUtc: DateTime.utc(1),
+          oldAnchor: TdfLocalDateTime(1, 1, 1),
+          timeZone: utcMinusTwo,
+        ),
+        throwsA(invalidTimestampMatcher),
+        reason: '0001-01-01 00:00Z in UTC-02:00 rolls under to year 0000 and must throw InvalidTimestamp',
+      );
+      expect(
+        () => monthlyRule.computeNextMode2Schedule(
+          completedAtUtc: DateTime.utc(1, 1, 1, 1, 59, 59),
+          oldDueUtc: DateTime.utc(1, 1, 1, 1, 59, 59),
+          oldAnchor: TdfLocalDateTime(1, 1, 1),
+          timeZone: utcMinusTwo,
+        ),
+        throwsA(invalidTimestampMatcher),
+        reason: '0001-01-01 01:59:59Z in UTC-02:00 (local 0000-12-31 23:59:59) must throw InvalidTimestamp',
+      );
+
+      // 2. Exact lower valid local boundary 0001-01-01 02:00:00Z in UTC-02:00 (local 0001-01-01 00:00:00) advances cleanly by 1 full month:
+      final validLower = monthlyRule.computeNextMode2Schedule(
+        completedAtUtc: DateTime.utc(1, 1, 1, 2),
+        oldDueUtc: DateTime.utc(1, 1, 1, 2),
+        oldAnchor: TdfLocalDateTime(1, 1, 1),
+        timeZone: utcMinusTwo,
+      );
+      expect(
+        validLower.newDueUtc,
+        equals(DateTime.utc(1, 2, 1, 2)),
+        reason: '0001-01-01 02:00Z in UTC-02:00 must advance 1 full month to 0001-02-01 02:00Z',
+      );
+      expect(validLower.newAnchor, equals(TdfLocalDateTime(1, 2, 1)));
+
+      // 3. Mirror upper boundary roll-over at 9999-12-31 23:00Z in UTC+02:00 with explicit anchor:
+      expect(
+        () => monthlyRule.computeNextMode2Schedule(
+          completedAtUtc: DateTime.utc(9999, 12, 31, 23),
+          oldDueUtc: DateTime.utc(9999, 12, 31, 23),
+          oldAnchor: TdfLocalDateTime(9999, 12, 31),
+          timeZone: utcPlusTwo,
+        ),
+        throwsA(invalidTimestampMatcher),
+        reason: '9999-12-31 23:00Z in UTC+02:00 rolls over to year 10000 and must throw InvalidTimestamp',
+      );
+
+      // 4. Mode 2 daily and Mode 1 recurrence also guard year 0000 local roll-under:
+      expect(
+        () => dailyRule.computeNextMode2Schedule(
+          completedAtUtc: DateTime.utc(1),
+          oldDueUtc: DateTime.utc(1),
+          oldAnchor: TdfLocalDateTime(1, 1, 1),
+          timeZone: utcMinusTwo,
+        ),
+        throwsA(invalidTimestampMatcher),
+        reason: 'Mode 2 daily referenceUtc rolling under to year 0000 must throw InvalidTimestamp',
+      );
+      expect(
+        () => monthlyRule.nextDueUtc(
+          completedAtUtc: DateTime.utc(1),
+          timeZone: utcMinusTwo,
+        ),
+        throwsA(invalidTimestampMatcher),
+        reason: 'Mode 1 localNow rolling under to year 0000 must throw InvalidTimestamp',
+      );
+    });
   });
 
   group('TDF 0.8.0 Synchronization, Stage Fairness, Cascade, and Recovery Conformance', () {
@@ -753,15 +860,15 @@ TaskBoard _executeMergeCall({
   final acknowledgedGeneration = vector['acknowledgedGeneration'] is int
       ? _requireInt(vector, 'acknowledgedGeneration')
       : null;
-  final requireAcknowledged = vector['requireAcknowledgedGeneration'] is bool
-      ? _requireBool(vector, 'requireAcknowledgedGeneration')
-      : false;
-  final pruneDeleted = vector['pruneExpiredDeleted'] is bool
-      ? _requireBool(vector, 'pruneExpiredDeleted')
-      : true;
-  final pruneCompleted = vector['pruneExpiredCompleted'] is bool
-      ? _requireBool(vector, 'pruneExpiredCompleted')
-      : true;
+  final requireAcknowledged =
+      vector['requireAcknowledgedGeneration'] is bool &&
+      _requireBool(vector, 'requireAcknowledgedGeneration');
+  final pruneDeleted =
+      vector['pruneExpiredDeleted'] is! bool ||
+      _requireBool(vector, 'pruneExpiredDeleted');
+  final pruneCompleted =
+      vector['pruneExpiredCompleted'] is! bool ||
+      _requireBool(vector, 'pruneExpiredCompleted');
 
   return TaskBoardSync.merge(
     primary: primary,
@@ -965,7 +1072,8 @@ List<TdfTaskDependency> _parseDependencies(Object? rawBlocked) {
   }
   final result = <TdfTaskDependency>[];
   for (final entry in rawBlocked.entries) {
-    final requiredCompletion = entry.value is int ? entry.value as int : 1;
+    final rawValue = entry.value;
+    final requiredCompletion = rawValue is int ? rawValue : 1;
     result.add(
       TdfTaskDependency(
         taskId: entry.key,
@@ -1018,7 +1126,7 @@ TdfLabel _parseLabel(Map<String, Object?> map) {
   return TdfLabel(
     id: _requireString(map, 'id'),
     name: _requireString(map, 'name'),
-    isScoped: map['scoped'] is bool ? _requireBool(map, 'scoped') : false,
+    isScoped: map['scoped'] is bool && _requireBool(map, 'scoped'),
     color: map['color'] is String ? _requireString(map, 'color') : null,
     note: map['note'] is String ? _requireString(map, 'note') : null,
     modifiedAt: modifiedRaw is String ? _parseUtcTimestamp(modifiedRaw) : null,
@@ -1153,7 +1261,7 @@ TaskItem _parseTask(Map<String, Object?> map) {
       : 'Task $id';
   final createdAt = map['created'] is String
       ? _parseUtcTimestamp(_requireString(map, 'created'))
-      : DateTime.utc(2026, 11, 1, 8, 0, 0);
+      : DateTime.utc(2026, 11, 1, 8);
   final modifiedAt = map['modified'] is String
       ? _parseUtcTimestamp(_requireString(map, 'modified'))
       : null;
@@ -1184,7 +1292,7 @@ TaskItem _parseTask(Map<String, Object?> map) {
         : 0,
     isCompleted: completedAt != null,
     completedAt: completedAt,
-    isPriority: map['priority'] is bool ? _requireBool(map, 'priority') : false,
+    isPriority: map['priority'] is bool && _requireBool(map, 'priority'),
     labelIds: _parseStringList(map['labels']),
     isSuspendedForever:
         suspendedMap != null &&
@@ -1428,9 +1536,9 @@ void _runMergeVector(Map<String, Object?> vector) {
   final cleanupMode = vector['cleanupMode'] is String
       ? TdfCleanupMode.values.byName(_requireString(vector, 'cleanupMode'))
       : TdfCleanupMode.finalStage;
-  final assertCommutative = vector['assertCommutative'] is bool
-      ? _requireBool(vector, 'assertCommutative')
-      : true;
+  final assertCommutative =
+      vector['assertCommutative'] is! bool ||
+      _requireBool(vector, 'assertCommutative');
 
   final baseline = vector['baseline'] is Map<String, Object?>
       ? _parseBoard(
@@ -1568,7 +1676,6 @@ void _runMergeVector(Map<String, Object?> vector) {
       baseline: forward,
       evaluationTime: evaluationTime,
       timeZone: timeZone,
-      cleanupMode: TdfCleanupMode.finalStage,
     );
     expect(
       idempotent.allTasks,
@@ -1827,14 +1934,12 @@ void _runMultiStageVector(Map<String, Object?> vector) {
     secondary: remoteBoard,
     baseline: stage2Baseline,
     evaluationTime: now,
-    cleanupMode: TdfCleanupMode.finalStage,
   );
   final stage2FinalReversed = TaskBoardSync.merge(
     primary: remoteBoard,
     secondary: stage1Deferred,
     baseline: stage2Baseline,
     evaluationTime: now,
-    cleanupMode: TdfCleanupMode.finalStage,
   );
   _assertBoardMatchesExpected(
     stage2Final,
@@ -1853,7 +1958,6 @@ void _runMultiStageVector(Map<String, Object?> vector) {
       secondary: remoteBoard,
       baseline: baseline,
       evaluationTime: now,
-      cleanupMode: TdfCleanupMode.finalStage,
     );
     expect(
       stage2Final.allTasks,
@@ -2063,9 +2167,7 @@ void _runRecoveryResolutionVector(Map<String, Object?> vector) {
   );
   expect(
     sharedAfter.dependencies,
-    equals(<TdfTaskDependency>[
-      TdfTaskDependency(taskId: recoveredTask.id, requiredCompletion: 1),
-    ]),
+    equals(<TdfTaskDependency>[TdfTaskDependency(taskId: recoveredTask.id)]),
     reason:
         '$vectorId: shared open task must rewrite kept blocker and strip discarded blocker',
   );
@@ -2117,7 +2219,6 @@ void _runZoneEvaluationCheck({
     evaluated,
     evaluationTime: evaluationUtc,
     timeZone: zone,
-    cleanupMode: TdfCleanupMode.finalStage,
   );
   _assertSingleExpectedTask(
     cleaned,

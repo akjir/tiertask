@@ -93,10 +93,39 @@ class UiSegmentedControl<T> extends StatelessWidget {
     this.mode = UiSegmentedControlMode.horizontal,
     this.enabled = true,
     this.semanticLabel,
+    this.focusNode,
+    this.hintText,
+    this.leadingIcon,
+    this.hasError = false,
+    this.minHeight,
+    this.borderRadius,
+    this.textStyle,
+    this.applyDisabledOpacity = true,
   });
+
+  /// Applies `disabledOpacity` internally when disabled (set false if an ancestor wraps opacity).
+  final bool applyDisabledOpacity;
+
+  /// Optional explicit corner radius for the vertical trigger overriding `tokens.radii.md`.
+  final double? borderRadius;
 
   /// Whether the entire segmented control is interactive.
   final bool enabled;
+
+  /// Optional caller-owned [FocusNode] for the vertical combobox trigger.
+  final FocusNode? focusNode;
+
+  /// Renders `danger` border color on the vertical trigger when true.
+  final bool hasError;
+
+  /// Optional placeholder text rendered in `muted` when no segment matches [value].
+  final String? hintText;
+
+  /// Optional leading outline icon rendered in the vertical trigger when the active segment has no icon.
+  final IconData? leadingIcon;
+
+  /// Optional explicit minimum height for the vertical trigger overriding `tokens.spacing.touchTarget`.
+  final double? minHeight;
 
   /// Visual presentation mode (`horizontal` trough or `vertical` combobox popup).
   final UiSegmentedControlMode mode;
@@ -109,6 +138,9 @@ class UiSegmentedControl<T> extends StatelessWidget {
 
   /// Ordered segment definitions.
   final List<UiSegment<T>> segments;
+
+  /// Optional trigger typography override for the vertical combobox mode.
+  final TextStyle? textStyle;
 
   /// Currently selected segment value.
   final T value;
@@ -129,6 +161,14 @@ class UiSegmentedControl<T> extends StatelessWidget {
         onChanged: onChanged,
         enabled: enabled,
         semanticLabel: semanticLabel,
+        focusNode: focusNode,
+        hintText: hintText,
+        leadingIcon: leadingIcon,
+        hasError: hasError,
+        minHeight: minHeight,
+        borderRadius: borderRadius,
+        textStyle: textStyle,
+        applyDisabledOpacity: applyDisabledOpacity,
       ),
     };
   }
@@ -146,7 +186,7 @@ class _StepPreviousSegmentIntent extends Intent {
   const _StepPreviousSegmentIntent();
 }
 
-/// Horizontal equal-width segmented control implementation backing [UiSegmentedControlMode.horizontal].
+/// Horizontal equal-width segmented control backing [UiSegmentedControlMode.horizontal].
 class _UiHorizontalSegmentedControl<T> extends StatefulWidget {
   /// Creates a [_UiHorizontalSegmentedControl].
   const _UiHorizontalSegmentedControl({
@@ -177,11 +217,12 @@ class _UiHorizontalSegmentedControl<T> extends StatefulWidget {
       _UiHorizontalSegmentedControlState<T>();
 }
 
-/// Manages per-segment [FocusNode]s and `ArrowLeft`/`ArrowRight` stepping for [_UiHorizontalSegmentedControl].
+/// Manages per-segment [FocusNode]s and horizontal stepping for [_UiHorizontalSegmentedControl].
 class _UiHorizontalSegmentedControlState<T>
     extends State<_UiHorizontalSegmentedControl<T>> {
-  /// Per-segment focus nodes synchronized with `widget.segments.length`.
   final List<FocusNode> _focusNodes = <FocusNode>[];
+  final List<FocusNode> _pendingDisposals = <FocusNode>[];
+  bool _isDisposalScheduled = false;
 
   @override
   void initState() {
@@ -199,6 +240,7 @@ class _UiHorizontalSegmentedControlState<T>
 
   @override
   void dispose() {
+    _flushPendingDisposals();
     for (final node in _focusNodes) {
       node.dispose();
     }
@@ -207,19 +249,66 @@ class _UiHorizontalSegmentedControlState<T>
 
   @override
   Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
     final controlEnabled = widget.enabled && widget.onChanged != null;
-    return _UiHorizontalTrough<T>(
-      segments: widget.segments,
-      value: widget.value,
-      focusNodes: _focusNodes,
-      controlEnabled: controlEnabled,
-      semanticLabel: widget.semanticLabel,
-      onSelect: _selectSegment,
-      onStep: _stepSelection,
+
+    return Semantics(
+      container: true,
+      label: widget.semanticLabel,
+      child: Opacity(
+        opacity: controlEnabled ? 1.0 : tokens.focus.disabledOpacity,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.bg,
+            borderRadius: BorderRadius.circular(tokens.radii.md),
+            border: Border.all(
+              color: colors.line,
+              width: tokens.radii.borderWidth,
+            ),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(3.0),
+            child: _UiHorizontalSegmentRow<T>(
+              segments: widget.segments,
+              value: widget.value,
+              focusNodes: _focusNodes,
+              controlEnabled: controlEnabled,
+              onSelect: _selectSegment,
+              onStep: _stepSelection,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
-  /// Focuses and selects segment at [index], skipping redundant notifications for the already-selected value.
+  /// Queues a removed segment [node] for post-frame disposal after its tab unmounts.
+  void _enqueueDisposal(FocusNode node) {
+    _pendingDisposals.add(node);
+    if (_isDisposalScheduled) {
+      return;
+    }
+    _isDisposalScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _flushPendingDisposals();
+    });
+  }
+
+  /// Disposes all queued segment focus nodes after the frame or during unmount.
+  void _flushPendingDisposals() {
+    _isDisposalScheduled = false;
+    if (_pendingDisposals.isEmpty) {
+      return;
+    }
+    final nodes = List<FocusNode>.of(_pendingDisposals);
+    _pendingDisposals.clear();
+    for (final node in nodes) {
+      node.dispose();
+    }
+  }
+
+  /// Focuses and selects segment at [index], skipping redundant notifications for the active value.
   void _selectSegment(int index) {
     _focusNodes[index].requestFocus();
     final nextValue = widget.segments[index].value;
@@ -251,84 +340,15 @@ class _UiHorizontalSegmentedControlState<T>
       _focusNodes.add(FocusNode());
     }
     while (_focusNodes.length > widget.segments.length) {
-      _focusNodes.removeLast().dispose();
+      _enqueueDisposal(_focusNodes.removeLast());
     }
   }
 }
 
-/// Bordered `bg` trough wrapping equal-width horizontal segments.
-class _UiHorizontalTrough<T> extends StatelessWidget {
-  /// Creates a [_UiHorizontalTrough].
-  const _UiHorizontalTrough({
-    required this.segments,
-    required this.value,
-    required this.focusNodes,
-    required this.controlEnabled,
-    required this.semanticLabel,
-    required this.onSelect,
-    required this.onStep,
-  });
-
-  /// Whether the overall control accepts interaction.
-  final bool controlEnabled;
-
-  /// Per-segment focus nodes owned by [_UiHorizontalSegmentedControlState].
-  final List<FocusNode> focusNodes;
-
-  /// Callback selecting the segment at the given index.
-  final ValueChanged<int> onSelect;
-
-  /// Callback stepping selection by `delta` (`-1` or `+1`) from an index.
-  final void Function(int currentIndex, int delta) onStep;
-
-  /// Optional accessible group label.
-  final String? semanticLabel;
-
-  /// Ordered horizontal segments.
-  final List<UiSegment<T>> segments;
-
-  /// Currently selected segment value.
-  final T value;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
-    return Semantics(
-      container: true,
-      label: semanticLabel,
-      child: Opacity(
-        opacity: controlEnabled ? 1.0 : tokens.focus.disabledOpacity,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: colors.bg,
-            borderRadius: BorderRadius.circular(tokens.radii.md),
-            border: Border.all(
-              color: colors.line,
-              width: tokens.radii.borderWidth,
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(3.0),
-            child: _UiHorizontalTroughRow<T>(
-              segments: segments,
-              value: value,
-              focusNodes: focusNodes,
-              controlEnabled: controlEnabled,
-              onSelect: onSelect,
-              onStep: onStep,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Equal-width horizontal row of [_UiSegmentTab] children inside [_UiHorizontalTrough].
-class _UiHorizontalTroughRow<T> extends StatelessWidget {
-  /// Creates a [_UiHorizontalTroughRow].
-  const _UiHorizontalTroughRow({
+/// Equal-width horizontal row of [_UiSegmentTab] items inside [_UiHorizontalSegmentedControl].
+class _UiHorizontalSegmentRow<T> extends StatelessWidget {
+  /// Creates a [_UiHorizontalSegmentRow].
+  const _UiHorizontalSegmentRow({
     required this.segments,
     required this.value,
     required this.focusNodes,
@@ -436,7 +456,7 @@ class _UiSegmentFocusRing extends StatelessWidget {
   }
 }
 
-/// Individual focusable tab cell inside [_UiHorizontalSegmentedControl].
+/// Individual focusable tab cell inside [_UiHorizontalSegmentRow].
 class _UiSegmentTab extends StatefulWidget {
   /// Creates a [_UiSegmentTab].
   const _UiSegmentTab({
@@ -482,137 +502,9 @@ class _UiSegmentTab extends StatefulWidget {
   State<_UiSegmentTab> createState() => _UiSegmentTabState();
 }
 
-/// Visual box for a horizontal [_UiSegmentTab].
-class _UiSegmentTabBox extends StatelessWidget {
-  /// Creates a [_UiSegmentTabBox].
-  const _UiSegmentTabBox({
-    required this.label,
-    required this.icon,
-    required this.isSelected,
-    required this.isHovered,
-    required this.enabled,
-    required this.isIndividuallyDisabled,
-    required this.showFocusRing,
-  });
-
-  /// Whether this tab is enabled.
-  final bool enabled;
-
-  /// Optional leading icon glyph.
-  final IconData? icon;
-
-  /// Whether pointer hover is active.
-  final bool isHovered;
-
-  /// Whether only this segment should dim (outer trough already dims when control is disabled).
-  final bool isIndividuallyDisabled;
-
-  /// Whether this tab is active.
-  final bool isSelected;
-
-  /// Visible label text.
-  final String label;
-
-  /// Whether keyboard focus ring is visible.
-  final bool showFocusRing;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
-    final foreground = isSelected
-        ? colors.accent
-        : (isHovered && enabled ? colors.ink : colors.muted);
-    final radius = tokens.radii.tag;
-
-    return Opacity(
-      opacity: isIndividuallyDisabled ? tokens.focus.disabledOpacity : 1.0,
-      child: _UiSegmentFocusRing(
-        visible: showFocusRing && enabled,
-        radius: radius,
-        child: AnimatedContainer(
-          duration: tokens.focus.hoverDuration,
-          width: double.infinity,
-          constraints: BoxConstraints(
-            minHeight: tokens.spacing.chromeControlHeight,
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? colors.panel
-                : colors.panel.withValues(alpha: 0.0),
-            borderRadius: BorderRadius.circular(radius),
-            boxShadow: isSelected ? tokens.focus.segmentedShadow : null,
-          ),
-          child: _UiSegmentTabLabel(
-            label: label,
-            icon: icon,
-            foreground: foreground,
-            isSelected: isSelected,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Centered icon and label row rendered inside [_UiSegmentTabBox].
-class _UiSegmentTabLabel extends StatelessWidget {
-  /// Creates a [_UiSegmentTabLabel].
-  const _UiSegmentTabLabel({
-    required this.label,
-    required this.icon,
-    required this.foreground,
-    required this.isSelected,
-  });
-
-  /// Foreground color for icon and label text.
-  final Color foreground;
-
-  /// Optional leading icon glyph.
-  final IconData? icon;
-
-  /// Whether this segment is active.
-  final bool isSelected;
-
-  /// Visible segment label.
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        if (icon case final glyph?) ...<Widget>[
-          ExcludeSemantics(
-            child: Icon(glyph, size: tokens.spacing.iconXs, color: foreground),
-          ),
-          const SizedBox(width: 5.0),
-        ],
-        Flexible(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: tokens.typography.meta.copyWith(
-              color: foreground,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 /// Manages hover and keyboard focus highlight for [_UiSegmentTab].
 class _UiSegmentTabState extends State<_UiSegmentTab> {
-  /// Whether pointer is hovering this tab.
   bool _isHovered = false;
-
-  /// Whether keyboard focus ring is visible.
   bool _showFocusRing = false;
 
   @override
@@ -640,7 +532,7 @@ class _UiSegmentTabState extends State<_UiSegmentTab> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTap: widget.onTap,
-          child: _UiSegmentTabBox(
+          child: _UiSegmentTabSurface(
             label: widget.label,
             icon: widget.icon,
             isSelected: widget.isSelected,
@@ -699,72 +591,185 @@ class _UiSegmentTabState extends State<_UiSegmentTab> {
   }
 }
 
-/// Scrollable column of vertical option rows bounded by [maxHeight].
-class _UiVerticalOptionList<T> extends StatelessWidget {
-  /// Creates a [_UiVerticalOptionList].
-  const _UiVerticalOptionList({
-    required this.maxHeight,
-    required this.rowMinHeight,
-    required this.segments,
-    required this.value,
-    required this.highlightedIndex,
-    required this.hasKeyboardHighlight,
-    required this.onSelectIndex,
+/// Visual tab surface and centered label rendered inside [_UiSegmentTab].
+class _UiSegmentTabSurface extends StatelessWidget {
+  /// Creates a [_UiSegmentTabSurface].
+  const _UiSegmentTabSurface({
+    required this.label,
+    required this.icon,
+    required this.isSelected,
+    required this.isHovered,
+    required this.enabled,
+    required this.isIndividuallyDisabled,
+    required this.showFocusRing,
   });
 
-  /// Whether keyboard highlight border is currently visible.
-  final bool hasKeyboardHighlight;
+  /// Whether this tab is enabled.
+  final bool enabled;
 
-  /// Active highlighted option index.
-  final int highlightedIndex;
+  /// Optional leading icon glyph.
+  final IconData? icon;
 
-  /// Maximum vertical height clamped to available viewport space.
-  final double maxHeight;
+  /// Whether pointer hover is active.
+  final bool isHovered;
 
-  /// Callback selecting an option row by index.
-  final ValueChanged<int> onSelectIndex;
+  /// Whether only this segment should dim (outer trough already dims when control is disabled).
+  final bool isIndividuallyDisabled;
 
-  /// Minimum touch-target row height (`34px` desktop, `44px` compact).
-  final double rowMinHeight;
+  /// Whether this tab is active.
+  final bool isSelected;
 
-  /// Ordered options displayed vertically.
-  final List<UiSegment<T>> segments;
+  /// Visible label text.
+  final String label;
 
-  /// Currently selected value.
-  final T value;
+  /// Whether keyboard focus ring is visible.
+  final bool showFocusRing;
 
   @override
   Widget build(BuildContext context) {
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxHeight: maxHeight),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(_popupInnerPadding),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            for (var i = 0; i < segments.length; i++)
-              _UiVerticalSegmentOption(
-                label: segments[i].label,
-                icon: segments[i].icon,
-                isSelected: segments[i].value == value,
-                isKeyboardHighlighted:
-                    hasKeyboardHighlight && i == highlightedIndex,
-                enabled: segments[i].enabled,
-                minHeight: rowMinHeight,
-                onTap: segments[i].enabled ? () => onSelectIndex(i) : null,
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+    final foreground = isSelected
+        ? colors.accent
+        : (isHovered && enabled ? colors.ink : colors.muted);
+    final radius = tokens.radii.tag;
+
+    return Opacity(
+      opacity: isIndividuallyDisabled ? tokens.focus.disabledOpacity : 1.0,
+      child: _UiSegmentFocusRing(
+        visible: showFocusRing && enabled,
+        radius: radius,
+        child: AnimatedContainer(
+          duration: tokens.focus.hoverDuration,
+          width: double.infinity,
+          constraints: BoxConstraints(
+            minHeight: tokens.spacing.chromeControlHeight,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? colors.panel
+                : colors.panel.withValues(alpha: 0.0),
+            borderRadius: BorderRadius.circular(radius),
+            boxShadow: isSelected ? tokens.focus.segmentedShadow : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (icon case final glyph?) ...<Widget>[
+                ExcludeSemantics(
+                  child: Icon(
+                    glyph,
+                    size: tokens.spacing.iconXs,
+                    color: foreground,
+                  ),
+                ),
+                const SizedBox(width: 5.0),
+              ],
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tokens.typography.meta.copyWith(
+                    color: foreground,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  ),
+                ),
               ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
 
-/// Visual row container for one option inside [_UiVerticalOptionList].
-class _UiVerticalOptionRow extends StatelessWidget {
+/// Interactive option row inside [_UiVerticalPopupSurface] tracking hover without stealing trigger focus.
+class _UiVerticalOptionRow extends StatefulWidget {
   /// Creates a [_UiVerticalOptionRow].
   const _UiVerticalOptionRow({
+    required this.label,
+    required this.icon,
+    required this.isSelected,
+    required this.isKeyboardHighlighted,
+    required this.enabled,
+    required this.minHeight,
+    required this.onTap,
+  });
+
+  /// Whether this option can be selected.
+  final bool enabled;
+
+  /// Optional leading outline icon glyph.
+  final IconData? icon;
+
+  /// Whether keyboard highlight inset border is shown.
+  final bool isKeyboardHighlighted;
+
+  /// Whether this option is currently active.
+  final bool isSelected;
+
+  /// Visible option label.
+  final String label;
+
+  /// Minimum touch-target row height (`34px` desktop, `44px` compact).
+  final double minHeight;
+
+  /// Selection callback invoked on tap when [enabled] is true.
+  final VoidCallback? onTap;
+
+  @override
+  State<_UiVerticalOptionRow> createState() => _UiVerticalOptionRowState();
+}
+
+/// Manages pointer hover state for [_UiVerticalOptionRow].
+class _UiVerticalOptionRowState extends State<_UiVerticalOptionRow> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: widget.isSelected,
+      enabled: widget.enabled,
+      label: widget.label,
+      child: MouseRegion(
+        cursor: widget.enabled
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.forbidden,
+        onEnter: (_) => _setHovered(true),
+        onExit: (_) => _setHovered(false),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: widget.enabled ? widget.onTap : null,
+          child: _UiVerticalOptionSurface(
+            label: widget.label,
+            icon: widget.icon,
+            isSelected: widget.isSelected,
+            isHovered: _isHovered,
+            isKeyboardHighlighted: widget.isKeyboardHighlighted,
+            enabled: widget.enabled,
+            minHeight: widget.minHeight,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Updates hover state when pointer enters or leaves this row.
+  void _setHovered(bool hovered) {
+    if (_isHovered != hovered) {
+      setState(() => _isHovered = hovered);
+    }
+  }
+}
+
+/// Visual surface for one option row inside [_UiVerticalOptionRow].
+class _UiVerticalOptionSurface extends StatelessWidget {
+  /// Creates a [_UiVerticalOptionSurface].
+  const _UiVerticalOptionSurface({
     required this.label,
     required this.icon,
     required this.isSelected,
@@ -825,72 +830,42 @@ class _UiVerticalOptionRow extends StatelessWidget {
             width: tokens.radii.borderWidth,
           ),
         ),
-        child: _UiVerticalOptionRowContent(
-          label: label,
-          icon: icon,
-          foreground: foreground,
-          isSelected: isSelected,
+        child: Row(
+          children: <Widget>[
+            if (icon case final glyph?) ...<Widget>[
+              ExcludeSemantics(
+                child: Icon(
+                  glyph,
+                  size: tokens.spacing.iconXs,
+                  color: foreground,
+                ),
+              ),
+              const SizedBox(width: 6.0),
+            ],
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: tokens.typography.meta.copyWith(
+                  color: foreground,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                ),
+              ),
+            ),
+            if (isSelected) ...<Widget>[
+              const SizedBox(width: 8.0),
+              ExcludeSemantics(
+                child: Icon(
+                  Icons.check_rounded,
+                  size: tokens.spacing.iconXs,
+                  color: colors.accent,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
-    );
-  }
-}
-
-/// Leading icon, single-line label, and optional trailing checkmark inside [_UiVerticalOptionRow].
-class _UiVerticalOptionRowContent extends StatelessWidget {
-  /// Creates a [_UiVerticalOptionRowContent].
-  const _UiVerticalOptionRowContent({
-    required this.label,
-    required this.icon,
-    required this.foreground,
-    required this.isSelected,
-  });
-
-  /// Foreground tint for icon and label text.
-  final Color foreground;
-
-  /// Optional leading outline icon glyph.
-  final IconData? icon;
-
-  /// Whether this option is currently active.
-  final bool isSelected;
-
-  /// Visible option label.
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    return Row(
-      children: <Widget>[
-        if (icon case final glyph?) ...<Widget>[
-          ExcludeSemantics(
-            child: Icon(glyph, size: tokens.spacing.iconXs, color: foreground),
-          ),
-          const SizedBox(width: 6.0),
-        ],
-        Expanded(
-          child: Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: tokens.typography.meta.copyWith(
-              color: foreground,
-              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-            ),
-          ),
-        ),
-        if (isSelected) ...<Widget>[
-          const SizedBox(width: 8.0),
-          ExcludeSemantics(
-            child: Icon(
-              Icons.check_rounded,
-              size: tokens.spacing.iconXs,
-              color: tokens.colors.accent,
-            ),
-          ),
-        ],
-      ],
     );
   }
 }
@@ -930,33 +905,44 @@ class _UiVerticalPopupMetrics {
 
   /// Resolved popup width (`>= triggerWidth`, wide enough for labels, clamped to viewport).
   final double width;
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) {
+      return true;
+    }
+    return other is _UiVerticalPopupMetrics &&
+        (other.width - width).abs() < 0.5 &&
+        (other.maxHeight - maxHeight).abs() < 0.5 &&
+        (other.offsetX - offsetX).abs() < 0.5 &&
+        other.openUpward == openUpward &&
+        other.rowMinHeight == rowMinHeight;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    width.round(),
+    maxHeight.round(),
+    offsetX.round(),
+    openUpward,
+    rowMinHeight,
+  );
 }
 
-/// Anchored, direction-aware animated overlay hosting vertical segment options (`U-SURFACE-002`).
-class _UiVerticalPopupOverlay<T> extends StatelessWidget {
+/// Anchored, direction-aware overlay positioning [child] (`U-SURFACE-002`).
+class _UiVerticalPopupOverlay extends StatelessWidget {
   /// Creates a [_UiVerticalPopupOverlay].
   const _UiVerticalPopupOverlay({
     required this.layerLink,
     required this.tapRegionGroupId,
-    required this.animation,
     required this.metrics,
     required this.isInteractive,
-    required this.segments,
-    required this.value,
-    required this.highlightedIndex,
-    required this.hasKeyboardHighlight,
-    required this.onSelectIndex,
     required this.onDismissOutside,
+    required this.child,
   });
 
-  /// Curved open/close animation driving fade and vertical expansion.
-  final Animation<double> animation;
-
-  /// Whether keyboard highlight border is currently visible.
-  final bool hasKeyboardHighlight;
-
-  /// Index of the currently highlighted option row.
-  final int highlightedIndex;
+  /// Animated popup surface anchored to the trigger.
+  final Widget child;
 
   /// Whether option rows currently accept pointer hits (false while closing).
   final bool isInteractive;
@@ -970,17 +956,8 @@ class _UiVerticalPopupOverlay<T> extends StatelessWidget {
   /// Callback dismissing the popup when tapping outside [tapRegionGroupId].
   final VoidCallback onDismissOutside;
 
-  /// Callback selecting the option at the given index.
-  final ValueChanged<int> onSelectIndex;
-
-  /// Ordered options displayed vertically.
-  final List<UiSegment<T>> segments;
-
   /// Shared `TapRegion` group identifier linking trigger and popup.
   final Object tapRegionGroupId;
-
-  /// Currently selected value.
-  final T value;
 
   @override
   Widget build(BuildContext context) {
@@ -998,18 +975,7 @@ class _UiVerticalPopupOverlay<T> extends StatelessWidget {
           onTapOutside: (_) => onDismissOutside(),
           child: IgnorePointer(
             ignoring: !isInteractive,
-            child: Material(
-              type: MaterialType.transparency,
-              child: _UiVerticalPopupSurface<T>(
-                animation: animation,
-                metrics: metrics,
-                segments: segments,
-                value: value,
-                highlightedIndex: highlightedIndex,
-                hasKeyboardHighlight: hasKeyboardHighlight,
-                onSelectIndex: onSelectIndex,
-              ),
-            ),
+            child: Material(type: MaterialType.transparency, child: child),
           ),
         ),
       ),
@@ -1017,11 +983,12 @@ class _UiVerticalPopupOverlay<T> extends StatelessWidget {
   }
 }
 
-/// Animated shadowed `panel` container expanding vertically out of the trigger edge.
+/// Shadowed animated `panel` popup surface hosting scrollable vertical option rows.
 class _UiVerticalPopupSurface<T> extends StatelessWidget {
   /// Creates a [_UiVerticalPopupSurface].
   const _UiVerticalPopupSurface({
     required this.animation,
+    required this.scrollController,
     required this.metrics,
     required this.segments,
     required this.value,
@@ -1044,6 +1011,9 @@ class _UiVerticalPopupSurface<T> extends StatelessWidget {
 
   /// Callback selecting the option at the given index.
   final ValueChanged<int> onSelectIndex;
+
+  /// Scroll controller for bringing active options into view.
+  final ScrollController scrollController;
 
   /// Ordered vertical options.
   final List<UiSegment<T>> segments;
@@ -1073,18 +1043,34 @@ class _UiVerticalPopupSurface<T> extends StatelessWidget {
           borderRadius: radius,
           child: SizeTransition(
             sizeFactor: animation,
-            axis: Axis.vertical,
             alignment: metrics.openUpward
                 ? Alignment.bottomCenter
                 : Alignment.topCenter,
-            child: _UiVerticalOptionList<T>(
-              maxHeight: metrics.maxHeight,
-              rowMinHeight: metrics.rowMinHeight,
-              segments: segments,
-              value: value,
-              highlightedIndex: highlightedIndex,
-              hasKeyboardHighlight: hasKeyboardHighlight,
-              onSelectIndex: onSelectIndex,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxHeight: metrics.maxHeight),
+              child: SingleChildScrollView(
+                controller: scrollController,
+                padding: const EdgeInsets.all(_popupInnerPadding),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: <Widget>[
+                    for (var i = 0; i < segments.length; i++)
+                      _UiVerticalOptionRow(
+                        label: segments[i].label,
+                        icon: segments[i].icon,
+                        isSelected: segments[i].value == value,
+                        isKeyboardHighlighted:
+                            hasKeyboardHighlight && i == highlightedIndex,
+                        enabled: segments[i].enabled,
+                        minHeight: metrics.rowMinHeight,
+                        onTap: segments[i].enabled
+                            ? () => onSelectIndex(i)
+                            : null,
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -1093,89 +1079,7 @@ class _UiVerticalPopupSurface<T> extends StatelessWidget {
   }
 }
 
-/// Interactive option row inside [_UiVerticalOptionList] tracking hover state without stealing trigger focus.
-class _UiVerticalSegmentOption extends StatefulWidget {
-  /// Creates a [_UiVerticalSegmentOption].
-  const _UiVerticalSegmentOption({
-    required this.label,
-    required this.icon,
-    required this.isSelected,
-    required this.isKeyboardHighlighted,
-    required this.enabled,
-    required this.minHeight,
-    required this.onTap,
-  });
-
-  /// Whether this option can be selected.
-  final bool enabled;
-
-  /// Optional leading outline icon glyph.
-  final IconData? icon;
-
-  /// Whether keyboard highlight inset border is shown.
-  final bool isKeyboardHighlighted;
-
-  /// Whether this option is currently active.
-  final bool isSelected;
-
-  /// Visible option label.
-  final String label;
-
-  /// Minimum touch-target row height.
-  final double minHeight;
-
-  /// Selection callback invoked on tap when [enabled] is true.
-  final VoidCallback? onTap;
-
-  @override
-  State<_UiVerticalSegmentOption> createState() =>
-      _UiVerticalSegmentOptionState();
-}
-
-/// Manages pointer hover highlight for [_UiVerticalSegmentOption].
-class _UiVerticalSegmentOptionState extends State<_UiVerticalSegmentOption> {
-  /// Whether the pointer is hovering this option row.
-  bool _isHovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      selected: widget.isSelected,
-      enabled: widget.enabled,
-      label: widget.label,
-      child: MouseRegion(
-        cursor: widget.enabled
-            ? SystemMouseCursors.click
-            : SystemMouseCursors.forbidden,
-        onEnter: (_) => _setHovered(true),
-        onExit: (_) => _setHovered(false),
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: widget.enabled ? widget.onTap : null,
-          child: _UiVerticalOptionRow(
-            label: widget.label,
-            icon: widget.icon,
-            isSelected: widget.isSelected,
-            isHovered: _isHovered,
-            isKeyboardHighlighted: widget.isKeyboardHighlighted,
-            enabled: widget.enabled,
-            minHeight: widget.minHeight,
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Updates hover state when pointer enters or leaves this row.
-  void _setHovered(bool hovered) {
-    if (_isHovered != hovered) {
-      setState(() => _isHovered = hovered);
-    }
-  }
-}
-
-/// Vertical combobox implementation backing [UiSegmentedControlMode.vertical].
+/// Vertical combobox implementation backing [UiSegmentedControlMode.vertical] and `UiFieldKind.select`.
 class _UiVerticalSegmentedControl<T> extends StatefulWidget {
   /// Creates a [_UiVerticalSegmentedControl].
   const _UiVerticalSegmentedControl({
@@ -1184,10 +1088,39 @@ class _UiVerticalSegmentedControl<T> extends StatefulWidget {
     required this.onChanged,
     required this.enabled,
     required this.semanticLabel,
+    required this.focusNode,
+    required this.hintText,
+    required this.leadingIcon,
+    required this.hasError,
+    required this.minHeight,
+    required this.borderRadius,
+    required this.textStyle,
+    required this.applyDisabledOpacity,
   });
+
+  /// Applies `disabledOpacity` internally when disabled.
+  final bool applyDisabledOpacity;
+
+  /// Optional trigger corner radius override.
+  final double? borderRadius;
 
   /// Whether the control accepts pointer and keyboard interaction.
   final bool enabled;
+
+  /// Optional caller-owned focus node (not disposed here).
+  final FocusNode? focusNode;
+
+  /// Renders `danger` border color when true.
+  final bool hasError;
+
+  /// Placeholder label shown in `muted` when no segment matches [value].
+  final String? hintText;
+
+  /// Optional leading icon used when the active segment has no icon.
+  final IconData? leadingIcon;
+
+  /// Optional trigger minimum height override.
+  final double? minHeight;
 
   /// Selection callback invoked when an option is chosen.
   final ValueChanged<T>? onChanged;
@@ -1198,6 +1131,9 @@ class _UiVerticalSegmentedControl<T> extends StatefulWidget {
   /// Ordered segments shown in the vertical popup menu.
   final List<UiSegment<T>> segments;
 
+  /// Optional trigger typography override.
+  final TextStyle? textStyle;
+
   /// Currently selected segment value.
   final T value;
 
@@ -1206,63 +1142,49 @@ class _UiVerticalSegmentedControl<T> extends StatefulWidget {
       _UiVerticalSegmentedControlState<T>();
 }
 
-/// Manages popup animation, direction measurement, `TapRegion` dismissal, and keyboard navigation for [_UiVerticalSegmentedControl].
+/// Manages popup animation, dynamic viewport metrics, `TapRegion` dismissal, and keyboard navigation.
 class _UiVerticalSegmentedControlState<T>
     extends State<_UiVerticalSegmentedControl<T>>
-    with SingleTickerProviderStateMixin {
-  /// Layer link connecting trigger to the anchored overlay follower.
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+  final List<ScrollPosition> _attachedScrollPositions = <ScrollPosition>[];
   final LayerLink _layerLink = LayerLink();
-
-  /// Overlay controller showing and hiding the animated popup menu.
+  final ScrollController _menuScrollController = ScrollController();
   final OverlayPortalController _overlayController = OverlayPortalController();
-
-  /// Shared `TapRegion` group ID keeping trigger and popup clicks paired.
+  final List<FocusNode> _pendingDisposals = <FocusNode>[];
   final Object _tapRegionGroupId = Object();
-
-  /// Global key used to measure trigger position in viewport coordinates.
   final GlobalKey _triggerKey = GlobalKey();
 
-  /// Animation controller driving smooth open/close fade, expansion, and chevron rotation.
   late final AnimationController _animationController;
-
-  /// Rotating chevron animation (`0.0` closed -> `0.5` open).
   late final Animation<double> _chevronTurns;
-
-  /// Curved animation applied to opacity, size expansion, and chevron turn.
   late final CurvedAnimation _curvedAnimation;
 
-  /// Focus node owned by the combobox trigger.
-  late final FocusNode _triggerFocusNode;
-
-  /// Whether keyboard highlight border is currently shown on [_highlightedIndex].
+  FocusNode? _ownedFocusNode;
   bool _hasKeyboardHighlight = false;
-
-  /// Active highlighted option index while the popup menu is open.
   int _highlightedIndex = 0;
-
-  /// Whether [_triggerFocusNode] currently holds focus.
+  bool _isDisposalScheduled = false;
   bool _isFocused = false;
-
-  /// Whether the pointer is hovering the trigger.
   bool _isHovered = false;
-
-  /// Whether the popup menu is logically open (false while reversing/closed).
   bool _isMenuOpen = false;
-
-  /// Last measured popup direction, width, maxHeight, and horizontal offset.
+  bool _metricsRefreshScheduled = false;
   _UiVerticalPopupMetrics _popupMetrics = _UiVerticalPopupMetrics.initial;
-
-  /// Whether keyboard focus ring highlight should paint around the trigger.
   bool _showFocusRing = false;
 
   /// Whether the vertical combobox can open and select options.
   bool get _controlEnabled =>
       widget.enabled && widget.onChanged != null && widget.segments.isNotEmpty;
 
+  /// Active focus node (caller-owned or internal).
+  FocusNode get _focusNode {
+    if (widget.focusNode case final external?) {
+      return external;
+    }
+    return _ownedFocusNode ??= FocusNode();
+  }
+
   @override
   void initState() {
     super.initState();
-    _triggerFocusNode = FocusNode();
+    WidgetsBinding.instance.addObserver(this);
     _animationController = AnimationController(
       vsync: this,
       duration: _menuAnimationDuration,
@@ -1280,62 +1202,109 @@ class _UiVerticalSegmentedControlState<T>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    MediaQuery.maybeSizeOf(context);
+    MediaQuery.maybePaddingOf(context);
+    MediaQuery.maybeViewInsetsOf(context);
+    if (_isMenuOpen || _overlayController.isShowing) {
+      _scheduleMetricsRefresh();
+    }
+  }
+
+  @override
+  void didChangeMetrics() {
+    if (_isMenuOpen || _overlayController.isShowing) {
+      _scheduleMetricsRefresh();
+    }
+  }
+
+  @override
   void didUpdateWidget(covariant _UiVerticalSegmentedControl<T> oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.focusNode != widget.focusNode && widget.focusNode != null) {
+      if (_ownedFocusNode case final previousOwned?) {
+        _ownedFocusNode = null;
+        _enqueueDisposal(previousOwned);
+      }
+    }
     if (!_controlEnabled && _isMenuOpen) {
+      _detachScrollListeners();
       _isMenuOpen = false;
       _hasKeyboardHighlight = false;
       unawaited(_animationController.reverse());
       return;
     }
-    if (_isMenuOpen && _highlightedIndex >= widget.segments.length) {
-      _highlightedIndex = _resolveInitialHighlightIndex();
+    if (_isMenuOpen) {
+      if (_highlightedIndex >= widget.segments.length) {
+        _highlightedIndex = _resolveInitialHighlightIndex();
+      }
+      _scheduleMetricsRefresh();
     }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _detachScrollListeners();
     _animationController.removeStatusListener(_handleAnimationStatusChanged);
     _curvedAnimation.dispose();
     _animationController.dispose();
-    _triggerFocusNode.dispose();
+    _menuScrollController.dispose();
+    _flushPendingDisposals();
+    _ownedFocusNode?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final resolved = _resolveTriggerDisplay();
     return TapRegion(
       groupId: _tapRegionGroupId,
       child: CompositedTransformTarget(
         link: _layerLink,
         child: OverlayPortal(
           controller: _overlayController,
-          overlayChildBuilder: (_) => _UiVerticalPopupOverlay<T>(
-            layerLink: _layerLink,
-            tapRegionGroupId: _tapRegionGroupId,
-            animation: _curvedAnimation,
-            metrics: _popupMetrics,
-            isInteractive: _isMenuOpen,
-            segments: widget.segments,
-            value: widget.value,
-            highlightedIndex: _highlightedIndex,
-            hasKeyboardHighlight: _hasKeyboardHighlight,
-            onSelectIndex: _selectIndex,
-            onDismissOutside: () => _closeMenu(restoreFocus: false),
-          ),
-          child: _UiVerticalTrigger(
-            triggerKey: _triggerKey,
-            visualState: _buildTriggerVisualState(),
-            chevronTurns: _chevronTurns,
-            focusNode: _triggerFocusNode,
-            onKeyEvent: _handleKeyEvent,
-            onFocusChange: _handleFocusChange,
-            onShowFocusHighlight: _handleFocusHighlightChanged,
-            onShowHoverHighlight: _handleHoverChanged,
-            onActivateAction: _handleSemanticActivate,
-            onTap: _controlEnabled
-                ? () => _toggleMenu(viaKeyboard: false)
-                : null,
+          overlayChildBuilder: _buildPopupOverlay,
+          child: NotificationListener<SizeChangedLayoutNotification>(
+            onNotification: _handleTriggerSizeChanged,
+            child: SizeChangedLayoutNotifier(
+              child: _UiVerticalTrigger(
+                semanticLabel: widget.semanticLabel,
+                valueLabel: resolved.label,
+                enabled: _controlEnabled,
+                focusNode: _focusNode,
+                onKeyEvent: _handleKeyEvent,
+                onFocusChange: _handleFocusChange,
+                onShowFocusHighlight: _handleFocusHighlightChanged,
+                onShowHoverHighlight: _handleHoverChanged,
+                onActivateAction: _handleSemanticActivate,
+                onTap: _controlEnabled
+                    ? () => _toggleMenu(viaKeyboard: false)
+                    : null,
+                child: _UiVerticalTriggerBox(
+                  triggerKey: _triggerKey,
+                  enabled: _controlEnabled,
+                  applyDisabledOpacity: widget.applyDisabledOpacity,
+                  hasError: widget.hasError,
+                  isHighlighted:
+                      _controlEnabled &&
+                      (_isHovered || _isFocused || _isMenuOpen),
+                  showFocusRing: _showFocusRing && _controlEnabled,
+                  minHeight: widget.minHeight,
+                  borderRadius: widget.borderRadius,
+                  child: _UiVerticalTriggerContent(
+                    label: resolved.label,
+                    hasSelectedValue: resolved.hasSelection,
+                    icon: resolved.icon,
+                    iconUsesMutedTint: resolved.iconUsesMutedTint,
+                    isMenuOpen: _isMenuOpen,
+                    textStyle: widget.textStyle,
+                    chevronTurns: _chevronTurns,
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -1354,18 +1323,42 @@ class _UiVerticalSegmentedControlState<T>
     _selectIndex(_highlightedIndex);
   }
 
-  /// Resolves immutable visual state for [_UiVerticalTrigger].
-  _UiVerticalTriggerVisualState _buildTriggerVisualState() {
-    final selectedSegment = _resolveSelectedSegment();
-    return _UiVerticalTriggerVisualState(
-      label: selectedSegment?.label ?? '',
-      icon: selectedSegment?.icon,
-      semanticLabel: widget.semanticLabel,
-      enabled: _controlEnabled,
-      isHighlighted:
-          _controlEnabled && (_isHovered || _isFocused || _isMenuOpen),
-      isMenuOpen: _isMenuOpen,
-      showFocusRing: _showFocusRing && _controlEnabled,
+  /// Subscribes to all ancestor [ScrollPosition]s so scrolling refreshes popup geometry.
+  void _attachScrollListeners() {
+    _detachScrollListeners();
+    context.visitAncestorElements((element) {
+      if (element.widget is Scrollable && element is StatefulElement) {
+        final state = element.state;
+        if (state is ScrollableState) {
+          final position = state.position;
+          if (!_attachedScrollPositions.contains(position)) {
+            position.addListener(_scheduleMetricsRefresh);
+            _attachedScrollPositions.add(position);
+          }
+        }
+      }
+      return true;
+    });
+  }
+
+  /// Builds the anchored vertical popup menu inside [OverlayPortal].
+  Widget _buildPopupOverlay(BuildContext context) {
+    return _UiVerticalPopupOverlay(
+      layerLink: _layerLink,
+      tapRegionGroupId: _tapRegionGroupId,
+      metrics: _popupMetrics,
+      isInteractive: _isMenuOpen,
+      onDismissOutside: () => _closeMenu(restoreFocus: false),
+      child: _UiVerticalPopupSurface<T>(
+        animation: _curvedAnimation,
+        scrollController: _menuScrollController,
+        metrics: _popupMetrics,
+        segments: widget.segments,
+        value: widget.value,
+        highlightedIndex: _highlightedIndex,
+        hasKeyboardHighlight: _hasKeyboardHighlight,
+        onSelectIndex: _selectIndex,
+      ),
     );
   }
 
@@ -1374,12 +1367,13 @@ class _UiVerticalSegmentedControlState<T>
     if (!_isMenuOpen) {
       return;
     }
+    _detachScrollListeners();
     setState(() {
       _isMenuOpen = false;
       _hasKeyboardHighlight = false;
     });
     if (restoreFocus && mounted) {
-      _triggerFocusNode.requestFocus();
+      _focusNode.requestFocus();
     }
     unawaited(_animationController.reverse());
   }
@@ -1390,8 +1384,7 @@ class _UiVerticalSegmentedControlState<T>
     final mediaSize = MediaQuery.sizeOf(context);
     final mediaPadding = MediaQuery.paddingOf(context);
     final viewInsets = MediaQuery.viewInsetsOf(context);
-    final isCompact = UiBreakpoints.isCompact(mediaSize.width);
-    final rowMinHeight = isCompact
+    final rowMinHeight = UiBreakpoints.isCompact(mediaSize.width)
         ? tokens.spacing.touchTargetMobile
         : tokens.spacing.chromeControlHeight;
 
@@ -1448,6 +1441,39 @@ class _UiVerticalSegmentedControlState<T>
     );
   }
 
+  /// Removes all ancestor scroll listeners attached while the popup was open.
+  void _detachScrollListeners() {
+    for (final position in _attachedScrollPositions) {
+      position.removeListener(_scheduleMetricsRefresh);
+    }
+    _attachedScrollPositions.clear();
+  }
+
+  /// Queues a replaced internal [node] for post-frame disposal after children detach.
+  void _enqueueDisposal(FocusNode node) {
+    _pendingDisposals.add(node);
+    if (_isDisposalScheduled) {
+      return;
+    }
+    _isDisposalScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _flushPendingDisposals();
+    });
+  }
+
+  /// Disposes all queued internal focus nodes after the frame or during unmount.
+  void _flushPendingDisposals() {
+    _isDisposalScheduled = false;
+    if (_pendingDisposals.isEmpty) {
+      return;
+    }
+    final nodes = List<FocusNode>.of(_pendingDisposals);
+    _pendingDisposals.clear();
+    for (final node in nodes) {
+      node.dispose();
+    }
+  }
+
   /// Opens the popup or commits the keyboard-highlighted option on `Enter`/`Space`.
   void _handleActivationKey() {
     if (_isMenuOpen) {
@@ -1502,12 +1528,10 @@ class _UiVerticalSegmentedControlState<T>
     }
   }
 
-  /// Handles `Enter`, `Space`, `ArrowDown`, `ArrowUp`, and `Escape` on the trigger focus scope.
+  /// Handles `Enter`, `Space`, `ArrowDown`, `ArrowUp`, `Home`, `End`, and `Escape`.
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (!_controlEnabled) {
-      return KeyEventResult.ignored;
-    }
-    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+    if (!_controlEnabled ||
+        (event is! KeyDownEvent && event is! KeyRepeatEvent)) {
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
@@ -1524,6 +1548,14 @@ class _UiVerticalSegmentedControlState<T>
     }
     if (key == LogicalKeyboardKey.arrowUp) {
       _handleArrowKey(-1);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.home && _isMenuOpen) {
+      _jumpHighlight(toEnd: false);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.end && _isMenuOpen) {
+      _jumpHighlight(toEnd: true);
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.enter ||
@@ -1544,6 +1576,30 @@ class _UiVerticalSegmentedControlState<T>
       return;
     }
     _toggleMenu(viaKeyboard: true);
+  }
+
+  /// Refreshes popup geometry when the trigger changes size while the popup is visible.
+  bool _handleTriggerSizeChanged(SizeChangedLayoutNotification notification) {
+    if (_isMenuOpen || _overlayController.isShowing) {
+      _scheduleMetricsRefresh();
+    }
+    return false;
+  }
+
+  /// Moves keyboard highlight to the first or last enabled option and scrolls it into view.
+  void _jumpHighlight({required bool toEnd}) {
+    final nextIndex = _findBoundaryEnabledSegmentIndex(
+      widget.segments,
+      fromEnd: toEnd,
+    );
+    if (nextIndex == null) {
+      return;
+    }
+    setState(() {
+      _highlightedIndex = nextIndex;
+      _hasKeyboardHighlight = true;
+    });
+    _scrollIndexIntoView(nextIndex, center: false);
   }
 
   /// Measures the maximum intrinsic option width so labels render cleanly without clipping.
@@ -1581,14 +1637,15 @@ class _UiVerticalSegmentedControlState<T>
     return math.min(widestOption, viewportMax);
   }
 
-  /// Measures direction, reveals the overlay portal, and runs the open animation.
+  /// Measures direction, attaches scroll listeners, reveals the overlay portal, and runs open animation.
   void _openMenu({required bool viaKeyboard}) {
     if (!_controlEnabled) {
       return;
     }
     final metrics = _computePopupMetrics();
     final initialHighlight = _resolveInitialHighlightIndex();
-    _triggerFocusNode.requestFocus();
+    _attachScrollListeners();
+    _focusNode.requestFocus();
     setState(() {
       _popupMetrics = metrics;
       _highlightedIndex = initialHighlight;
@@ -1599,6 +1656,11 @@ class _UiVerticalSegmentedControlState<T>
       _overlayController.show();
     }
     unawaited(_animationController.forward());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _isMenuOpen) {
+        _scrollIndexIntoView(initialHighlight, center: true);
+      }
+    });
   }
 
   /// Resolves the initial highlighted index to the selected enabled segment or first enabled segment.
@@ -1621,17 +1683,91 @@ class _UiVerticalSegmentedControlState<T>
     return firstEnabled;
   }
 
-  /// Resolves the currently selected [UiSegment], falling back to the first segment when present.
-  UiSegment<T>? _resolveSelectedSegment() {
+  /// Resolves the trigger label, icon, and selection presence honoring optional [widget.hintText].
+  ({String label, bool hasSelection, IconData? icon, bool iconUsesMutedTint})
+  _resolveTriggerDisplay() {
     for (final segment in widget.segments) {
       if (segment.value == widget.value) {
-        return segment;
+        return (
+          label: segment.label,
+          hasSelection: true,
+          icon: segment.icon ?? widget.leadingIcon,
+          iconUsesMutedTint: segment.icon == null && widget.leadingIcon != null,
+        );
       }
     }
-    return widget.segments.isNotEmpty ? widget.segments.first : null;
+    if (widget.hintText case final hint?) {
+      return (
+        label: hint,
+        hasSelection: false,
+        icon: widget.leadingIcon,
+        iconUsesMutedTint: true,
+      );
+    }
+    if (widget.segments.isNotEmpty) {
+      final fallback = widget.segments.first;
+      return (
+        label: fallback.label,
+        hasSelection: true,
+        icon: fallback.icon ?? widget.leadingIcon,
+        iconUsesMutedTint: fallback.icon == null && widget.leadingIcon != null,
+      );
+    }
+    return (
+      label: '',
+      hasSelection: false,
+      icon: widget.leadingIcon,
+      iconUsesMutedTint: true,
+    );
   }
 
-  /// Invokes `onChanged` for enabled segment at [index] when value changes and closes the popup restoring trigger focus.
+  /// Queues a single post-frame geometry refresh while the popup is visible.
+  void _scheduleMetricsRefresh() {
+    if (_metricsRefreshScheduled || !mounted) {
+      return;
+    }
+    _metricsRefreshScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _metricsRefreshScheduled = false;
+      if (!mounted || (!_isMenuOpen && !_overlayController.isShowing)) {
+        return;
+      }
+      final nextMetrics = _computePopupMetrics();
+      if (nextMetrics != _popupMetrics) {
+        setState(() => _popupMetrics = nextMetrics);
+      }
+    });
+  }
+
+  /// Scrolls [_menuScrollController] so option at [index] is visible inside the popup viewport.
+  void _scrollIndexIntoView(int index, {required bool center}) {
+    if (!_menuScrollController.hasClients) {
+      return;
+    }
+    final position = _menuScrollController.position;
+    if (position.maxScrollExtent <= 0.0) {
+      return;
+    }
+    final rowHeight = _popupMetrics.rowMinHeight;
+    final rowTop = index * rowHeight;
+    final rowBottom = rowTop + rowHeight;
+    final viewportExtent = position.viewportDimension;
+    final double targetOffset;
+    if (center) {
+      targetOffset = rowTop - (viewportExtent - rowHeight) / 2.0;
+    } else if (rowTop < position.pixels) {
+      targetOffset = rowTop;
+    } else if (rowBottom > position.pixels + viewportExtent) {
+      targetOffset = rowBottom - viewportExtent;
+    } else {
+      return;
+    }
+    _menuScrollController.jumpTo(
+      targetOffset.clamp(0.0, position.maxScrollExtent),
+    );
+  }
+
+  /// Invokes `onChanged` for enabled segment at [index] when value changes and closes restoring focus.
   void _selectIndex(int index) {
     if (index < 0 || index >= widget.segments.length) {
       return;
@@ -1660,6 +1796,7 @@ class _UiVerticalSegmentedControlState<T>
       _highlightedIndex = nextIndex;
       _hasKeyboardHighlight = true;
     });
+    _scrollIndexIntoView(nextIndex, center: false);
   }
 
   /// Toggles the vertical popup menu open or closed.
@@ -1676,9 +1813,9 @@ class _UiVerticalSegmentedControlState<T>
 class _UiVerticalTrigger extends StatelessWidget {
   /// Creates a [_UiVerticalTrigger].
   const _UiVerticalTrigger({
-    required this.triggerKey,
-    required this.visualState,
-    required this.chevronTurns,
+    required this.semanticLabel,
+    required this.valueLabel,
+    required this.enabled,
     required this.focusNode,
     required this.onKeyEvent,
     required this.onFocusChange,
@@ -1686,12 +1823,16 @@ class _UiVerticalTrigger extends StatelessWidget {
     required this.onShowHoverHighlight,
     required this.onActivateAction,
     required this.onTap,
+    required this.child,
   });
 
-  /// Animation driving the `180°` chevron rotation while the popup opens/closes.
-  final Animation<double> chevronTurns;
+  /// Visual trigger box wrapped by focus and gesture detectors.
+  final Widget child;
 
-  /// Trigger focus node owned by [_UiVerticalSegmentedControlState].
+  /// Whether the trigger is enabled.
+  final bool enabled;
+
+  /// Trigger focus node.
   final FocusNode focusNode;
 
   /// Semantic activation handler for accessibility actions.
@@ -1700,7 +1841,7 @@ class _UiVerticalTrigger extends StatelessWidget {
   /// Callback notified when focus changes.
   final ValueChanged<bool> onFocusChange;
 
-  /// Keyboard handler intercepting `Enter`, `Space`, arrows, and `Escape`.
+  /// Keyboard handler intercepting `Enter`, `Space`, arrows, `Home`, `End`, and `Escape`.
   final FocusOnKeyEventCallback onKeyEvent;
 
   /// Callback notified when focus ring highlight changes.
@@ -1712,27 +1853,27 @@ class _UiVerticalTrigger extends StatelessWidget {
   /// Tap callback toggling the vertical popup.
   final VoidCallback? onTap;
 
-  /// Key used by parent state to measure trigger screen coordinates.
-  final GlobalKey triggerKey;
+  /// Optional accessible group label.
+  final String? semanticLabel;
 
-  /// Visual appearance parameters for the trigger box.
-  final _UiVerticalTriggerVisualState visualState;
+  /// Current selected or hint label announced as semantic value.
+  final String valueLabel;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      enabled: visualState.enabled,
-      label: visualState.semanticLabel,
-      value: visualState.label,
+      enabled: enabled,
+      label: semanticLabel,
+      value: valueLabel,
       child: Focus(
         canRequestFocus: false,
         skipTraversal: true,
         onKeyEvent: onKeyEvent,
         child: FocusableActionDetector(
           focusNode: focusNode,
-          enabled: visualState.enabled,
-          mouseCursor: visualState.enabled
+          enabled: enabled,
+          mouseCursor: enabled
               ? SystemMouseCursors.click
               : SystemMouseCursors.forbidden,
           onFocusChange: onFocusChange,
@@ -1742,11 +1883,7 @@ class _UiVerticalTrigger extends StatelessWidget {
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onTap: onTap,
-            child: _UiVerticalTriggerBox(
-              triggerKey: triggerKey,
-              visualState: visualState,
-              chevronTurns: chevronTurns,
-            ),
+            child: child,
           ),
         ),
       ),
@@ -1777,84 +1914,126 @@ class _UiVerticalTriggerBox extends StatelessWidget {
   /// Creates a [_UiVerticalTriggerBox].
   const _UiVerticalTriggerBox({
     required this.triggerKey,
-    required this.visualState,
-    required this.chevronTurns,
+    required this.enabled,
+    required this.applyDisabledOpacity,
+    required this.hasError,
+    required this.isHighlighted,
+    required this.showFocusRing,
+    required this.minHeight,
+    required this.borderRadius,
+    required this.child,
   });
 
-  /// Animation rotating the trailing chevron (`0.0 -> 0.5`).
-  final Animation<double> chevronTurns;
+  /// Applies `disabledOpacity` internally when disabled.
+  final bool applyDisabledOpacity;
+
+  /// Optional corner radius overriding `tokens.radii.md`.
+  final double? borderRadius;
+
+  /// Interior trigger label and chevron row.
+  final Widget child;
+
+  /// Whether the trigger is enabled.
+  final bool enabled;
+
+  /// Renders `danger` border color when true.
+  final bool hasError;
+
+  /// Whether border uses `accent` (hover, focus, or open menu).
+  final bool isHighlighted;
+
+  /// Optional minimum height overriding `tokens.spacing.touchTarget`.
+  final double? minHeight;
+
+  /// Whether the outer keyboard focus ring is visible.
+  final bool showFocusRing;
 
   /// Key used by parent state to measure trigger screen coordinates.
   final GlobalKey triggerKey;
-
-  /// Visual appearance parameters for the trigger box.
-  final _UiVerticalTriggerVisualState visualState;
 
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
-    final surfaceLevel = UiSurfaceScope.of(context);
-    final fillColor = surfaceLevel == UiSurfaceLevel.insetWell
+    final fillColor = UiSurfaceScope.of(context) == UiSurfaceLevel.insetWell
         ? colors.panel
         : colors.bg;
+    final resolvedRadius = borderRadius ?? tokens.radii.md;
+    final borderColor = hasError
+        ? colors.danger
+        : (isHighlighted ? colors.accent : colors.line);
 
     return Opacity(
-      opacity: visualState.enabled ? 1.0 : tokens.focus.disabledOpacity,
+      opacity: (!applyDisabledOpacity || enabled)
+          ? 1.0
+          : tokens.focus.disabledOpacity,
       child: _UiSegmentFocusRing(
-        visible: visualState.showFocusRing,
-        radius: tokens.radii.md,
+        visible: showFocusRing,
+        radius: resolvedRadius,
         child: AnimatedContainer(
           key: triggerKey,
           duration: tokens.focus.hoverDuration,
-          constraints: BoxConstraints(minHeight: tokens.spacing.touchTarget),
+          constraints: BoxConstraints(
+            minHeight: minHeight ?? tokens.spacing.touchTarget,
+          ),
           padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 8.0),
           decoration: BoxDecoration(
             color: fillColor,
-            borderRadius: BorderRadius.circular(tokens.radii.md),
+            borderRadius: BorderRadius.circular(resolvedRadius),
             border: Border.all(
-              color: visualState.isHighlighted ? colors.accent : colors.line,
+              color: borderColor,
               width: tokens.radii.borderWidth,
             ),
           ),
-          child: _UiVerticalTriggerContent(
-            label: visualState.label,
-            icon: visualState.icon,
-            isMenuOpen: visualState.isMenuOpen,
-            chevronTurns: chevronTurns,
-          ),
+          child: child,
         ),
       ),
     );
   }
 }
 
-/// Adapts vertical trigger interior layout cleanly between unbounded desktop rows and tight full-width containers.
+/// Adapts vertical trigger interior layout between unbounded desktop rows and tight full-width containers.
 class _UiVerticalTriggerContent extends StatelessWidget {
   /// Creates a [_UiVerticalTriggerContent].
   const _UiVerticalTriggerContent({
     required this.label,
+    required this.hasSelectedValue,
     required this.icon,
+    required this.iconUsesMutedTint,
     required this.isMenuOpen,
+    required this.textStyle,
     required this.chevronTurns,
   });
 
   /// Animation rotating the trailing chevron (`0.0 -> 0.5`).
   final Animation<double> chevronTurns;
 
-  /// Optional leading segment icon.
+  /// Distinguishes active selection (`ink`) from placeholder hint (`muted`).
+  final bool hasSelectedValue;
+
+  /// Optional leading icon glyph.
   final IconData? icon;
+
+  /// Tints [icon] in `muted` when displaying a field-level icon.
+  final bool iconUsesMutedTint;
 
   /// Whether the popup menu is currently open.
   final bool isMenuOpen;
 
-  /// Currently selected segment label.
+  /// Currently selected label or placeholder hint text.
   final String label;
+
+  /// Optional explicit trigger typography override.
+  final TextStyle? textStyle;
 
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
     final colors = tokens.colors;
+    final resolvedStyle =
+        (textStyle ??
+                tokens.typography.meta.copyWith(fontWeight: FontWeight.w500))
+            .copyWith(color: hasSelectedValue ? colors.ink : colors.muted);
     final chevron = ExcludeSemantics(
       child: RotationTransition(
         turns: chevronTurns,
@@ -1869,12 +2048,31 @@ class _UiVerticalTriggerContent extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final hasBoundedWidth = constraints.hasBoundedWidth;
+        final labelText = Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: resolvedStyle,
+        );
         final leading = Padding(
           padding: const EdgeInsets.only(right: 6.0),
-          child: _UiVerticalTriggerLabel(
-            label: label,
-            icon: icon,
-            hasBoundedWidth: hasBoundedWidth,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              if (icon case final glyph?) ...<Widget>[
+                ExcludeSemantics(
+                  child: Icon(
+                    glyph,
+                    size: iconUsesMutedTint
+                        ? tokens.spacing.iconSm
+                        : tokens.spacing.iconXs,
+                    color: iconUsesMutedTint ? colors.muted : colors.ink,
+                  ),
+                ),
+                const SizedBox(width: 6.0),
+              ],
+              if (hasBoundedWidth) Flexible(child: labelText) else labelText,
+            ],
           ),
         );
         return Row(
@@ -1892,87 +2090,28 @@ class _UiVerticalTriggerContent extends StatelessWidget {
   }
 }
 
-/// Leading optional icon and single-line selected label inside [_UiVerticalTriggerContent].
-class _UiVerticalTriggerLabel extends StatelessWidget {
-  /// Creates a [_UiVerticalTriggerLabel].
-  const _UiVerticalTriggerLabel({
-    required this.label,
-    required this.icon,
-    required this.hasBoundedWidth,
-  });
-
-  /// Whether parent constraints bound horizontal width so [Flexible] can ellipsize safely.
-  final bool hasBoundedWidth;
-
-  /// Optional leading outline icon glyph.
-  final IconData? icon;
-
-  /// Selected segment label.
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
-    final text = Text(
-      label,
-      maxLines: 1,
-      overflow: TextOverflow.ellipsis,
-      style: tokens.typography.meta.copyWith(
-        color: colors.ink,
-        fontWeight: FontWeight.w500,
-      ),
-    );
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        if (icon case final glyph?) ...<Widget>[
-          ExcludeSemantics(
-            child: Icon(glyph, size: tokens.spacing.iconXs, color: colors.ink),
-          ),
-          const SizedBox(width: 6.0),
-        ],
-        if (hasBoundedWidth) Flexible(child: text) else text,
-      ],
-    );
+/// Finds the first or last enabled segment index in [segments] for `Home` and `End` navigation.
+int? _findBoundaryEnabledSegmentIndex<T>(
+  List<UiSegment<T>> segments, {
+  required bool fromEnd,
+}) {
+  if (segments.isEmpty) {
+    return null;
   }
-}
-
-/// Immutable visual properties bundled for [_UiVerticalTrigger] and [_UiVerticalTriggerBox].
-@immutable
-class _UiVerticalTriggerVisualState {
-  /// Creates a [_UiVerticalTriggerVisualState].
-  const _UiVerticalTriggerVisualState({
-    required this.label,
-    required this.icon,
-    required this.semanticLabel,
-    required this.enabled,
-    required this.isHighlighted,
-    required this.isMenuOpen,
-    required this.showFocusRing,
-  });
-
-  /// Whether the trigger is enabled.
-  final bool enabled;
-
-  /// Optional leading icon of the currently selected segment.
-  final IconData? icon;
-
-  /// Whether border uses `accent` (hover, focus, or open menu).
-  final bool isHighlighted;
-
-  /// Whether the vertical popup menu is open.
-  final bool isMenuOpen;
-
-  /// Label of the currently selected segment.
-  final String label;
-
-  /// Optional accessible group label.
-  final String? semanticLabel;
-
-  /// Whether the `1px` outer keyboard focus ring is visible.
-  final bool showFocusRing;
+  if (fromEnd) {
+    for (var i = segments.length - 1; i >= 0; i--) {
+      if (segments[i].enabled) {
+        return i;
+      }
+    }
+    return null;
+  }
+  for (var i = 0; i < segments.length; i++) {
+    if (segments[i].enabled) {
+      return i;
+    }
+  }
+  return null;
 }
 
 /// Finds the next enabled segment index stepping cyclically by [delta] (`+1` or `-1`) from [currentIndex].

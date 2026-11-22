@@ -45,7 +45,6 @@ void main() {
               onPressed: () {},
             ),
           ),
-          surfaceSize: const Size(1280, 800),
         );
 
         expect(find.text('Focus'), findsOneWidget);
@@ -76,7 +75,6 @@ void main() {
             title: 'Focus',
             activeFilterLabel: 'Work',
             onClearActiveFilter: () {},
-            showInlineFilterOnCompact: false,
           ),
           surfaceSize: const Size(390, 800),
         );

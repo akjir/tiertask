@@ -3,6 +3,12 @@
 #include <flutter_linux/flutter_linux.h>
 #include <gio/gio.h>
 
+#include <cstring>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "flutter/generated_plugin_registrant.h"
 #include "generated_version.h"
 
@@ -14,37 +20,110 @@ struct _MyApplication {
   FlMethodChannel* link_launcher_channel;
   FlMethodChannel* location_channel;
   FlMethodChannel* window_controls_channel;
+  GtkFileChooserNative* active_file_dialog;
+  FlMethodCall* active_file_dialog_call;
+  gulong active_file_dialog_response_handler;
+  GCancellable* location_cancellable;
+  guint64 engine_generation;
+  gboolean engine_active;
   GtkGesture* window_press_gesture;
+  GtkGesture* window_drag_gesture;
+  GtkEventController* window_motion_controller;
+  GdkCursor* active_resize_cursor;
+  GdkWindowEdge active_resize_edge;
+  gboolean has_resize_cursor;
   GtkWindow* main_window;
+  GdkDevice* last_button_press_device;
   gint last_button_press_x_root;
   gint last_button_press_y_root;
   guint32 last_button_press_time;
   gboolean has_last_button_press;
+  gboolean primary_button_pressed;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
-// Handles the asynchronous response from the native GTK folder chooser dialog.
+// Releases all registered Flutter method channel instances.
+static void clear_method_channels(MyApplication* self) {
+  g_clear_object(&self->app_version_channel);
+  g_clear_object(&self->directory_picker_channel);
+  g_clear_object(&self->link_launcher_channel);
+  g_clear_object(&self->location_channel);
+  g_clear_object(&self->window_controls_channel);
+}
+
+// Cancels and clears the cancellable shared by in-flight location queries.
+static void cancel_pending_location_queries(MyApplication* self) {
+  if (self->location_cancellable != nullptr) {
+    g_cancellable_cancel(self->location_cancellable);
+    g_clear_object(&self->location_cancellable);
+  }
+}
+
+// Disconnects signals, destroys an open native chooser, and releases its call.
+static void cleanup_active_file_dialog(MyApplication* self) {
+  if (self->active_file_dialog != nullptr) {
+    GtkNativeDialog* dialog = GTK_NATIVE_DIALOG(self->active_file_dialog);
+    self->active_file_dialog = nullptr;
+    if (self->active_file_dialog_response_handler != 0) {
+      g_signal_handler_disconnect(dialog,
+                                  self->active_file_dialog_response_handler);
+      self->active_file_dialog_response_handler = 0;
+    }
+    gtk_native_dialog_destroy(dialog);
+    g_object_unref(dialog);
+  }
+  g_clear_object(&self->active_file_dialog_call);
+}
+
+// Releases window-attached input controllers, cursor cache, and pointer state.
+static void clear_window_input_controllers(MyApplication* self) {
+  g_clear_object(&self->window_press_gesture);
+  g_clear_object(&self->window_drag_gesture);
+  g_clear_object(&self->window_motion_controller);
+  g_clear_object(&self->active_resize_cursor);
+  g_clear_object(&self->last_button_press_device);
+  self->has_resize_cursor = FALSE;
+  self->has_last_button_press = FALSE;
+  self->primary_button_pressed = FALSE;
+}
+
+// Handles the asynchronous response from the native GTK file/folder chooser.
 static void on_directory_dialog_response(GtkNativeDialog* dialog,
                                          gint response_id,
                                          gpointer user_data) {
-  g_autoptr(FlMethodCall) method_call = FL_METHOD_CALL(user_data);
-  g_autoptr(FlMethodResponse) response = nullptr;
+  MyApplication* self = MY_APPLICATION(user_data);
+  if (self->active_file_dialog != GTK_FILE_CHOOSER_NATIVE(dialog)) {
+    return;
+  }
 
-  if (response_id == GTK_RESPONSE_ACCEPT) {
-    g_autofree gchar* folder_path =
-        gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
-    if (folder_path != nullptr) {
-      g_autoptr(FlValue) result = fl_value_new_string(folder_path);
-      response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  g_autoptr(FlMethodCall) method_call = self->active_file_dialog_call;
+  self->active_file_dialog_call = nullptr;
+
+  if (self->active_file_dialog_response_handler != 0) {
+    g_signal_handler_disconnect(dialog,
+                                self->active_file_dialog_response_handler);
+    self->active_file_dialog_response_handler = 0;
+  }
+  self->active_file_dialog = nullptr;
+
+  if (method_call != nullptr && self->engine_active) {
+    g_autoptr(FlMethodResponse) response = nullptr;
+    if (response_id == GTK_RESPONSE_ACCEPT) {
+      g_autofree gchar* selected_path =
+          gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+      if (selected_path != nullptr) {
+        g_autoptr(FlValue) result = fl_value_new_string(selected_path);
+        response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+      } else {
+        response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+      }
     } else {
       response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
     }
-  } else {
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(nullptr));
+    fl_method_call_respond(method_call, response, nullptr);
   }
 
-  fl_method_call_respond(method_call, response, nullptr);
   gtk_native_dialog_destroy(dialog);
   g_object_unref(dialog);
 }
@@ -53,6 +132,7 @@ static void on_directory_dialog_response(GtkNativeDialog* dialog,
 static void on_directory_picker_method_call(FlMethodChannel* channel,
                                             FlMethodCall* method_call,
                                             gpointer user_data) {
+  (void)channel;
   MyApplication* self = MY_APPLICATION(user_data);
   const gchar* method = fl_method_call_get_name(method_call);
   const gboolean is_pick_directory = g_strcmp0(method, "pickDirectory") == 0;
@@ -61,6 +141,22 @@ static void on_directory_picker_method_call(FlMethodChannel* channel,
   if (!is_pick_directory && !is_pick_file) {
     g_autoptr(FlMethodResponse) response =
         FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  if (self->active_file_dialog != nullptr) {
+    g_autoptr(FlMethodResponse) response = FL_METHOD_RESPONSE(
+        fl_method_error_response_new(
+            "BUSY", "A file or directory dialog is already open.", nullptr));
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  if (self->main_window == nullptr || !self->engine_active) {
+    g_autoptr(FlMethodResponse) response = FL_METHOD_RESPONSE(
+        fl_method_error_response_new(
+            "NO_WINDOW", "Main window is unavailable.", nullptr));
     fl_method_call_respond(method_call, response, nullptr);
     return;
   }
@@ -108,27 +204,79 @@ static void on_directory_picker_method_call(FlMethodChannel* channel,
     }
   }
 
-  g_signal_connect(dialog, "response", G_CALLBACK(on_directory_dialog_response),
-                   g_object_ref(method_call));
+  self->active_file_dialog = dialog;
+  self->active_file_dialog_call = FL_METHOD_CALL(g_object_ref(method_call));
+  self->active_file_dialog_response_handler = g_signal_connect(
+      dialog, "response", G_CALLBACK(on_directory_dialog_response), self);
   gtk_native_dialog_show(GTK_NATIVE_DIALOG(dialog));
 }
 
-static FlValue* build_unavailable_location_map() {
-  FlValue* map = fl_value_new_map();
-  fl_value_set_string_take(map, "status", fl_value_new_string("unavailable"));
-  return map;
+struct WifiAccessPoint {
+  std::string mac_address;
+  gint64 signal_strength;
+};
+
+struct LocationQueryResult {
+  gboolean found = FALSE;
+  gdouble latitude = 0.0;
+  gdouble longitude = 0.0;
+  std::vector<WifiAccessPoint> wifi_aps;
+};
+
+struct LocationTaskContext {
+  GWeakRef app_ref;
+  FlMethodCall* method_call = nullptr;
+  guint64 engine_generation = 0;
+};
+
+static void destroy_location_query_result(gpointer data) {
+  delete static_cast<LocationQueryResult*>(data);
 }
 
+static void destroy_location_task_context(gpointer data) {
+  auto* context = static_cast<LocationTaskContext*>(data);
+  if (context == nullptr) {
+    return;
+  }
+  g_weak_ref_clear(&context->app_ref);
+  g_clear_object(&context->method_call);
+  delete context;
+}
+
+// Sleeps up to timeout_ms on the worker thread, waking early on cancellation.
+static gboolean sleep_cancellable_ms(GCancellable* cancellable,
+                                     gint timeout_ms) {
+  if (cancellable == nullptr) {
+    g_usleep(static_cast<gulong>(timeout_ms) * 1000UL);
+    return TRUE;
+  }
+  if (g_cancellable_is_cancelled(cancellable)) {
+    return FALSE;
+  }
+  GPollFD poll_fd;
+  if (g_cancellable_make_pollfd(cancellable, &poll_fd)) {
+    g_poll(&poll_fd, 1, timeout_ms);
+    g_cancellable_release_fd(cancellable);
+    return !g_cancellable_is_cancelled(cancellable);
+  }
+  g_usleep(static_cast<gulong>(timeout_ms) * 1000UL);
+  return !g_cancellable_is_cancelled(cancellable);
+}
+
+// Reads a double property from a GeoClue2 Location D-Bus object.
 static gboolean read_geoclue_double_property(GDBusConnection* bus,
                                              const gchar* object_path,
                                              const gchar* property_name,
+                                             GCancellable* cancellable,
                                              gdouble* out_value) {
+  GError* error = nullptr;
   g_autoptr(GVariant) reply = g_dbus_connection_call_sync(
       bus, "org.freedesktop.GeoClue2", object_path,
       "org.freedesktop.DBus.Properties", "Get",
       g_variant_new("(ss)", "org.freedesktop.GeoClue2.Location", property_name),
-      G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+      G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 1500, cancellable, &error);
   if (reply == nullptr) {
+    g_clear_error(&error);
     return FALSE;
   }
   g_autoptr(GVariant) boxed = nullptr;
@@ -141,147 +289,174 @@ static gboolean read_geoclue_double_property(GDBusConnection* bus,
   return TRUE;
 }
 
-static FlValue* query_network_manager_wifi_aps(GDBusConnection* bus) {
-  FlValue* ap_list = fl_value_new_list();
+// Sets a property on a GeoClue2 Client D-Bus object (takes floating value ref).
+static gboolean set_geoclue_client_property(GDBusConnection* bus,
+                                            const gchar* client_path,
+                                            const gchar* property_name,
+                                            GVariant* value,
+                                            GCancellable* cancellable) {
+  GError* error = nullptr;
+  g_autoptr(GVariant) reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", client_path,
+      "org.freedesktop.DBus.Properties", "Set",
+      g_variant_new("(ssv)", "org.freedesktop.GeoClue2.Client", property_name,
+                    value),
+      nullptr, G_DBUS_CALL_FLAGS_NONE, 1500, cancellable, &error);
+  if (reply == nullptr) {
+    g_clear_error(&error);
+    return FALSE;
+  }
+  return TRUE;
+}
+
+// Deletes a GeoClue2 client on the Manager so system bus objects do not leak.
+static void delete_geoclue_client(GDBusConnection* bus,
+                                  const gchar* client_path) {
+  GError* error = nullptr;
+  g_autoptr(GVariant) delete_reply = g_dbus_connection_call_sync(
+      bus, "org.freedesktop.GeoClue2", "/org/freedesktop/GeoClue2/Manager",
+      "org.freedesktop.GeoClue2.Manager", "DeleteClient",
+      g_variant_new("(o)", client_path), nullptr, G_DBUS_CALL_FLAGS_NONE, 1000,
+      nullptr, &error);
+  if (delete_reply == nullptr) {
+    g_clear_error(&error);
+  }
+}
+
+// Queries visible Wi-Fi AP BSSIDs and signal strengths via NetworkManager.
+static void query_network_manager_wifi_aps(
+    GDBusConnection* bus,
+    GCancellable* cancellable,
+    std::vector<WifiAccessPoint>* out_aps) {
+  constexpr gsize kMaxWifiAccessPoints = 20;
+  constexpr guint32 kNmDeviceTypeWifi = 2;
+
+  GError* error = nullptr;
   g_autoptr(GVariant) dev_reply = g_dbus_connection_call_sync(
       bus, "org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager",
       "org.freedesktop.NetworkManager", "GetDevices", nullptr,
-      G_VARIANT_TYPE("(ao)"), G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+      G_VARIANT_TYPE("(ao)"), G_DBUS_CALL_FLAGS_NONE, 1500, cancellable,
+      &error);
   if (dev_reply == nullptr) {
-    return ap_list;
+    g_clear_error(&error);
+    return;
   }
 
   g_autoptr(GVariantIter) dev_iter = nullptr;
   g_variant_get(dev_reply, "(ao)", &dev_iter);
   const gchar* dev_path = nullptr;
-  while (g_variant_iter_loop(dev_iter, "&o", &dev_path) &&
-         fl_value_get_length(ap_list) < 20) {
+  while (!g_cancellable_is_cancelled(cancellable) &&
+         out_aps->size() < kMaxWifiAccessPoints &&
+         g_variant_iter_loop(dev_iter, "&o", &dev_path)) {
+    g_autoptr(GVariant) type_reply = g_dbus_connection_call_sync(
+        bus, "org.freedesktop.NetworkManager", dev_path,
+        "org.freedesktop.DBus.Properties", "Get",
+        g_variant_new("(ss)", "org.freedesktop.NetworkManager.Device",
+                      "DeviceType"),
+        G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 500, cancellable,
+        &error);
+    if (type_reply == nullptr) {
+      g_clear_error(&error);
+      continue;
+    }
+    g_autoptr(GVariant) type_boxed = nullptr;
+    g_variant_get(type_reply, "(v)", &type_boxed);
+    if (type_boxed == nullptr ||
+        !g_variant_is_of_type(type_boxed, G_VARIANT_TYPE_UINT32) ||
+        g_variant_get_uint32(type_boxed) != kNmDeviceTypeWifi) {
+      continue;
+    }
+
     g_autoptr(GVariant) ap_reply = g_dbus_connection_call_sync(
         bus, "org.freedesktop.NetworkManager", dev_path,
         "org.freedesktop.NetworkManager.Device.Wireless", "GetAllAccessPoints",
-        nullptr, G_VARIANT_TYPE("(ao)"), G_DBUS_CALL_FLAGS_NONE, 1000, nullptr,
-        nullptr);
+        nullptr, G_VARIANT_TYPE("(ao)"), G_DBUS_CALL_FLAGS_NONE, 1000,
+        cancellable, &error);
     if (ap_reply == nullptr) {
+      g_clear_error(&error);
       continue;
     }
+
     g_autoptr(GVariantIter) ap_iter = nullptr;
     g_variant_get(ap_reply, "(ao)", &ap_iter);
     const gchar* ap_path = nullptr;
-    while (g_variant_iter_loop(ap_iter, "&o", &ap_path) &&
-           fl_value_get_length(ap_list) < 20) {
-      g_autoptr(GVariant) hw_reply = g_dbus_connection_call_sync(
+    while (!g_cancellable_is_cancelled(cancellable) &&
+           out_aps->size() < kMaxWifiAccessPoints &&
+           g_variant_iter_loop(ap_iter, "&o", &ap_path)) {
+      g_autoptr(GVariant) props_reply = g_dbus_connection_call_sync(
           bus, "org.freedesktop.NetworkManager", ap_path,
-          "org.freedesktop.DBus.Properties", "Get",
-          g_variant_new("(ss)", "org.freedesktop.NetworkManager.AccessPoint",
-                        "HwAddress"),
-          G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, nullptr);
-      if (hw_reply == nullptr) {
+          "org.freedesktop.DBus.Properties", "GetAll",
+          g_variant_new("(s)", "org.freedesktop.NetworkManager.AccessPoint"),
+          G_VARIANT_TYPE("(a{sv})"), G_DBUS_CALL_FLAGS_NONE, 500, cancellable,
+          &error);
+      if (props_reply == nullptr) {
+        g_clear_error(&error);
         continue;
       }
-      g_autoptr(GVariant) hw_boxed = nullptr;
-      g_variant_get(hw_reply, "(v)", &hw_boxed);
-      if (hw_boxed == nullptr ||
-          !g_variant_is_of_type(hw_boxed, G_VARIANT_TYPE_STRING)) {
+
+      g_autoptr(GVariant) props_dict =
+          g_variant_get_child_value(props_reply, 0);
+      if (props_dict == nullptr) {
         continue;
       }
-      const gchar* bssid = g_variant_get_string(hw_boxed, nullptr);
+
+      g_autoptr(GVariant) hw_value = g_variant_lookup_value(
+          props_dict, "HwAddress", G_VARIANT_TYPE_STRING);
+      if (hw_value == nullptr) {
+        continue;
+      }
+      const gchar* bssid = g_variant_get_string(hw_value, nullptr);
       if (bssid == nullptr || bssid[0] == '\0') {
         continue;
       }
 
       gint64 dbm = -70;
-      g_autoptr(GVariant) str_reply = g_dbus_connection_call_sync(
-          bus, "org.freedesktop.NetworkManager", ap_path,
-          "org.freedesktop.DBus.Properties", "Get",
-          g_variant_new("(ss)", "org.freedesktop.NetworkManager.AccessPoint",
-                        "Strength"),
-          G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 500, nullptr, nullptr);
-      if (str_reply != nullptr) {
-        g_autoptr(GVariant) str_boxed = nullptr;
-        g_variant_get(str_reply, "(v)", &str_boxed);
-        if (str_boxed != nullptr &&
-            g_variant_is_of_type(str_boxed, G_VARIANT_TYPE_BYTE)) {
-          guint8 pct = g_variant_get_byte(str_boxed);
-          dbm = static_cast<gint64>(pct / 2) - 100;
-        }
+      g_autoptr(GVariant) strength_value =
+          g_variant_lookup_value(props_dict, "Strength", G_VARIANT_TYPE_BYTE);
+      if (strength_value != nullptr) {
+        const guint8 pct = g_variant_get_byte(strength_value);
+        dbm = static_cast<gint64>(pct / 2) - 100;
       }
 
-      FlValue* ap_map = fl_value_new_map();
-      fl_value_set_string_take(ap_map, "macAddress",
-                               fl_value_new_string(bssid));
-      fl_value_set_string_take(ap_map, "signalStrength",
-                               fl_value_new_int(dbm));
-      fl_value_append_take(ap_list, ap_map);
+      WifiAccessPoint access_point;
+      access_point.mac_address = bssid;
+      access_point.signal_strength = dbm;
+      out_aps->push_back(std::move(access_point));
     }
   }
-  return ap_list;
 }
 
-static FlValue* build_unavailable_with_wifi_map(GDBusConnection* bus) {
-  FlValue* map = build_unavailable_location_map();
-  if (bus != nullptr) {
-    FlValue* wifi_aps = query_network_manager_wifi_aps(bus);
-    if (fl_value_get_length(wifi_aps) > 0) {
-      fl_value_set_string_take(map, "wifiAccessPoints", wifi_aps);
-    } else {
-      fl_value_unref(wifi_aps);
-    }
+// Queries GeoClue2 location off the main thread, falling back to Wi-Fi APs.
+static std::unique_ptr<LocationQueryResult> query_geoclue2_location(
+    GCancellable* cancellable) {
+  std::unique_ptr<LocationQueryResult> result(new LocationQueryResult());
+  if (g_cancellable_is_cancelled(cancellable)) {
+    return result;
   }
-  return map;
-}
 
-static FlValue* query_geoclue2_location() {
+  GError* error = nullptr;
   g_autoptr(GDBusConnection) bus =
-      g_bus_get_sync(G_BUS_TYPE_SYSTEM, nullptr, nullptr);
+      g_bus_get_sync(G_BUS_TYPE_SYSTEM, cancellable, &error);
   if (bus == nullptr) {
-    return build_unavailable_location_map();
+    g_clear_error(&error);
+    return result;
   }
 
   g_autoptr(GVariant) client_reply = g_dbus_connection_call_sync(
       bus, "org.freedesktop.GeoClue2", "/org/freedesktop/GeoClue2/Manager",
       "org.freedesktop.GeoClue2.Manager", "GetClient", nullptr,
-      G_VARIANT_TYPE("(o)"), G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
+      G_VARIANT_TYPE("(o)"), G_DBUS_CALL_FLAGS_NONE, 1500, cancellable, &error);
   if (client_reply == nullptr) {
-    return build_unavailable_with_wifi_map(bus);
+    g_clear_error(&error);
+    query_network_manager_wifi_aps(bus, cancellable, &result->wifi_aps);
+    return result;
   }
 
   const gchar* client_path = nullptr;
   g_variant_get(client_reply, "(&o)", &client_path);
   if (client_path == nullptr || g_strcmp0(client_path, "/") == 0) {
-    return build_unavailable_with_wifi_map(bus);
-  }
-
-  g_autoptr(GVariant) desktop_reply = g_dbus_connection_call_sync(
-      bus, "org.freedesktop.GeoClue2", client_path,
-      "org.freedesktop.DBus.Properties", "Set",
-      g_variant_new("(ssv)", "org.freedesktop.GeoClue2.Client", "DesktopId",
-                    g_variant_new_string(APPLICATION_ID)),
-      nullptr, G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
-  g_autoptr(GVariant) acc_reply = g_dbus_connection_call_sync(
-      bus, "org.freedesktop.GeoClue2", client_path,
-      "org.freedesktop.DBus.Properties", "Set",
-      g_variant_new("(ssv)", "org.freedesktop.GeoClue2.Client",
-                    "RequestedAccuracyLevel", g_variant_new_uint32(8)),
-      nullptr, G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
-  g_autoptr(GVariant) dist_reply = g_dbus_connection_call_sync(
-      bus, "org.freedesktop.GeoClue2", client_path,
-      "org.freedesktop.DBus.Properties", "Set",
-      g_variant_new("(ssv)", "org.freedesktop.GeoClue2.Client",
-                    "DistanceThreshold", g_variant_new_uint32(100)),
-      nullptr, G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
-  g_autoptr(GVariant) time_reply = g_dbus_connection_call_sync(
-      bus, "org.freedesktop.GeoClue2", client_path,
-      "org.freedesktop.DBus.Properties", "Set",
-      g_variant_new("(ssv)", "org.freedesktop.GeoClue2.Client",
-                    "TimeThreshold", g_variant_new_uint32(300)),
-      nullptr, G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
-
-  g_autoptr(GVariant) start_reply = g_dbus_connection_call_sync(
-      bus, "org.freedesktop.GeoClue2", client_path,
-      "org.freedesktop.GeoClue2.Client", "Start", nullptr, nullptr,
-      G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
-  if (start_reply == nullptr) {
-    return build_unavailable_with_wifi_map(bus);
+    query_network_manager_wifi_aps(bus, cancellable, &result->wifi_aps);
+    return result;
   }
 
   gdouble latitude = 0.0;
@@ -289,53 +464,336 @@ static FlValue* query_geoclue2_location() {
   gdouble accuracy = 100000.0;
   gboolean has_coords = FALSE;
 
-  for (int attempt = 0; attempt < 5; ++attempt) {
-    g_autoptr(GVariant) loc_prop_reply = g_dbus_connection_call_sync(
+  const gboolean configured =
+      set_geoclue_client_property(bus, client_path, "DesktopId",
+                                  g_variant_new_string(APPLICATION_ID),
+                                  cancellable) &&
+      set_geoclue_client_property(bus, client_path, "RequestedAccuracyLevel",
+                                  g_variant_new_uint32(8), cancellable) &&
+      set_geoclue_client_property(bus, client_path, "DistanceThreshold",
+                                  g_variant_new_uint32(100), cancellable) &&
+      set_geoclue_client_property(bus, client_path, "TimeThreshold",
+                                  g_variant_new_uint32(300), cancellable);
+
+  if (configured) {
+    g_autoptr(GVariant) start_reply = g_dbus_connection_call_sync(
         bus, "org.freedesktop.GeoClue2", client_path,
-        "org.freedesktop.DBus.Properties", "Get",
-        g_variant_new("(ss)", "org.freedesktop.GeoClue2.Client", "Location"),
-        G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 1500, nullptr, nullptr);
-    const gchar* location_path = nullptr;
-    g_autoptr(GVariant) loc_boxed = nullptr;
-    if (loc_prop_reply != nullptr) {
-      g_variant_get(loc_prop_reply, "(v)", &loc_boxed);
-      if (loc_boxed != nullptr &&
-          g_variant_is_of_type(loc_boxed, G_VARIANT_TYPE_OBJECT_PATH)) {
-        location_path = g_variant_get_string(loc_boxed, nullptr);
+        "org.freedesktop.GeoClue2.Client", "Start", nullptr, nullptr,
+        G_DBUS_CALL_FLAGS_NONE, 1500, cancellable, &error);
+    if (start_reply == nullptr) {
+      g_clear_error(&error);
+    } else {
+      for (int attempt = 0; attempt < 5; ++attempt) {
+        if (g_cancellable_is_cancelled(cancellable)) {
+          break;
+        }
+        g_autoptr(GVariant) loc_prop_reply = g_dbus_connection_call_sync(
+            bus, "org.freedesktop.GeoClue2", client_path,
+            "org.freedesktop.DBus.Properties", "Get",
+            g_variant_new("(ss)", "org.freedesktop.GeoClue2.Client",
+                          "Location"),
+            G_VARIANT_TYPE("(v)"), G_DBUS_CALL_FLAGS_NONE, 1500, cancellable,
+            &error);
+        const gchar* location_path = nullptr;
+        g_autoptr(GVariant) loc_boxed = nullptr;
+        if (loc_prop_reply == nullptr) {
+          g_clear_error(&error);
+        } else {
+          g_variant_get(loc_prop_reply, "(v)", &loc_boxed);
+          if (loc_boxed != nullptr &&
+              g_variant_is_of_type(loc_boxed, G_VARIANT_TYPE_OBJECT_PATH)) {
+            location_path = g_variant_get_string(loc_boxed, nullptr);
+          }
+        }
+        if (location_path != nullptr && g_strcmp0(location_path, "/") != 0 &&
+            read_geoclue_double_property(bus, location_path, "Latitude",
+                                         cancellable, &latitude) &&
+            read_geoclue_double_property(bus, location_path, "Longitude",
+                                         cancellable, &longitude)) {
+          read_geoclue_double_property(bus, location_path, "Accuracy",
+                                       cancellable, &accuracy);
+          has_coords = (accuracy <= 5000.0);
+          break;
+        }
+        if (attempt + 1 < 5 && !sleep_cancellable_ms(cancellable, 120)) {
+          break;
+        }
+      }
+
+      g_autoptr(GVariant) stop_reply = g_dbus_connection_call_sync(
+          bus, "org.freedesktop.GeoClue2", client_path,
+          "org.freedesktop.GeoClue2.Client", "Stop", nullptr, nullptr,
+          G_DBUS_CALL_FLAGS_NONE, 1000, nullptr, &error);
+      if (stop_reply == nullptr) {
+        g_clear_error(&error);
       }
     }
-    if (location_path != nullptr && g_strcmp0(location_path, "/") != 0 &&
-        read_geoclue_double_property(bus, location_path, "Latitude",
-                                     &latitude) &&
-        read_geoclue_double_property(bus, location_path, "Longitude",
-                                     &longitude)) {
-      read_geoclue_double_property(bus, location_path, "Accuracy", &accuracy);
-      has_coords = (accuracy <= 5000.0);
-      break;
-    }
-    g_usleep(120000);
   }
 
-  g_autoptr(GVariant) stop_reply = g_dbus_connection_call_sync(
-      bus, "org.freedesktop.GeoClue2", client_path,
-      "org.freedesktop.GeoClue2.Client", "Stop", nullptr, nullptr,
-      G_DBUS_CALL_FLAGS_NONE, 1000, nullptr, nullptr);
+  delete_geoclue_client(bus, client_path);
 
-  if (!has_coords) {
-    return build_unavailable_with_wifi_map(bus);
+  if (has_coords) {
+    result->found = TRUE;
+    result->latitude = latitude;
+    result->longitude = longitude;
+    return result;
   }
 
+  if (!g_cancellable_is_cancelled(cancellable)) {
+    query_network_manager_wifi_aps(bus, cancellable, &result->wifi_aps);
+  }
+  return result;
+}
+
+// Builds an unavailable location payload map on the GTK main thread.
+static FlValue* build_unavailable_location_map() {
   FlValue* map = fl_value_new_map();
-  fl_value_set_string_take(map, "status", fl_value_new_string("found"));
-  fl_value_set_string_take(map, "latitude", fl_value_new_float(latitude));
-  fl_value_set_string_take(map, "longitude", fl_value_new_float(longitude));
-  fl_value_set_string_take(map, "source", fl_value_new_string("system"));
+  fl_value_set_string_take(map, "status", fl_value_new_string("unavailable"));
   return map;
+}
+
+// Converts a worker-thread LocationQueryResult into a Flutter method payload.
+static FlValue* build_location_result_map(const LocationQueryResult* result) {
+  if (result == nullptr) {
+    return build_unavailable_location_map();
+  }
+  if (result->found) {
+    FlValue* map = fl_value_new_map();
+    fl_value_set_string_take(map, "status", fl_value_new_string("found"));
+    fl_value_set_string_take(map, "latitude",
+                             fl_value_new_float(result->latitude));
+    fl_value_set_string_take(map, "longitude",
+                             fl_value_new_float(result->longitude));
+    fl_value_set_string_take(map, "source", fl_value_new_string("system"));
+    return map;
+  }
+
+  FlValue* map = build_unavailable_location_map();
+  if (!result->wifi_aps.empty()) {
+    FlValue* ap_list = fl_value_new_list();
+    for (const WifiAccessPoint& access_point : result->wifi_aps) {
+      FlValue* ap_map = fl_value_new_map();
+      fl_value_set_string_take(
+          ap_map, "macAddress",
+          fl_value_new_string(access_point.mac_address.c_str()));
+      fl_value_set_string_take(ap_map, "signalStrength",
+                               fl_value_new_int(access_point.signal_strength));
+      fl_value_append_take(ap_list, ap_map);
+    }
+    fl_value_set_string_take(map, "wifiAccessPoints", ap_list);
+  }
+  return map;
+}
+
+// GTask worker function executing blocking D-Bus location calls off-thread.
+static void location_query_thread_func(GTask* task,
+                                       gpointer source_object,
+                                       gpointer task_data,
+                                       GCancellable* cancellable) {
+  (void)source_object;
+  (void)task_data;
+  std::unique_ptr<LocationQueryResult> result =
+      query_geoclue2_location(cancellable);
+  g_task_return_pointer(task, result.release(), destroy_location_query_result);
+}
+
+// GTask completion callback responding on the GTK main loop if still alive.
+static void on_location_query_complete(GObject* source_object,
+                                       GAsyncResult* async_result,
+                                       gpointer user_data) {
+  (void)source_object;
+  (void)user_data;
+  GTask* task = G_TASK(async_result);
+  auto* context = static_cast<LocationTaskContext*>(g_task_get_task_data(task));
+
+  GError* error = nullptr;
+  std::unique_ptr<LocationQueryResult> query_result(
+      static_cast<LocationQueryResult*>(
+          g_task_propagate_pointer(task, &error)));
+  if (error != nullptr) {
+    g_clear_error(&error);
+  }
+
+  if (context == nullptr || context->method_call == nullptr) {
+    return;
+  }
+
+  g_autoptr(FlMethodCall) method_call = context->method_call;
+  context->method_call = nullptr;
+
+  gpointer raw_app = g_weak_ref_get(&context->app_ref);
+  g_autoptr(MyApplication) app =
+      raw_app != nullptr ? MY_APPLICATION(raw_app) : nullptr;
+  GCancellable* cancellable = g_task_get_cancellable(task);
+  if (app == nullptr || !app->engine_active ||
+      app->engine_generation != context->engine_generation ||
+      (cancellable != nullptr && g_cancellable_is_cancelled(cancellable))) {
+    return;
+  }
+
+  g_autoptr(FlValue) result_map = build_location_result_map(query_result.get());
+  g_autoptr(FlMethodResponse) response =
+      FL_METHOD_RESPONSE(fl_method_success_response_new(result_map));
+  fl_method_call_respond(method_call, response, nullptr);
+}
+
+static void on_location_method_call(FlMethodChannel* channel,
+                                    FlMethodCall* method_call,
+                                    gpointer user_data) {
+  (void)channel;
+  MyApplication* self = MY_APPLICATION(user_data);
+  const gchar* method = fl_method_call_get_name(method_call);
+  if (g_strcmp0(method, "getLocation") != 0) {
+    g_autoptr(FlMethodResponse) response =
+        FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+    fl_method_call_respond(method_call, response, nullptr);
+    return;
+  }
+
+  if (!self->engine_active) {
+    return;
+  }
+
+  if (self->location_cancellable == nullptr) {
+    self->location_cancellable = g_cancellable_new();
+  }
+
+  auto* context = new LocationTaskContext();
+  g_weak_ref_init(&context->app_ref, self);
+  context->method_call = FL_METHOD_CALL(g_object_ref(method_call));
+  context->engine_generation = self->engine_generation;
+
+  g_autoptr(GTask) task = g_task_new(nullptr, self->location_cancellable,
+                                     on_location_query_complete, nullptr);
+  g_task_set_task_data(task, context, destroy_location_task_context);
+  g_task_run_in_thread(task, location_query_thread_func);
+}
+
+static gboolean is_ascii_alpha(gchar ch) {
+  return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z');
+}
+
+static gboolean is_rfc3986_scheme_char(gchar ch) {
+  return is_ascii_alpha(ch) || (ch >= '0' && ch <= '9') || ch == '+' ||
+         ch == '-' || ch == '.';
+}
+
+// Rejects ASCII controls, C1 controls, Unicode line/paragraph separators, and
+// BiDi control/override/isolate marks.
+static gboolean is_forbidden_uri_char(gunichar ch) {
+  if (ch <= 0x1F || ch == 0x7F) {
+    return TRUE;
+  }
+  if (ch >= 0x80 && ch <= 0x9F) {
+    return TRUE;
+  }
+  if (ch == 0x061C || ch == 0x200E || ch == 0x200F) {
+    return TRUE;
+  }
+  if (ch == 0x2028 || ch == 0x2029) {
+    return TRUE;
+  }
+  if (ch >= 0x202A && ch <= 0x202E) {
+    return TRUE;
+  }
+  if (ch >= 0x2066 && ch <= 0x2069) {
+    return TRUE;
+  }
+  return FALSE;
+}
+
+// Checks whether a lowercase URI scheme is blocked by the launch security policy.
+static gboolean is_blocked_uri_scheme(const gchar* lowercase_scheme) {
+  static const gchar* const kBlockedSchemes[] = {
+      "javascript",      "vbscript",    "jscript", "livescript", "data",
+      "blob",            "about",       "view-source", "file",   "smb",
+      "cifs",            "nfs",         "jar",     "shell",      "cmd",
+      "powershell",      "wscript",     "cscript", "ms-msdt",    "search-ms",
+      "ms-appinstaller", "mhtml",       "its",     "mk",         "hcp",
+      "res",             "intent",      "content",
+  };
+  for (gsize i = 0; i < G_N_ELEMENTS(kBlockedSchemes); ++i) {
+    if (g_strcmp0(lowercase_scheme, kBlockedSchemes[i]) == 0) {
+      return TRUE;
+    }
+  }
+  return FALSE;
+}
+
+// Validates a launch URI against RFC 3986 scheme syntax and the blocklist.
+static gboolean validate_launch_uri(const gchar* uri,
+                                    const gchar** out_reason) {
+  if (uri == nullptr || uri[0] == '\0') {
+    *out_reason = "URI is empty.";
+    return FALSE;
+  }
+  if (!g_utf8_validate(uri, -1, nullptr)) {
+    *out_reason = "URI is not valid UTF-8.";
+    return FALSE;
+  }
+
+  gboolean is_first = TRUE;
+  gunichar last_char = 0;
+  for (const gchar* cursor = uri; *cursor != '\0';
+       cursor = g_utf8_next_char(cursor)) {
+    const gunichar ch = g_utf8_get_char(cursor);
+    if (is_first) {
+      if (g_unichar_isspace(ch)) {
+        *out_reason = "URI must not contain leading whitespace.";
+        return FALSE;
+      }
+      is_first = FALSE;
+    }
+    if (is_forbidden_uri_char(ch)) {
+      *out_reason = "URI contains forbidden control or BiDi characters.";
+      return FALSE;
+    }
+    last_char = ch;
+  }
+  if (is_first || g_unichar_isspace(last_char)) {
+    *out_reason = "URI must not be empty or contain trailing whitespace.";
+    return FALSE;
+  }
+
+  const gchar* colon = std::strchr(uri, ':');
+  if (colon == nullptr || colon == uri) {
+    *out_reason = "URI must start with a valid scheme.";
+    return FALSE;
+  }
+  const gsize scheme_length = static_cast<gsize>(colon - uri);
+  if (scheme_length < 2) {
+    *out_reason = "URI scheme must be at least two characters.";
+    return FALSE;
+  }
+  if (colon[1] == '\0') {
+    *out_reason = "URI must have a non-empty remainder after the scheme.";
+    return FALSE;
+  }
+  if (!is_ascii_alpha(uri[0])) {
+    *out_reason = "URI scheme must start with an ASCII letter.";
+    return FALSE;
+  }
+  for (const gchar* cursor = uri + 1; cursor < colon; ++cursor) {
+    if (!is_rfc3986_scheme_char(*cursor)) {
+      *out_reason = "URI scheme contains invalid characters.";
+      return FALSE;
+    }
+  }
+
+  g_autofree gchar* lowercase_scheme =
+      g_ascii_strdown(uri, static_cast<gssize>(scheme_length));
+  if (is_blocked_uri_scheme(lowercase_scheme)) {
+    *out_reason = "URI scheme is blocked by security policy.";
+    return FALSE;
+  }
+  return TRUE;
 }
 
 static void on_link_launcher_method_call(FlMethodChannel* channel,
                                          FlMethodCall* method_call,
                                          gpointer user_data) {
+  (void)channel;
+  (void)user_data;
   const gchar* method = fl_method_call_get_name(method_call);
   g_autoptr(FlMethodResponse) response = nullptr;
   if (g_strcmp0(method, "openLink") != 0) {
@@ -353,9 +811,11 @@ static void on_link_launcher_method_call(FlMethodChannel* channel,
       uri = fl_value_get_string(uri_val);
     }
   }
-  if (uri == nullptr || uri[0] == '\0') {
+
+  const gchar* reject_reason = "Invalid URI.";
+  if (!validate_launch_uri(uri, &reject_reason)) {
     response = FL_METHOD_RESPONSE(
-        fl_method_error_response_new("INVALID_URI", "URI is empty.", nullptr));
+        fl_method_error_response_new("INVALID_URI", reject_reason, nullptr));
     fl_method_call_respond(method_call, response, nullptr);
     return;
   }
@@ -375,6 +835,8 @@ static void on_link_launcher_method_call(FlMethodChannel* channel,
 static void on_app_version_method_call(FlMethodChannel* channel,
                                        FlMethodCall* method_call,
                                        gpointer user_data) {
+  (void)channel;
+  (void)user_data;
   const gchar* method = fl_method_call_get_name(method_call);
   g_autoptr(FlMethodResponse) response = nullptr;
   if (g_strcmp0(method, "getAppVersion") == 0) {
@@ -383,171 +845,6 @@ static void on_app_version_method_call(FlMethodChannel* channel,
   } else {
     response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
   }
-  fl_method_call_respond(method_call, response, nullptr);
-}
-
-static void on_location_method_call(FlMethodChannel* channel,
-                                    FlMethodCall* method_call,
-                                    gpointer user_data) {
-  const gchar* method = fl_method_call_get_name(method_call);
-  g_autoptr(FlMethodResponse) response = nullptr;
-  if (g_strcmp0(method, "getLocation") == 0) {
-    g_autoptr(FlValue) result = query_geoclue2_location();
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
-  } else {
-    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
-  }
-  fl_method_call_respond(method_call, response, nullptr);
-}
-
-// Resolves the resize edge when (x, y) lies inside the frameless border strip.
-static gboolean hit_test_resize_edge(GtkWindow* window,
-                                     gdouble x,
-                                     gdouble y,
-                                     GdkWindowEdge* out_edge) {
-  constexpr gdouble kResizeBorder = 5.0;
-  constexpr gdouble kCornerSize = 12.0;
-
-  const gint width = gtk_widget_get_allocated_width(GTK_WIDGET(window));
-  const gint height = gtk_widget_get_allocated_height(GTK_WIDGET(window));
-  if (width <= 0 || height <= 0) {
-    return FALSE;
-  }
-
-  const gboolean near_left = x < kResizeBorder;
-  const gboolean near_right = x >= width - kResizeBorder;
-  const gboolean near_top = y < kResizeBorder;
-  const gboolean near_bottom = y >= height - kResizeBorder;
-  if (!near_left && !near_right && !near_top && !near_bottom) {
-    return FALSE;
-  }
-
-  const gboolean corner_left = x < kCornerSize;
-  const gboolean corner_right = x >= width - kCornerSize;
-  const gboolean corner_top = y < kCornerSize;
-  const gboolean corner_bottom = y >= height - kCornerSize;
-
-  if ((near_top && corner_left) || (near_left && corner_top)) {
-    *out_edge = GDK_WINDOW_EDGE_NORTH_WEST;
-  } else if ((near_top && corner_right) || (near_right && corner_top)) {
-    *out_edge = GDK_WINDOW_EDGE_NORTH_EAST;
-  } else if ((near_bottom && corner_left) || (near_left && corner_bottom)) {
-    *out_edge = GDK_WINDOW_EDGE_SOUTH_WEST;
-  } else if ((near_bottom && corner_right) || (near_right && corner_bottom)) {
-    *out_edge = GDK_WINDOW_EDGE_SOUTH_EAST;
-  } else if (near_top) {
-    *out_edge = GDK_WINDOW_EDGE_NORTH;
-  } else if (near_bottom) {
-    *out_edge = GDK_WINDOW_EDGE_SOUTH;
-  } else if (near_left) {
-    *out_edge = GDK_WINDOW_EDGE_WEST;
-  } else {
-    *out_edge = GDK_WINDOW_EDGE_EAST;
-  }
-  return TRUE;
-}
-
-// Captures primary pointer presses on the toplevel window before FlView to
-// record the Wayland/X11 event timestamp and handle frameless edge resizing.
-static void on_window_gesture_pressed(GtkGestureMultiPress* gesture,
-                                      gint n_press,
-                                      gdouble x,
-                                      gdouble y,
-                                      gpointer user_data) {
-  MyApplication* self = MY_APPLICATION(user_data);
-  GdkEvent* event = gtk_get_current_event();
-  if (event == nullptr) {
-    return;
-  }
-
-  if (event->type == GDK_BUTTON_PRESS) {
-    const GdkEventButton* button_event = &event->button;
-    self->last_button_press_x_root = static_cast<gint>(button_event->x_root);
-    self->last_button_press_y_root = static_cast<gint>(button_event->y_root);
-    self->last_button_press_time = button_event->time;
-    self->has_last_button_press = TRUE;
-
-    if (n_press == 1 && button_event->button == GDK_BUTTON_PRIMARY &&
-        self->main_window != nullptr &&
-        !gtk_window_is_maximized(self->main_window)) {
-      GdkWindow* gdk_window =
-          gtk_widget_get_window(GTK_WIDGET(self->main_window));
-      const gboolean is_fullscreen =
-          gdk_window != nullptr &&
-          (gdk_window_get_state(gdk_window) & GDK_WINDOW_STATE_FULLSCREEN) != 0;
-      GdkWindowEdge edge = GDK_WINDOW_EDGE_EAST;
-      if (!is_fullscreen &&
-          hit_test_resize_edge(self->main_window, x, y, &edge)) {
-        gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
-        gtk_window_begin_resize_drag(
-            self->main_window, edge, static_cast<gint>(button_event->button),
-            static_cast<gint>(button_event->x_root),
-            static_cast<gint>(button_event->y_root), button_event->time);
-      }
-    }
-  }
-  gdk_event_free(event);
-}
-
-// Handles custom desktop chrome commands on de.akjir.tiertask/window_controls.
-static void on_window_controls_method_call(FlMethodChannel* channel,
-                                           FlMethodCall* method_call,
-                                           gpointer user_data) {
-  (void)channel;
-  MyApplication* self = MY_APPLICATION(user_data);
-  const gchar* method = fl_method_call_get_name(method_call);
-  g_autoptr(FlMethodResponse) response = nullptr;
-
-  if (g_strcmp0(method, "closeWindow") == 0) {
-    if (self->main_window != nullptr) {
-      gtk_window_close(self->main_window);
-    }
-    g_autoptr(FlValue) result = fl_value_new_bool(self->main_window != nullptr);
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
-  } else if (g_strcmp0(method, "startDragging") == 0) {
-    gboolean started = FALSE;
-    if (self->main_window != nullptr) {
-      GdkWindow* gdk_window =
-          gtk_widget_get_window(GTK_WIDGET(self->main_window));
-      GdkDisplay* display =
-          gdk_window != nullptr ? gdk_window_get_display(gdk_window) : nullptr;
-      GdkSeat* seat =
-          display != nullptr ? gdk_display_get_default_seat(display) : nullptr;
-      GdkDevice* pointer =
-          seat != nullptr ? gdk_seat_get_pointer(seat) : nullptr;
-      if (gdk_window != nullptr && pointer != nullptr) {
-        GdkModifierType modifiers = static_cast<GdkModifierType>(0);
-        gdk_window_get_device_position(gdk_window, pointer, nullptr, nullptr,
-                                       &modifiers);
-        if ((modifiers & GDK_BUTTON1_MASK) != 0) {
-          gint root_x = self->last_button_press_x_root;
-          gint root_y = self->last_button_press_y_root;
-          gdk_device_get_position(pointer, nullptr, &root_x, &root_y);
-          const guint32 timestamp = self->has_last_button_press
-                                        ? self->last_button_press_time
-                                        : GDK_CURRENT_TIME;
-          gtk_window_begin_move_drag(self->main_window, GDK_BUTTON_PRIMARY,
-                                     root_x, root_y, timestamp);
-          started = TRUE;
-        }
-      }
-    }
-    g_autoptr(FlValue) result = fl_value_new_bool(started);
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
-  } else if (g_strcmp0(method, "toggleMaximize") == 0) {
-    if (self->main_window != nullptr) {
-      if (gtk_window_is_maximized(self->main_window)) {
-        gtk_window_unmaximize(self->main_window);
-      } else {
-        gtk_window_maximize(self->main_window);
-      }
-    }
-    g_autoptr(FlValue) result = fl_value_new_bool(self->main_window != nullptr);
-    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
-  } else {
-    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
-  }
-
   fl_method_call_respond(method_call, response, nullptr);
 }
 
@@ -622,10 +919,400 @@ static void on_wayland_scale_factor_notify(GObject* object,
   sync_wayland_subsurface_scale(FL_VIEW(user_data));
 }
 
-// Clears main_window if GTK destroys the toplevel before GObject::dispose.
+// Returns TRUE when the window is resizable and neither maximized nor fullscreen.
+static gboolean is_window_resizable_state(GtkWindow* window) {
+  if (window == nullptr || !gtk_window_get_resizable(window) ||
+      gtk_window_is_maximized(window)) {
+    return FALSE;
+  }
+  GdkWindow* gdk_window = gtk_widget_get_window(GTK_WIDGET(window));
+  if (gdk_window == nullptr) {
+    return FALSE;
+  }
+  const GdkWindowState state = gdk_window_get_state(gdk_window);
+  return (state & GDK_WINDOW_STATE_FULLSCREEN) == 0;
+}
+
+// Resolves the resize edge when (x, y) lies inside the frameless border strip.
+static gboolean hit_test_resize_edge(GtkWindow* window,
+                                     gdouble x,
+                                     gdouble y,
+                                     GdkWindowEdge* out_edge) {
+  constexpr gdouble kResizeBorder = 5.0;
+  constexpr gdouble kCornerSize = 12.0;
+
+  const gint width = gtk_widget_get_allocated_width(GTK_WIDGET(window));
+  const gint height = gtk_widget_get_allocated_height(GTK_WIDGET(window));
+  if (width <= 0 || height <= 0 || x < 0.0 || y < 0.0 || x >= width ||
+      y >= height) {
+    return FALSE;
+  }
+
+  const gboolean near_left = x < kResizeBorder;
+  const gboolean near_right = x >= width - kResizeBorder;
+  const gboolean near_top = y < kResizeBorder;
+  const gboolean near_bottom = y >= height - kResizeBorder;
+  if (!near_left && !near_right && !near_top && !near_bottom) {
+    return FALSE;
+  }
+
+  const gboolean corner_left = x < kCornerSize;
+  const gboolean corner_right = x >= width - kCornerSize;
+  const gboolean corner_top = y < kCornerSize;
+  const gboolean corner_bottom = y >= height - kCornerSize;
+
+  if ((near_top && corner_left) || (near_left && corner_top)) {
+    *out_edge = GDK_WINDOW_EDGE_NORTH_WEST;
+  } else if ((near_top && corner_right) || (near_right && corner_top)) {
+    *out_edge = GDK_WINDOW_EDGE_NORTH_EAST;
+  } else if ((near_bottom && corner_left) || (near_left && corner_bottom)) {
+    *out_edge = GDK_WINDOW_EDGE_SOUTH_WEST;
+  } else if ((near_bottom && corner_right) || (near_right && corner_bottom)) {
+    *out_edge = GDK_WINDOW_EDGE_SOUTH_EAST;
+  } else if (near_top) {
+    *out_edge = GDK_WINDOW_EDGE_NORTH;
+  } else if (near_bottom) {
+    *out_edge = GDK_WINDOW_EDGE_SOUTH;
+  } else if (near_left) {
+    *out_edge = GDK_WINDOW_EDGE_WEST;
+  } else {
+    *out_edge = GDK_WINDOW_EDGE_EAST;
+  }
+  return TRUE;
+}
+
+// Maps a frameless window resize edge to its standard CSS cursor name.
+static const gchar* cursor_name_for_resize_edge(GdkWindowEdge edge) {
+  switch (edge) {
+    case GDK_WINDOW_EDGE_NORTH_WEST:
+      return "nw-resize";
+    case GDK_WINDOW_EDGE_NORTH:
+      return "n-resize";
+    case GDK_WINDOW_EDGE_NORTH_EAST:
+      return "ne-resize";
+    case GDK_WINDOW_EDGE_WEST:
+      return "w-resize";
+    case GDK_WINDOW_EDGE_EAST:
+      return "e-resize";
+    case GDK_WINDOW_EDGE_SOUTH_WEST:
+      return "sw-resize";
+    case GDK_WINDOW_EDGE_SOUTH:
+      return "s-resize";
+    case GDK_WINDOW_EDGE_SOUTH_EAST:
+      return "se-resize";
+  }
+  return nullptr;
+}
+
+static void set_cursor_if_needed(GdkWindow* gdk_window, GdkCursor* cursor) {
+  if (gdk_window == nullptr || gdk_window_is_destroyed(gdk_window)) {
+    return;
+  }
+  if (gdk_window_get_cursor(gdk_window) != cursor) {
+    gdk_window_set_cursor(gdk_window, cursor);
+  }
+}
+
+// Applies or resets the resize cursor across the toplevel and Flutter surfaces.
+static void apply_cursor_to_window_hierarchy(MyApplication* self,
+                                             GdkCursor* cursor,
+                                             GdkWindow* event_window) {
+  if (self->main_window == nullptr) {
+    return;
+  }
+  GdkWindow* toplevel_gdk_window =
+      gtk_widget_get_window(GTK_WIDGET(self->main_window));
+  if (toplevel_gdk_window == nullptr ||
+      gdk_window_is_destroyed(toplevel_gdk_window)) {
+    return;
+  }
+  set_cursor_if_needed(toplevel_gdk_window, cursor);
+
+  GtkWidget* child_view = gtk_bin_get_child(GTK_BIN(self->main_window));
+  GdkWindow* view_gdk_window =
+      child_view != nullptr ? gtk_widget_get_window(child_view) : nullptr;
+  if (view_gdk_window != nullptr && view_gdk_window != toplevel_gdk_window) {
+    set_cursor_if_needed(view_gdk_window, cursor);
+  }
+
+  if (child_view != nullptr && FL_IS_VIEW(child_view)) {
+    GtkWidget* renderer = find_subsurface_renderer(FL_VIEW(child_view));
+    GdkWindow* renderer_window =
+        renderer != nullptr ? gtk_widget_get_window(renderer) : nullptr;
+    if (renderer_window != nullptr &&
+        renderer_window != toplevel_gdk_window &&
+        renderer_window != view_gdk_window) {
+      set_cursor_if_needed(renderer_window, cursor);
+    }
+  }
+
+  if (event_window != nullptr && !gdk_window_is_destroyed(event_window) &&
+      gdk_window_get_toplevel(event_window) == toplevel_gdk_window &&
+      event_window != toplevel_gdk_window && event_window != view_gdk_window) {
+    set_cursor_if_needed(event_window, cursor);
+  }
+}
+
+// Restores default cursor handling once the pointer leaves resize zones.
+static void clear_resize_cursor(MyApplication* self, GdkWindow* event_window) {
+  if (self->has_resize_cursor) {
+    apply_cursor_to_window_hierarchy(self, nullptr, event_window);
+  }
+  g_clear_object(&self->active_resize_cursor);
+  self->has_resize_cursor = FALSE;
+}
+
+// Updates the frameless border resize cursor for pointer coordinates (x, y).
+static void update_resize_hover_cursor(MyApplication* self,
+                                       gdouble x,
+                                       gdouble y) {
+  GdkEvent* current_event = gtk_get_current_event();
+  GdkWindow* event_window =
+      current_event != nullptr ? current_event->any.window : nullptr;
+
+  GdkWindowEdge edge = GDK_WINDOW_EDGE_EAST;
+  if (!self->primary_button_pressed &&
+      is_window_resizable_state(self->main_window) &&
+      hit_test_resize_edge(self->main_window, x, y, &edge)) {
+    GdkWindow* toplevel_gdk_window =
+        gtk_widget_get_window(GTK_WIDGET(self->main_window));
+    GdkDisplay* display = toplevel_gdk_window != nullptr
+                              ? gdk_window_get_display(toplevel_gdk_window)
+                              : nullptr;
+    if (display != nullptr) {
+      if (!self->has_resize_cursor || self->active_resize_edge != edge ||
+          self->active_resize_cursor == nullptr) {
+        const gchar* cursor_name = cursor_name_for_resize_edge(edge);
+        g_clear_object(&self->active_resize_cursor);
+        if (cursor_name != nullptr) {
+          self->active_resize_cursor =
+              gdk_cursor_new_from_name(display, cursor_name);
+        }
+        self->active_resize_edge = edge;
+        self->has_resize_cursor = (self->active_resize_cursor != nullptr);
+      }
+      if (self->active_resize_cursor != nullptr) {
+        apply_cursor_to_window_hierarchy(self, self->active_resize_cursor,
+                                         event_window);
+      }
+    }
+  } else if (self->has_resize_cursor) {
+    clear_resize_cursor(self, event_window);
+  }
+
+  if (current_event != nullptr) {
+    gdk_event_free(current_event);
+  }
+}
+
+static void on_window_motion_enter(GtkEventControllerMotion* controller,
+                                   gdouble x,
+                                   gdouble y,
+                                   gpointer user_data) {
+  (void)controller;
+  update_resize_hover_cursor(MY_APPLICATION(user_data), x, y);
+}
+
+static void on_window_motion(GtkEventControllerMotion* controller,
+                             gdouble x,
+                             gdouble y,
+                             gpointer user_data) {
+  (void)controller;
+  update_resize_hover_cursor(MY_APPLICATION(user_data), x, y);
+}
+
+static void on_window_motion_leave(GtkEventControllerMotion* controller,
+                                   gpointer user_data) {
+  (void)controller;
+  MyApplication* self = MY_APPLICATION(user_data);
+  if (!self->has_resize_cursor) {
+    return;
+  }
+  GdkEvent* current_event = gtk_get_current_event();
+  GdkWindow* event_window =
+      current_event != nullptr ? current_event->any.window : nullptr;
+  clear_resize_cursor(self, event_window);
+  if (current_event != nullptr) {
+    gdk_event_free(current_event);
+  }
+}
+
+// Records primary button press coordinates, timestamp, and master pointer.
+static void record_primary_button_press(MyApplication* self,
+                                        const GdkEvent* event) {
+  if (event == nullptr || event->type != GDK_BUTTON_PRESS) {
+    return;
+  }
+  const GdkEventButton* button_event = &event->button;
+  if (button_event->button != GDK_BUTTON_PRIMARY) {
+    return;
+  }
+  self->last_button_press_x_root = static_cast<gint>(button_event->x_root);
+  self->last_button_press_y_root = static_cast<gint>(button_event->y_root);
+  self->last_button_press_time = button_event->time;
+  g_set_object(&self->last_button_press_device, gdk_event_get_device(event));
+  self->has_last_button_press = TRUE;
+}
+
+// Captures primary pointer presses on the toplevel window before FlView to
+// record the Wayland/X11 event metadata and handle frameless edge resizing.
+static void on_window_gesture_pressed(GtkGestureMultiPress* gesture,
+                                      gint n_press,
+                                      gdouble x,
+                                      gdouble y,
+                                      gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  GdkEvent* event = gtk_get_current_event();
+  if (event == nullptr) {
+    return;
+  }
+
+  if (event->type == GDK_BUTTON_PRESS) {
+    const GdkEventButton* button_event = &event->button;
+    record_primary_button_press(self, event);
+
+    if (n_press == 1 && button_event->button == GDK_BUTTON_PRIMARY &&
+        is_window_resizable_state(self->main_window)) {
+      GdkWindowEdge edge = GDK_WINDOW_EDGE_EAST;
+      if (hit_test_resize_edge(self->main_window, x, y, &edge)) {
+        self->primary_button_pressed = FALSE;
+        gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+        gtk_window_begin_resize_drag(
+            self->main_window, edge, static_cast<gint>(button_event->button),
+            static_cast<gint>(button_event->x_root),
+            static_cast<gint>(button_event->y_root), button_event->time);
+      }
+    }
+  }
+  gdk_event_free(event);
+}
+
+// Tracks primary button press state across drag motion for startDragging.
+static void on_window_drag_begin(GtkGestureDrag* gesture,
+                                 gdouble start_x,
+                                 gdouble start_y,
+                                 gpointer user_data) {
+  (void)gesture;
+  (void)start_x;
+  (void)start_y;
+  MyApplication* self = MY_APPLICATION(user_data);
+  GdkEvent* event = gtk_get_current_event();
+  if (event != nullptr) {
+    if (event->type == GDK_BUTTON_PRESS &&
+        event->button.button == GDK_BUTTON_PRIMARY) {
+      record_primary_button_press(self, event);
+      self->primary_button_pressed = TRUE;
+    }
+    gdk_event_free(event);
+  }
+}
+
+static void on_window_drag_end(GtkGestureDrag* gesture,
+                               gdouble offset_x,
+                               gdouble offset_y,
+                               gpointer user_data) {
+  (void)gesture;
+  (void)offset_x;
+  (void)offset_y;
+  MyApplication* self = MY_APPLICATION(user_data);
+  self->primary_button_pressed = FALSE;
+}
+
+static void on_window_drag_cancel(GtkGesture* gesture,
+                                  GdkEventSequence* sequence,
+                                  gpointer user_data) {
+  (void)gesture;
+  (void)sequence;
+  MyApplication* self = MY_APPLICATION(user_data);
+  self->primary_button_pressed = FALSE;
+}
+
+// Handles custom desktop chrome commands on de.akjir.tiertask/window_controls.
+static void on_window_controls_method_call(FlMethodChannel* channel,
+                                           FlMethodCall* method_call,
+                                           gpointer user_data) {
+  (void)channel;
+  MyApplication* self = MY_APPLICATION(user_data);
+  const gchar* method = fl_method_call_get_name(method_call);
+  g_autoptr(FlMethodResponse) response = nullptr;
+
+  if (g_strcmp0(method, "closeWindow") == 0) {
+    if (self->main_window != nullptr) {
+      gtk_window_close(self->main_window);
+    }
+    g_autoptr(FlValue) result = fl_value_new_bool(self->main_window != nullptr);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else if (g_strcmp0(method, "startDragging") == 0) {
+    gboolean started = FALSE;
+    if (self->main_window != nullptr) {
+      GdkWindow* gdk_window =
+          gtk_widget_get_window(GTK_WIDGET(self->main_window));
+      GdkDisplay* display =
+          gdk_window != nullptr ? gdk_window_get_display(gdk_window) : nullptr;
+      GdkSeat* seat =
+          display != nullptr ? gdk_display_get_default_seat(display) : nullptr;
+      GdkDevice* pointer = nullptr;
+      if (self->last_button_press_device != nullptr &&
+          gdk_device_get_display(self->last_button_press_device) == display &&
+          gdk_device_get_device_type(self->last_button_press_device) !=
+              GDK_DEVICE_TYPE_SLAVE) {
+        pointer = self->last_button_press_device;
+      } else if (seat != nullptr) {
+        pointer = gdk_seat_get_pointer(seat);
+      }
+
+      if (gdk_window != nullptr && pointer != nullptr) {
+        gboolean button_active = self->primary_button_pressed;
+        if (!button_active) {
+          GdkModifierType modifiers = static_cast<GdkModifierType>(0);
+          gdk_window_get_device_position(gdk_window, pointer, nullptr, nullptr,
+                                         &modifiers);
+          button_active = (modifiers & GDK_BUTTON1_MASK) != 0;
+        }
+        if (button_active) {
+          gint root_x = self->last_button_press_x_root;
+          gint root_y = self->last_button_press_y_root;
+          guint32 timestamp = self->last_button_press_time;
+          if (!self->has_last_button_press) {
+            gdk_device_get_position(pointer, nullptr, &root_x, &root_y);
+            timestamp = GDK_CURRENT_TIME;
+          }
+          gdk_window_begin_move_drag_for_device(gdk_window, pointer,
+                                                GDK_BUTTON_PRIMARY, root_x,
+                                                root_y, timestamp);
+          self->primary_button_pressed = FALSE;
+          started = TRUE;
+        }
+      }
+    }
+    g_autoptr(FlValue) result = fl_value_new_bool(started);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else if (g_strcmp0(method, "toggleMaximize") == 0) {
+    if (self->main_window != nullptr) {
+      if (gtk_window_is_maximized(self->main_window)) {
+        gtk_window_unmaximize(self->main_window);
+      } else {
+        clear_resize_cursor(self, nullptr);
+        gtk_window_maximize(self->main_window);
+      }
+    }
+    g_autoptr(FlValue) result = fl_value_new_bool(self->main_window != nullptr);
+    response = FL_METHOD_RESPONSE(fl_method_success_response_new(result));
+  } else {
+    response = FL_METHOD_RESPONSE(fl_method_not_implemented_response_new());
+  }
+
+  fl_method_call_respond(method_call, response, nullptr);
+}
+
+// Clears window-scoped state and active async tasks on toplevel destroy.
 static void on_main_window_destroy(GtkWidget* widget, gpointer user_data) {
   MyApplication* self = MY_APPLICATION(user_data);
   if (GTK_WIDGET(self->main_window) == widget) {
+    self->engine_active = FALSE;
+    cancel_pending_location_queries(self);
+    cleanup_active_file_dialog(self);
+    clear_window_input_controllers(self);
     self->main_window = nullptr;
   }
 }
@@ -640,6 +1327,16 @@ static void first_frame_cb(MyApplication* self, FlView* view) {
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
+  cancel_pending_location_queries(self);
+  cleanup_active_file_dialog(self);
+  clear_method_channels(self);
+  clear_resize_cursor(self, nullptr);
+  clear_window_input_controllers(self);
+
+  self->engine_generation += 1;
+  self->engine_active = TRUE;
+  self->location_cancellable = g_cancellable_new();
+
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
@@ -661,6 +1358,9 @@ static void my_application_activate(GApplication* application) {
   }
 
   gtk_window_set_default_size(window, 1280, 720);
+  gtk_widget_add_events(GTK_WIDGET(window),
+                        GDK_POINTER_MOTION_MASK | GDK_ENTER_NOTIFY_MASK |
+                            GDK_LEAVE_NOTIFY_MASK);
 
   g_autoptr(FlDartProject) project = fl_dart_project_new();
   fl_dart_project_set_dart_entrypoint_arguments(
@@ -677,32 +1377,66 @@ static void my_application_activate(GApplication* application) {
 
   // Show the window when Flutter renders.
   // Requires the view to be realized so we can start rendering.
-  g_signal_connect_swapped(view, "first-frame", G_CALLBACK(first_frame_cb),
-                           self);
+  g_signal_connect_object(view, "first-frame", G_CALLBACK(first_frame_cb), self,
+                          G_CONNECT_SWAPPED);
   gtk_widget_realize(GTK_WIDGET(view));
   GtkWidget* subsurface_renderer = find_subsurface_renderer(view);
   if (subsurface_renderer != nullptr) {
     g_object_set_data(
         G_OBJECT(subsurface_renderer), "tiertask-subsurface-scale",
         GINT_TO_POINTER(gtk_widget_get_scale_factor(subsurface_renderer)));
-    g_signal_connect_after(view, "notify::scale-factor",
-                           G_CALLBACK(on_wayland_scale_factor_notify), view);
-    g_signal_connect_after(subsurface_renderer, "notify::scale-factor",
-                           G_CALLBACK(on_wayland_scale_factor_notify), view);
+    g_signal_connect_object(view, "notify::scale-factor",
+                            G_CALLBACK(on_wayland_scale_factor_notify), view,
+                            G_CONNECT_AFTER);
+    g_signal_connect_object(subsurface_renderer, "notify::scale-factor",
+                            G_CALLBACK(on_wayland_scale_factor_notify), view,
+                            G_CONNECT_AFTER);
   }
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
   self->main_window = window;
-  g_signal_connect(window, "destroy", G_CALLBACK(on_main_window_destroy), self);
-  g_clear_object(&self->window_press_gesture);
+  g_signal_connect_object(window, "destroy",
+                          G_CALLBACK(on_main_window_destroy), self,
+                          static_cast<GConnectFlags>(0));
+
   self->window_press_gesture = gtk_gesture_multi_press_new(GTK_WIDGET(window));
   gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(self->window_press_gesture),
                                 GDK_BUTTON_PRIMARY);
   gtk_event_controller_set_propagation_phase(
       GTK_EVENT_CONTROLLER(self->window_press_gesture), GTK_PHASE_CAPTURE);
-  g_signal_connect(self->window_press_gesture, "pressed",
-                   G_CALLBACK(on_window_gesture_pressed), self);
+  g_signal_connect_object(self->window_press_gesture, "pressed",
+                          G_CALLBACK(on_window_gesture_pressed), self,
+                          static_cast<GConnectFlags>(0));
+
+  self->window_drag_gesture = gtk_gesture_drag_new(GTK_WIDGET(window));
+  gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(self->window_drag_gesture),
+                                GDK_BUTTON_PRIMARY);
+  gtk_event_controller_set_propagation_phase(
+      GTK_EVENT_CONTROLLER(self->window_drag_gesture), GTK_PHASE_CAPTURE);
+  g_signal_connect_object(self->window_drag_gesture, "drag-begin",
+                          G_CALLBACK(on_window_drag_begin), self,
+                          static_cast<GConnectFlags>(0));
+  g_signal_connect_object(self->window_drag_gesture, "drag-end",
+                          G_CALLBACK(on_window_drag_end), self,
+                          static_cast<GConnectFlags>(0));
+  g_signal_connect_object(self->window_drag_gesture, "cancel",
+                          G_CALLBACK(on_window_drag_cancel), self,
+                          static_cast<GConnectFlags>(0));
+
+  self->window_motion_controller =
+      gtk_event_controller_motion_new(GTK_WIDGET(window));
+  gtk_event_controller_set_propagation_phase(self->window_motion_controller,
+                                             GTK_PHASE_CAPTURE);
+  g_signal_connect_object(self->window_motion_controller, "enter",
+                          G_CALLBACK(on_window_motion_enter), self,
+                          static_cast<GConnectFlags>(0));
+  g_signal_connect_object(self->window_motion_controller, "motion",
+                          G_CALLBACK(on_window_motion), self,
+                          static_cast<GConnectFlags>(0));
+  g_signal_connect_object(self->window_motion_controller, "leave",
+                          G_CALLBACK(on_window_motion_leave), self,
+                          static_cast<GConnectFlags>(0));
 
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
   FlBinaryMessenger* messenger =
@@ -739,6 +1473,7 @@ static gboolean my_application_local_command_line(GApplication* application,
                                                   int* exit_status) {
   MyApplication* self = MY_APPLICATION(application);
   // Strip out the first argument as it is the binary name.
+  g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   self->dart_entrypoint_arguments = g_strdupv(*arguments + 1);
 
   g_autoptr(GError) error = nullptr;
@@ -756,18 +1491,15 @@ static gboolean my_application_local_command_line(GApplication* application,
 
 // Implements GApplication::startup.
 static void my_application_startup(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application startup.
-
   G_APPLICATION_CLASS(my_application_parent_class)->startup(application);
 }
 
 // Implements GApplication::shutdown.
 static void my_application_shutdown(GApplication* application) {
-  // MyApplication* self = MY_APPLICATION(object);
-
-  // Perform any actions required at application shutdown.
+  MyApplication* self = MY_APPLICATION(application);
+  self->engine_active = FALSE;
+  cancel_pending_location_queries(self);
+  cleanup_active_file_dialog(self);
 
   G_APPLICATION_CLASS(my_application_parent_class)->shutdown(application);
 }
@@ -775,12 +1507,12 @@ static void my_application_shutdown(GApplication* application) {
 // Implements GObject::dispose.
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
-  g_clear_object(&self->app_version_channel);
-  g_clear_object(&self->directory_picker_channel);
-  g_clear_object(&self->link_launcher_channel);
-  g_clear_object(&self->location_channel);
-  g_clear_object(&self->window_controls_channel);
-  g_clear_object(&self->window_press_gesture);
+  self->engine_active = FALSE;
+  cancel_pending_location_queries(self);
+  cleanup_active_file_dialog(self);
+  clear_method_channels(self);
+  clear_window_input_controllers(self);
+  self->main_window = nullptr;
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
@@ -794,7 +1526,9 @@ static void my_application_class_init(MyApplicationClass* klass) {
   G_OBJECT_CLASS(klass)->dispose = my_application_dispose;
 }
 
-static void my_application_init(MyApplication* self) {}
+static void my_application_init(MyApplication* self) {
+  (void)self;
+}
 
 MyApplication* my_application_new() {
   // Set the program name to the application ID, which helps various systems

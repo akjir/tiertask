@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/location_state.dart';
 import '../repositories/location_repository.dart';
+import '../services/app_logger.dart';
 import 'config_providers.dart';
 import 'workspace_providers.dart';
 
@@ -42,9 +43,11 @@ final locationEnabledProvider = Provider<bool>((ref) {
       false;
 });
 
-/// Provides the [LocationRepository] for foreground location determination.
+/// Provides the [LocationRepository] for foreground location determination and closes pooled sockets on disposal.
 final locationRepositoryProvider = Provider<LocationRepository>((ref) {
-  return PlatformLocationRepository();
+  final repository = PlatformLocationRepository();
+  ref.onDispose(repository.close);
+  return repository;
 });
 
 /// Provides the reactive foreground [LocationState] governed by [LocationNotifier].
@@ -74,7 +77,6 @@ class LocationNotifier extends Notifier<LocationState> {
     ref.onDispose(_disposeResources);
 
     if (!locationEnabled) {
-      _requestGeneration++;
       return const LocationState(status: LocationStatus.disabled);
     }
 
@@ -87,7 +89,7 @@ class LocationNotifier extends Notifier<LocationState> {
 
   /// Handles [AppLifecycleState] transitions to pause timers in background and refresh with cooldown on resume.
   void handleAppLifecycleState(AppLifecycleState lifecycleState) {
-    if (!_isLocationEnabled) {
+    if (!ref.mounted || !_isLocationEnabled) {
       return;
     }
     switch (lifecycleState) {
@@ -114,7 +116,7 @@ class LocationNotifier extends Notifier<LocationState> {
 
   /// Forces an immediate foreground location refresh when triggered by the user from the status dialog.
   Future<void> refreshLocation() async {
-    if (!_isLocationEnabled) {
+    if (!ref.mounted || !_isLocationEnabled) {
       return;
     }
     final generation = ++_requestGeneration;
@@ -122,8 +124,9 @@ class LocationNotifier extends Notifier<LocationState> {
     await _performLookup(generation: generation, forceRefresh: true);
   }
 
-  /// Cancels the passive refresh timer and disposes the lifecycle listener.
+  /// Invalidates in-flight lookups, cancels the passive refresh timer, and disposes the lifecycle listener.
   void _disposeResources() {
+    _requestGeneration++;
     _stopPassiveTimer();
     _lifecycleListener?.dispose();
     _lifecycleListener = null;
@@ -135,8 +138,23 @@ class LocationNotifier extends Notifier<LocationState> {
     required bool forceRefresh,
   }) async {
     final repository = ref.read(locationRepositoryProvider);
-    final fix = await repository.determineLocation(forceRefresh: forceRefresh);
-    if (generation != _requestGeneration || !_isLocationEnabled) {
+    LocationFix? fix;
+    try {
+      fix = await repository.determineLocation(forceRefresh: forceRefresh);
+    } on Object catch (error, stackTrace) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.storage,
+        'location.lookup_failed',
+        fields: <String, Object?>{'force_refresh': forceRefresh},
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+    if (!ref.mounted || generation != _requestGeneration) {
+      return;
+    }
+    if (!_isLocationEnabled) {
       return;
     }
     final now = ref.read(clockProvider)();
@@ -163,7 +181,7 @@ class LocationNotifier extends Notifier<LocationState> {
   void _startPassiveTimer() {
     _stopPassiveTimer();
     _passiveTimer = Timer.periodic(passiveRefreshInterval, (_) {
-      if (!_isLocationEnabled) {
+      if (!ref.mounted || !_isLocationEnabled) {
         _stopPassiveTimer();
         return;
       }

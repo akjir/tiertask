@@ -21,11 +21,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Changed built-in color palettes from Slate and Navy to Calm (default) and Plum Umber in Light and Dark modes, migrating saved palettes automatically.
 - Changed the development build indicator from a corner banner ribbon to an inline pill in the top bar.
 - Changed the application logo and platform launcher icons to the minimal three-bar TierTask mark.
+- Changed per-workspace sync baselines to local atomic files, keeping OS keyrings exclusively for WebDAV passwords.
+- Changed dropdown selectors across the app to unified flat custom popup menus.
 - Reduced synchronization latency by skipping redundant file reads, re-parsing, serialization, and per-line log disk flushes on large task boards.
+- Reduced UI blocking during large-board synchronization, location lookups, and raw TDF or diagnostic log inspection.
+
+### Removed
+
+- Removed automatic migration from pre-0.4.0 legacy binary workspace settings.
 
 ### Fixed
 
 - Fixed synchronization state persistence failing in dual local and WebDAV mode when task files exceed 512 KB.
+- Fixed Android storing local task files and logs in volatile cache instead of persistent app storage, with automatic migration.
+- Fixed background diagnostic log uploads ignoring the Local-Only log storage preference.
+- Fixed Settings exposing an unlocalized crash severity option in the diagnostic log level selector.
+- Fixed external link launching to block unsafe local and network-share URI schemes while preserving custom app schemes.
+- Fixed desktop focus restoration, window resizing, and Android location permission lifecycle handling.
 
 ## [0.4.0] - 2026-11-20
 

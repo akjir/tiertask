@@ -21,6 +21,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tiertask/l10n/app_localizations_de.dart';
 import 'package:tiertask/models/app_workspace.dart';
 import 'package:tiertask/models/webdav_config.dart';
 import 'package:tiertask/providers/config_providers.dart';
@@ -28,10 +29,11 @@ import 'package:tiertask/providers/workspace_providers.dart';
 import 'package:tiertask/repositories/app_version_repository.dart';
 import 'package:tiertask/repositories/local_file_repository.dart';
 import 'package:tiertask/repositories/settings_repository.dart';
+import 'package:tiertask/repositories/webdav_repository.dart';
 import 'package:tiertask/services/app_logger.dart';
 
 void main() {
-  final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
+  final fixedDate = DateTime.utc(2026, 11, 1, 12);
 
   group('AppLanguage, AppThemeMode, StorageMode & WebDavConfig Resolution', () {
     test(
@@ -560,14 +562,11 @@ void main() {
       final settingsRepository = InMemorySettingsRepository(
         const WebDavConfig(
           language: AppLanguage.english,
-          themePalette: AppThemePalette.calm,
           themeMode: AppThemeMode.light,
           storageMode: StorageMode.both,
           serverUrl: 'https://cloud.example.com',
           username: 'alice',
           password: 'secret',
-          filePath: 'tasks.tdf',
-          localFilePath: 'tasks.tdf',
         ),
       );
       final container = ProviderContainer(
@@ -618,17 +617,12 @@ void main() {
       final settingsRepository = _GateableSettingsRepository(
         const WebDavConfig(
           language: AppLanguage.english,
-          themePalette: AppThemePalette.calm,
           themeMode: AppThemeMode.light,
           storageMode: StorageMode.both,
           serverUrl: 'https://cloud.example.com',
           username: 'alice',
           password: 'secret',
-          filePath: 'tasks.tdf',
-          localFilePath: 'tasks.tdf',
           diagnosticsEnabled: true,
-          logLevel: LogLevel.info,
-          logStorageMode: StorageMode.local,
         ),
         onSave: () async {
           if (saveGate case final gate?) {
@@ -728,7 +722,583 @@ void main() {
         reason: 'Failed preference persistence must roll back optimistic state',
       );
     });
+
+    test('syncLogToWebDavNow honors logStorageMode.usesWebDav and routes saveLog/deleteLog through webDavRepositoryProvider', () async {
+      AppLogger.resetForTesting(clock: () => fixedDate);
+      addTearDown(() => AppLogger.resetForTesting());
+
+      const localLogConfig = WebDavConfig(
+        serverUrl: 'https://cloud.example.com',
+        username: 'alice',
+        password: 'secret',
+        storageMode: StorageMode.both,
+        diagnosticsEnabled: true,
+      );
+      final spyWebDav = _SpyLogWebDavRepository(config: localLogConfig);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(localLogConfig),
+          ),
+          webDavRepositoryProvider.overrideWithValue(spyWebDav),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(webDavConfigProvider.future);
+      final notifier = container.read(webDavConfigProvider.notifier);
+
+      await notifier.syncLogToWebDavNow();
+      expect(
+        spyWebDav.saveLogCalls,
+        isEmpty,
+        reason: 'syncLogToWebDavNow must never upload logs when logStorageMode is local-only',
+      );
+
+      await notifier.updateLogStorageMode(StorageMode.both);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(
+        spyWebDav.saveLogCalls,
+        hasLength(1),
+        reason: 'Switching logStorageMode to both must upload logs via injected webDavRepositoryProvider',
+      );
+
+      await notifier.syncLogToWebDavNow();
+      expect(
+        spyWebDav.saveLogCalls,
+        hasLength(2),
+        reason: 'syncLogToWebDavNow must route uploads through webDavRepositoryProvider when usesWebDav is true',
+      );
+
+      await notifier.updateDiagnosticsEnabled(false);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(
+        spyWebDav.deleteLogCalls,
+        hasLength(1),
+        reason: 'Disabling diagnostics must delete remote log via injected webDavRepositoryProvider',
+      );
+    });
+
+    test('updateLogStorageMode catches background syncLogToWebDavNow failures and logs a warning without uncaught errors', () async {
+      AppLogger.resetForTesting(clock: () => fixedDate);
+      addTearDown(() => AppLogger.resetForTesting());
+
+      const initialConfig = WebDavConfig(
+        serverUrl: 'https://cloud.example.com',
+        username: 'alice',
+        password: 'secret',
+        storageMode: StorageMode.both,
+        diagnosticsEnabled: true,
+      );
+      final spyWebDav = _SpyLogWebDavRepository(
+        config: initialConfig,
+        saveLogError: const WebDavException('Simulated log upload timeout'),
+      );
+      final uncaughtErrors = <Object>[];
+
+      await runZonedGuarded(
+        () async {
+          final container = ProviderContainer(
+            overrides: [
+              settingsRepositoryProvider.overrideWithValue(
+                InMemorySettingsRepository(initialConfig),
+              ),
+              webDavRepositoryProvider.overrideWithValue(spyWebDav),
+              clockProvider.overrideWithValue(() => fixedDate),
+            ],
+          );
+          addTearDown(container.dispose);
+          AppLogger.setEnabled(
+            true,
+            minimumLevel: LogLevel.info,
+            persistToDisk: false,
+          );
+          await container.read(webDavConfigProvider.future);
+          await container
+              .read(webDavConfigProvider.notifier)
+              .updateLogStorageMode(StorageMode.webdav);
+          await Future<void>.delayed(const Duration(milliseconds: 30));
+        },
+        (error, _) {
+          uncaughtErrors.add(error);
+        },
+      );
+
+      expect(
+        uncaughtErrors,
+        isEmpty,
+        reason: 'updateLogStorageMode must catch fire-and-forget syncLogToWebDavNow failures',
+      );
+      expect(
+        AppLogger.lines.any(
+          (line) =>
+              line.contains('[WARN ]') &&
+              line.contains('log.webdav.sync_failed'),
+        ),
+        isTrue,
+        reason: 'Failed background WebDAV log upload must be logged at LogLevel.warn',
+      );
+    });
+
+    test('queued updateConfig #2 failure rolls back to succeeded write #1 instead of stale pre-queue config', () async {
+      final firstGate = Completer<void>();
+      var saveAttempt = 0;
+      final settingsRepository = _GateableSettingsRepository(
+        const WebDavConfig(
+          language: AppLanguage.english,
+          themeMode: AppThemeMode.light,
+        ),
+        onSave: () async {
+          saveAttempt++;
+          if (saveAttempt == 1) {
+            await firstGate.future;
+            return;
+          }
+          throw const WorkspaceException(
+            WorkspaceErrorKind.settingsPersistenceFailed,
+            'Write #2 failed',
+          );
+        },
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepository),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+      final sub = container.listen(webDavConfigProvider, (_, _) {});
+      addTearDown(sub.close);
+
+      await container.read(webDavConfigProvider.future);
+      final notifier = container.read(webDavConfigProvider.notifier);
+
+      final firstWrite = notifier.updateThemePalette(AppThemePalette.plumUmber);
+      final secondWrite = notifier.updateThemeMode(AppThemeMode.dark);
+
+      firstGate.complete();
+      await firstWrite;
+      await expectLater(secondWrite, throwsA(isA<WorkspaceException>()));
+
+      final resolved = container.read(webDavConfigProvider).requireValue;
+      expect(
+        resolved.themePalette,
+        equals(AppThemePalette.plumUmber),
+        reason: 'Write #2 failure must preserve succeeded Write #1 themePalette instead of rolling back to C0',
+      );
+      expect(
+        resolved.themeMode,
+        equals(AppThemeMode.light),
+        reason: 'Write #2 failure must roll back only its own themeMode edit',
+      );
+    });
+
+    test('queued Workspace A config write drains before switching to Workspace B and never corrupts Workspace B', () async {
+      final saveGate = Completer<void>();
+      var gatedFirstSave = false;
+      final settingsRepository = _GateableSettingsRepository(
+        const WebDavConfig(
+          language: AppLanguage.english,
+          themeMode: AppThemeMode.light,
+        ),
+        onSave: () async {
+          if (!gatedFirstSave) {
+            gatedFirstSave = true;
+            await saveGate.future;
+          }
+        },
+      );
+      await settingsRepository.createWorkspace(
+        'Work',
+        id: 'work',
+        config: const WebDavConfig(
+          language: AppLanguage.german,
+          localFilePath: 'work.tdf',
+          filePath: 'work.tdf',
+        ),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(settingsRepository),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+      final configSub = container.listen(webDavConfigProvider, (_, _) {});
+      addTearDown(configSub.close);
+
+      await container.read(activeWorkspaceProvider.future);
+      await container.read(webDavConfigProvider.future);
+
+      // Start a slow write on Workspace A ("tasks"), then immediately switch to Workspace B ("work").
+      final writeOnA = container
+          .read(webDavConfigProvider.notifier)
+          .updateThemeMode(AppThemeMode.dark);
+      var switchCompleted = false;
+      final switchToB = container
+          .read(activeWorkspaceProvider.notifier)
+          .switchWorkspace('work')
+          .then((workspace) {
+            switchCompleted = true;
+            return workspace;
+          });
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(
+        switchCompleted,
+        isFalse,
+        reason: 'switchWorkspace must wait for WorkspaceUnloadCoordinator to drain pending Workspace A config writes',
+      );
+
+      saveGate.complete();
+      await writeOnA;
+      final switched = await switchToB;
+
+      expect(switched.id, equals('work'));
+      expect(
+        switched.config.themeMode,
+        equals(AppThemeMode.system),
+        reason: 'Workspace B config must never be overwritten by queued Workspace A write',
+      );
+      expect(
+        container.read(webDavConfigProvider).requireValue.themeMode,
+        equals(AppThemeMode.system),
+      );
+
+      // Switching back to Workspace A must show A's persisted dark mode.
+      final backToA = await container
+          .read(activeWorkspaceProvider.notifier)
+          .switchWorkspace('tasks');
+      expect(backToA.config.themeMode, equals(AppThemeMode.dark));
+
+      // Direct updateConfigForWorkspace for inactive Workspace B must persist ONLY to B without overwriting active Workspace A.
+      await container
+          .read(activeWorkspaceProvider.notifier)
+          .updateConfigForWorkspace(
+            'work',
+            switched.config.copyWith(themePalette: AppThemePalette.plumUmber),
+          );
+      expect(
+        container.read(activeWorkspaceProvider).requireValue.id,
+        equals('tasks'),
+      );
+      expect(
+        container.read(webDavConfigProvider).requireValue.themePalette,
+        equals(AppThemePalette.calm),
+        reason: 'Targeted config persistence for inactive Workspace B must not mutate active Workspace A',
+      );
+      final reloadedB = await container
+          .read(activeWorkspaceProvider.notifier)
+          .switchWorkspace('work');
+      expect(reloadedB.config.themePalette, equals(AppThemePalette.plumUmber));
+    });
+
+    test('changeLocalFileLocation drains WorkspaceUnloadCoordinator before moving file and survives mid-flight disposal', () async {
+      final tempDir = await Directory.systemTemp.createTemp(
+        'tiertask_move_drain_',
+      );
+      addTearDown(() async {
+        if (await tempDir.exists()) {
+          await tempDir.delete(recursive: true);
+        }
+      });
+      final sourcePath = '${tempDir.path}${Platform.pathSeparator}old.tdf';
+      final targetPath = '${tempDir.path}${Platform.pathSeparator}new.tdf';
+      await File(sourcePath).writeAsString('tdf 0.8.0\n', flush: true);
+
+      final unloadGate = Completer<void>();
+      var unloadDrainedBeforeMove = false;
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              WebDavConfig(
+                storageMode: StorageMode.local,
+                localFilePath: sourcePath,
+              ),
+            ),
+          ),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(webDavConfigProvider.future);
+      final unregister = container
+          .read(workspaceUnloadCoordinatorProvider)
+          .register(() async {
+            await unloadGate.future;
+            unloadDrainedBeforeMove = !await File(targetPath).exists();
+          });
+      addTearDown(unregister);
+
+      final moveFuture = container
+          .read(webDavConfigProvider.notifier)
+          .changeLocalFileLocation(
+            WebDavConfig(
+              storageMode: StorageMode.local,
+              localFilePath: targetPath,
+            ),
+          );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(
+        await File(targetPath).exists(),
+        isFalse,
+        reason: 'changeLocalFileLocation must not move the file until unload hooks finish draining',
+      );
+
+      unloadGate.complete();
+      await moveFuture;
+      expect(unloadDrainedBeforeMove, isTrue);
+      expect(await File(targetPath).exists(), isTrue);
+
+      // Mid-flight disposal during unload drain must exit cleanly without throwing UnmountedRefException.
+      final disposeGate = Completer<void>();
+      final disposeContainer = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              WebDavConfig(
+                storageMode: StorageMode.local,
+                localFilePath: targetPath,
+              ),
+            ),
+          ),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      await disposeContainer.read(webDavConfigProvider.future);
+      disposeContainer
+          .read(workspaceUnloadCoordinatorProvider)
+          .register(() => disposeGate.future);
+      final abortedMove = disposeContainer
+          .read(webDavConfigProvider.notifier)
+          .changeLocalFileLocation(
+            WebDavConfig(
+              storageMode: StorageMode.local,
+              localFilePath: sourcePath,
+            ),
+          );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      disposeContainer.dispose();
+      disposeGate.complete();
+      await expectLater(abortedMove, completes);
+      expect(
+        await File(targetPath).exists(),
+        isTrue,
+        reason: 'Aborted move after disposal must leave the file in place',
+      );
+    });
+
+    test('webDavRepositoryProvider closes pooled HttpClient on dispose and binding change, while language switches preserve WebDavRepository ETag cache and LocalFileRepository instance', () async {
+      HttpOverrides.global = null;
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response
+          ..statusCode = HttpStatus.ok
+          ..headers.set(HttpHeaders.etagHeader, '"etag-v1"')
+          ..write('tdf 0.8.0\n');
+        await request.response.close();
+      });
+
+      final createdClients = <_CloseTrackingHttpClient>[];
+      await HttpOverrides.runWithHttpOverrides(() async {
+        final settingsRepo = InMemorySettingsRepository(
+          WebDavConfig(
+            language: AppLanguage.english,
+            storageMode: StorageMode.both,
+            serverUrl: 'http://127.0.0.1:${server.port}',
+            username: 'alice',
+            password: 'secret',
+          ),
+        );
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepo),
+            localStorageDirectoryPathProvider.overrideWithValue(sourceDir.path),
+            clockProvider.overrideWithValue(() => fixedDate),
+          ],
+        );
+
+        await container.read(activeWorkspaceProvider.future);
+        await container.read(webDavConfigProvider.future);
+
+        final webDavSub = container.listen(webDavRepositoryProvider, (_, _) {});
+        final localSub = container.listen(
+          localFileRepositoryProvider,
+          (_, _) {},
+        );
+        final webDavBefore = container.read(webDavRepositoryProvider);
+        final localBefore = container.read(localFileRepositoryProvider);
+
+        await webDavBefore.fetchTdf();
+        expect(webDavBefore.cachedEtag, equals('"etag-v1"'));
+        expect(createdClients, hasLength(1));
+        expect(createdClients.single.closeCalls, equals(0));
+
+        // Language switch en -> de must NOT recreate WebDavRepository or LocalFileRepository, nor close pooled HttpClient.
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateLanguage(AppLanguage.german);
+        final webDavAfterLang = container.read(webDavRepositoryProvider);
+        final localAfterLang = container.read(localFileRepositoryProvider);
+        expect(
+          webDavAfterLang,
+          same(webDavBefore),
+          reason: 'Switching language must preserve WebDavRepository instance and ETag cache',
+        );
+        expect(webDavAfterLang.cachedEtag, equals('"etag-v1"'));
+        expect(createdClients.single.closeCalls, equals(0));
+        expect(
+          localAfterLang,
+          same(localBefore),
+          reason:
+              'Switching language must preserve LocalFileRepository instance',
+        );
+        expect(
+          () => localAfterLang.renameTdf('../bad.tdf'),
+          throwsA(
+            isA<LocalFileException>().having(
+              (error) => error.message,
+              'message',
+              equals(AppLocalizationsDe().localFileNameErrorInvalid),
+            ),
+          ),
+          reason: 'Preserved LocalFileRepository must still localize errors dynamically in German',
+        );
+
+        // Changing serverUrl recreates WebDavRepository and closes the old pooled HttpClient.
+        final nextConfig = container
+            .read(webDavConfigProvider)
+            .requireValue
+            .copyWith(filePath: 'other.tdf');
+        await container
+            .read(webDavConfigProvider.notifier)
+            .updateConfig(nextConfig);
+        final webDavAfterPathChange = container.read(webDavRepositoryProvider);
+        expect(webDavAfterPathChange, isNot(same(webDavBefore)));
+        expect(
+          createdClients.first.closeCalls,
+          equals(1),
+          reason: 'Replacing webDavRepositoryProvider must close the prior pooled HttpClient',
+        );
+
+        await webDavAfterPathChange.fetchTdf();
+        expect(createdClients, hasLength(2));
+        expect(createdClients.last.closeCalls, equals(0));
+
+        webDavSub.close();
+        localSub.close();
+        container.dispose();
+        expect(
+          createdClients.last.closeCalls,
+          equals(1),
+          reason: 'Disposing ProviderContainer must close webDavRepositoryProvider pooled HttpClient',
+        );
+      }, _TrackingHttpOverrides(createdClients));
+    });
+
+    test('toggling diagnosticsEnabled while diagnosticsEnabledProvider is watched invokes AppLogger.setEnabled exactly once per toggle', () async {
+      AppLogger.resetForTesting(clock: () => fixedDate);
+      addTearDown(AppLogger.resetForTesting);
+
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          localStorageDirectoryPathProvider.overrideWithValue(sourceDir.path),
+          clockProvider.overrideWithValue(() => fixedDate),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(activeWorkspaceProvider.future);
+      await container.read(webDavConfigProvider.future);
+      final diagSub = container.listen(diagnosticsEnabledProvider, (_, _) {});
+      addTearDown(diagSub.close);
+
+      final notifier = container.read(webDavConfigProvider.notifier);
+      expect(
+        notifier.loggerSyncApplyCountForTesting,
+        equals(0),
+        reason: 'Disabled startup must not invoke AppLogger.setEnabled',
+      );
+
+      await notifier.updateDiagnosticsEnabled(true);
+      expect(container.read(diagnosticsEnabledProvider), isTrue);
+      expect(AppLogger.isEnabled, isTrue);
+      expect(
+        notifier.loggerSyncApplyCountForTesting,
+        equals(1),
+        reason: 'Enabling diagnostics must invoke AppLogger.setEnabled exactly once',
+      );
+
+      await notifier.updateDiagnosticsEnabled(false);
+      expect(container.read(diagnosticsEnabledProvider), isFalse);
+      expect(AppLogger.isEnabled, isFalse);
+      expect(
+        notifier.loggerSyncApplyCountForTesting,
+        equals(2),
+        reason: 'Disabling diagnostics must invoke AppLogger.setEnabled exactly once',
+      );
+    });
   });
+}
+
+class _TrackingHttpOverrides extends HttpOverrides {
+  _TrackingHttpOverrides(this.createdClients);
+
+  final List<_CloseTrackingHttpClient> createdClients;
+
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    final client = _CloseTrackingHttpClient(super.createHttpClient(context));
+    createdClients.add(client);
+    return client;
+  }
+}
+
+class _CloseTrackingHttpClient implements HttpClient {
+  _CloseTrackingHttpClient(this._delegate);
+
+  final HttpClient _delegate;
+  int closeCalls = 0;
+
+  @override
+  Duration? get connectionTimeout => _delegate.connectionTimeout;
+
+  @override
+  set connectionTimeout(Duration? value) {
+    _delegate.connectionTimeout = value;
+  }
+
+  @override
+  void close({bool force = false}) {
+    closeCalls++;
+    _delegate.close(force: force);
+  }
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) => _delegate.getUrl(url);
+
+  @override
+  Future<HttpClientRequest> openUrl(String method, Uri url) =>
+      _delegate.openUrl(method, url);
+
+  @override
+  Future<HttpClientRequest> putUrl(Uri url) => _delegate.putUrl(url);
+
+  @override
+  Future<HttpClientRequest> deleteUrl(Uri url) => _delegate.deleteUrl(url);
+
+  @override
+  Never noSuchMethod(Invocation invocation) =>
+      throw UnimplementedError('${invocation.memberName}');
 }
 
 class _GateableSettingsRepository extends InMemorySettingsRepository {
@@ -740,6 +1310,36 @@ class _GateableSettingsRepository extends InMemorySettingsRepository {
   Future<void> saveConfig(WebDavConfig config) async {
     await onSave();
     await super.saveConfig(config);
+  }
+
+  @override
+  Future<void> saveConfigForWorkspace(
+    String workspaceId,
+    WebDavConfig config,
+  ) async {
+    await onSave();
+    await super.saveConfigForWorkspace(workspaceId, config);
+  }
+}
+
+class _SpyLogWebDavRepository extends WebDavRepository {
+  _SpyLogWebDavRepository({required super.config, this.saveLogError});
+
+  final List<String> deleteLogCalls = <String>[];
+  final List<String> saveLogCalls = <String>[];
+  final Exception? saveLogError;
+
+  @override
+  Future<void> deleteLog(String logFileName) async {
+    deleteLogCalls.add(logFileName);
+  }
+
+  @override
+  Future<void> saveLog(String logFileName, [String? logContent]) async {
+    saveLogCalls.add(logFileName);
+    if (saveLogError case final error?) {
+      throw error;
+    }
   }
 }
 

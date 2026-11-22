@@ -21,6 +21,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
 import '../l10n/tier_localization_extension.dart';
+import '../models/app_build_profile.dart';
 import '../models/app_workspace.dart';
 import '../models/webdav_config.dart';
 import '../repositories/app_version_repository.dart';
@@ -80,7 +81,7 @@ final appThemePaletteProvider = Provider<AppThemePalette>((ref) {
 });
 
 /// Provides the resolved SemVer 2.0.0 application version and Git build metadata (`v0.1.0+<count>.<hash>[.dev]`).
-final appVersionProvider = FutureProvider<String>((ref) async {
+final appVersionProvider = FutureProvider<String>((ref) {
   return ref.watch(appVersionRepositoryProvider).loadAppVersion();
 });
 
@@ -139,7 +140,7 @@ final diagnosticsEnabledProvider = Provider<bool>((ref) {
       ref.watch(
         appVersionProvider.select((versionAsync) => versionAsync.asData?.value),
       ) ??
-      '0.2.3';
+      AppVersionRepository.defaultFullVersion;
   AppLogger.clock = () => clock().toUtc();
   if (logSlice == null) {
     return false;
@@ -158,36 +159,17 @@ final diagnosticsEnabledProvider = Provider<bool>((ref) {
     username: logSlice.username,
     filePath: logSlice.filePath,
   );
-  final metadata = _buildLogMetadata(
-    config: resolvedConfig,
-    workspaceId: workspaceMeta?.id ?? AppWorkspace.defaultId,
-    workspaceName: workspaceMeta?.name ?? AppWorkspace.defaultName,
-    appVersion: appVersion,
-  );
-  final logFilePath = LocalFileRepository.resolveLogFilePath(
-    baseDirectoryPath: baseDirectoryPath,
-    utcNow: clock().toUtc(),
-    platform: metadata.platform,
-    workspaceId: metadata.workspaceId,
-    buildProfile: buildProfile,
-  );
-  final resolvedBaseDir =
-      baseDirectoryPath ??
-      LocalFileRepository.resolveDefaultDirectoryPath(
+  ref
+      .read(_loggerSyncCoordinatorProvider)
+      .sync(
+        config: resolvedConfig,
+        workspaceId: workspaceMeta?.id ?? AppWorkspace.defaultId,
+        workspaceName: workspaceMeta?.name ?? AppWorkspace.defaultName,
+        appVersion: appVersion,
+        baseDirectoryPath: baseDirectoryPath,
         buildProfile: buildProfile,
+        clock: clock,
       );
-  if (resolvedConfig.diagnosticsEnabled || AppLogger.isEnabled) {
-    AppLogger.setEnabled(
-      resolvedConfig.diagnosticsEnabled,
-      sink: LocalFileLogSink(buildProfile: buildProfile),
-      logFilePath: logFilePath,
-      baseDirectoryPath: resolvedBaseDir,
-      secretToRedact: resolvedConfig.password,
-      minimumLevel: resolvedConfig.logLevel,
-      metadata: metadata,
-      persistToDisk: resolvedConfig.logStorageMode.usesLocal,
-    );
-  }
 
   Timer? debounceTimer;
   void onLogRevisionChanged() {
@@ -245,7 +227,7 @@ final linkLauncherRepositoryProvider = Provider<LinkLauncherRepository>((ref) {
   return const PlatformLinkLauncherRepository();
 });
 
-/// Provides a [LocalFileRepository] configured with the current local storage binding.
+/// Provides a [LocalFileRepository] configured with the current local storage binding so language and preference edits preserve repository state.
 final localFileRepositoryProvider = Provider<LocalFileRepository>((ref) {
   final localSlice =
       ref.watch(
@@ -256,7 +238,6 @@ final localFileRepositoryProvider = Provider<LocalFileRepository>((ref) {
           }
           return (
             localFilePath: config.localFilePath,
-            language: config.language,
             storageMode: config.storageMode,
           );
         }),
@@ -269,7 +250,6 @@ final localFileRepositoryProvider = Provider<LocalFileRepository>((ref) {
           }
           return (
             localFilePath: config.localFilePath,
-            language: config.language,
             storageMode: config.storageMode,
           );
         }),
@@ -278,17 +258,38 @@ final localFileRepositoryProvider = Provider<LocalFileRepository>((ref) {
       ? const WebDavConfig()
       : WebDavConfig(
           localFilePath: localSlice.localFilePath,
-          language: localSlice.language,
           storageMode: localSlice.storageMode,
         );
   final baseDirectoryPath = ref.watch(localStorageDirectoryPathProvider);
   final buildProfile = ref.watch(appBuildProfileProvider);
   final inMemoryStore = ref.watch(inMemoryLocalStoreProvider);
+  var currentLanguage = readCurrentConfig(ref).language;
+  ref.listen<AppLanguage?>(
+    webDavConfigProvider.select(
+      (asyncConfig) => asyncConfig.asData?.value.language,
+    ),
+    (_, next) {
+      if (next != null) {
+        currentLanguage = next;
+      }
+    },
+  );
+  ref.listen<AppLanguage?>(
+    activeWorkspaceProvider.select(
+      (asyncWorkspace) => asyncWorkspace.asData?.value.config.language,
+    ),
+    (_, next) {
+      if (next != null) {
+        currentLanguage = next;
+      }
+    },
+  );
   return LocalFileRepository(
     config: config,
     baseDirectoryPath: baseDirectoryPath,
     buildProfile: buildProfile,
     inMemoryStore: inMemoryStore,
+    languageResolver: () => currentLanguage,
   );
 });
 
@@ -336,7 +337,7 @@ final webDavConfigProvider =
       retry: disableProviderRetry,
     );
 
-/// Provides a [WebDavRepository] configured with the current WebDAV binding so unrelated preference edits preserve ETag caches.
+/// Provides a [WebDavRepository] configured with the current WebDAV binding so language and preference edits preserve ETag caches and pooled sockets close on disposal.
 final webDavRepositoryProvider = Provider<WebDavRepository>((ref) {
   final remoteSlice =
       ref.watch(
@@ -350,7 +351,6 @@ final webDavRepositoryProvider = Provider<WebDavRepository>((ref) {
             username: config.username,
             password: config.password,
             filePath: config.filePath,
-            language: config.language,
             storageMode: config.storageMode,
           );
         }),
@@ -366,7 +366,6 @@ final webDavRepositoryProvider = Provider<WebDavRepository>((ref) {
             username: config.username,
             password: config.password,
             filePath: config.filePath,
-            language: config.language,
             storageMode: config.storageMode,
           );
         }),
@@ -378,10 +377,12 @@ final webDavRepositoryProvider = Provider<WebDavRepository>((ref) {
           username: remoteSlice.username,
           password: remoteSlice.password,
           filePath: remoteSlice.filePath,
-          language: remoteSlice.language,
+          language: readCurrentConfig(ref).language,
           storageMode: remoteSlice.storageMode,
         );
-  return WebDavRepository(config: config);
+  final repository = WebDavRepository(config: config);
+  ref.onDispose(repository.close);
+  return repository;
 });
 
 /// Provides the [WindowControlRepository] driving frameless desktop window commands.
@@ -389,6 +390,11 @@ final windowControlRepositoryProvider = Provider<WindowControlRepository>((
   ref,
 ) {
   return const PlatformWindowControlRepository();
+});
+
+/// Deduplicates [AppLogger.setEnabled] calls shared between [diagnosticsEnabledProvider] and [WebDavConfigNotifier].
+final _loggerSyncCoordinatorProvider = Provider<_LoggerSyncCoordinator>((ref) {
+  return _LoggerSyncCoordinator();
 });
 
 /// Monotonic state notifier backing [boundaryTickProvider].
@@ -440,18 +446,27 @@ class DesktopWindowActions {
 /// Manages the persisted [WebDavConfig] state for the currently active workspace.
 class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   String? _activeWorkspaceId;
-  int _inFlightWriteCount = 0;
+  final Map<String, int> _inFlightWritesByWorkspace = <String, int>{};
   bool _initialBuildPending = false;
   WebDavConfig? _lastPersistedConfig;
   Future<void> _pendingWrite = Future<void>.value();
   int _writeGeneration = 0;
 
+  /// Number of [AppLogger.setEnabled] invocations performed through this container's logger coordinator.
+  @visibleForTesting
+  int get loggerSyncApplyCountForTesting =>
+      ref.read(_loggerSyncCoordinatorProvider).applyCount;
+
   @override
   FutureOr<WebDavConfig> build() {
-    _inFlightWriteCount = 0;
+    _inFlightWritesByWorkspace.clear();
     _initialBuildPending = false;
     _writeGeneration = 0;
     _pendingWrite = Future<void>.value();
+    final unregisterUnload = ref
+        .read(workspaceUnloadCoordinatorProvider)
+        .register(drainPendingWrites);
+    ref.onDispose(unregisterUnload);
     ref.listen<AsyncValue<AppWorkspace>>(
       activeWorkspaceProvider,
       _handleActiveWorkspaceChanged,
@@ -467,7 +482,20 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
 
   /// Moves the local `.tdf` file when its resolved path changes and persists [newConfig] atomically.
   Future<void> changeLocalFileLocation(WebDavConfig newConfig) async {
-    final current = state.asData?.value ?? await future;
+    final initialCurrent = state.asData?.value ?? await future;
+    if (!ref.mounted) {
+      return;
+    }
+    final targetWorkspaceId =
+        _activeWorkspaceId ??
+        ref.read(activeWorkspaceProvider).asData?.value.id;
+    await ref.read(workspaceUnloadCoordinatorProvider).runBeforeUnload();
+    if (!ref.mounted ||
+        (targetWorkspaceId != null &&
+            _activeWorkspaceId != targetWorkspaceId)) {
+      return;
+    }
+    final current = state.asData?.value ?? initialCurrent;
     final localizations = lookupAppLocalizations(
       newConfig.language.resolveLocale(PlatformDispatcher.instance.locale),
     );
@@ -493,6 +521,12 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
         newConfig.storageMode.usesLocal && sourcePath != targetPath;
     if (shouldMove) {
       await sourceRepo.moveTdfFile(targetRepo);
+      if (!ref.mounted ||
+          (targetWorkspaceId != null &&
+              _activeWorkspaceId != targetWorkspaceId)) {
+        await _tryRollbackMove(targetRepo, sourceRepo);
+        return;
+      }
     }
 
     try {
@@ -513,22 +547,45 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     }
   }
 
-  /// Uploads the active diagnostic log snapshot to WebDAV immediately.
+  /// Awaits all queued configuration writes before workspace unload or application exit.
+  Future<void> drainPendingWrites() async {
+    while (true) {
+      final pending = _pendingWrite;
+      try {
+        await pending;
+      } on Object {
+        // Callers of updateConfig observe their own persistence errors.
+      }
+      if (identical(_pendingWrite, pending)) {
+        return;
+      }
+    }
+  }
+
+  /// Uploads the active diagnostic log snapshot to WebDAV immediately when WebDAV log storage is enabled.
   Future<void> syncLogToWebDavNow() async {
     final current = state.asData?.value ?? await future;
-    if (!current.diagnosticsEnabled || !current.isWebDavConfigured) {
+    if (!ref.mounted ||
+        !current.diagnosticsEnabled ||
+        !current.logStorageMode.usesWebDav ||
+        !current.isWebDavConfigured) {
       return;
     }
-    await WebDavRepository(config: current)
+    await ref
+        .read(webDavRepositoryProvider)
         .saveLog(AppLogger.activeLogFileName);
   }
 
-  /// Persists [newConfig] to the active workspace in FIFO order with optimistic state updates and rollback on failure.
+  /// Persists [newConfig] to the workspace active at call entry in FIFO order with optimistic state updates and rollback on failure.
   Future<void> updateConfig(WebDavConfig newConfig) {
+    final targetWorkspaceId =
+        _activeWorkspaceId ??
+        ref.read(activeWorkspaceProvider).asData?.value.id;
+    final writeKey = targetWorkspaceId ?? '';
     final previous = state.asData?.value;
-    final rollbackConfig = _lastPersistedConfig ?? previous;
     final generation = ++_writeGeneration;
-    _inFlightWriteCount++;
+    _inFlightWritesByWorkspace[writeKey] =
+        (_inFlightWritesByWorkspace[writeKey] ?? 0) + 1;
     if (ref.mounted && previous != newConfig) {
       state = AsyncData<WebDavConfig>(newConfig);
       if (previous == null ||
@@ -540,10 +597,23 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     final completer = Completer<void>();
     _pendingWrite = _pendingWrite.then((_) async {
       try {
-        await ref
-            .read(activeWorkspaceProvider.notifier)
-            .updateActiveConfig(newConfig);
-        if (ref.mounted) {
+        if (!ref.mounted) {
+          completer.complete();
+          return;
+        }
+        final workspaceNotifier = ref.read(activeWorkspaceProvider.notifier);
+        if (targetWorkspaceId != null) {
+          await workspaceNotifier.updateConfigForWorkspace(
+            targetWorkspaceId,
+            newConfig,
+          );
+        } else {
+          await workspaceNotifier.updateActiveConfig(newConfig);
+        }
+        final isStillTargetWorkspace =
+            targetWorkspaceId == null ||
+            _activeWorkspaceId == targetWorkspaceId;
+        if (ref.mounted && isStillTargetWorkspace) {
           _lastPersistedConfig = newConfig;
         }
         AppLogger.event(
@@ -561,7 +631,12 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
         );
         completer.complete();
       } on Object catch (error, stackTrace) {
+        final rollbackConfig = _lastPersistedConfig ?? previous;
+        final isStillTargetWorkspace =
+            targetWorkspaceId == null ||
+            _activeWorkspaceId == targetWorkspaceId;
         if (ref.mounted &&
+            isStillTargetWorkspace &&
             generation == _writeGeneration &&
             rollbackConfig != null) {
           state = AsyncData<WebDavConfig>(rollbackConfig);
@@ -572,28 +647,36 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
         }
         completer.completeError(error, stackTrace);
       } finally {
-        _inFlightWriteCount = _inFlightWriteCount > 0
-            ? _inFlightWriteCount - 1
-            : 0;
+        final remaining = (_inFlightWritesByWorkspace[writeKey] ?? 1) - 1;
+        if (remaining <= 0) {
+          _inFlightWritesByWorkspace.remove(writeKey);
+        } else {
+          _inFlightWritesByWorkspace[writeKey] = remaining;
+        }
       }
     });
     return completer.future;
   }
 
-  /// Updates the [diagnosticsEnabled] preference, synchronizes [AppLogger], and persists it immediately.
+  /// Updates the [diagnosticsEnabled] preference, synchronizes [AppLogger] once, and persists it immediately.
   Future<void> updateDiagnosticsEnabled(bool diagnosticsEnabled) async {
     final current = state.asData?.value ?? await future;
+    if (!ref.mounted) {
+      return;
+    }
+    final activeLogFileName = AppLogger.activeLogFileName;
     final updated = current.copyWith(diagnosticsEnabled: diagnosticsEnabled);
-    _syncLoggerForConfig(updated);
+    if (current == updated) {
+      _syncLoggerForConfig(updated);
+    }
+    final saveFuture = updateConfig(updated);
     if (!diagnosticsEnabled &&
         current.logStorageMode.usesWebDav &&
         current.isWebDavConfigured) {
-      unawaited(
-        WebDavRepository(config: current)
-            .deleteLog(AppLogger.activeLogFileName),
-      );
+      final repository = ref.read(webDavRepositoryProvider);
+      unawaited(_deleteRemoteLogQuietly(repository, activeLogFileName));
     }
-    await updateConfig(updated);
+    await saveFuture;
   }
 
   /// Updates only the per-workspace [dueLeadWindow] preference and persists it immediately.
@@ -628,19 +711,25 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   Future<void> updateLogLevel(LogLevel logLevel) async {
     final current = state.asData?.value ?? await future;
     final updated = current.copyWith(logLevel: logLevel);
-    AppLogger.setMinimumLevel(logLevel);
+    if (!updated.diagnosticsEnabled) {
+      AppLogger.setMinimumLevel(logLevel);
+    }
     await updateConfig(updated);
   }
 
   /// Updates the [logStorageMode] target, synchronizes [AppLogger], and persists it immediately.
   Future<void> updateLogStorageMode(StorageMode logStorageMode) async {
     final current = state.asData?.value ?? await future;
+    if (!ref.mounted) {
+      return;
+    }
     final updated = current.copyWith(logStorageMode: logStorageMode);
     await updateConfig(updated);
-    if (updated.diagnosticsEnabled &&
+    if (ref.mounted &&
+        updated.diagnosticsEnabled &&
         logStorageMode.usesWebDav &&
         updated.isWebDavConfigured) {
-      unawaited(syncLogToWebDavNow());
+      unawaited(_syncLogToWebDavQuietly());
     }
   }
 
@@ -692,6 +781,23 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     }
   }
 
+  /// Deletes [logFileName] from [repository] in the background without leaking uncaught errors.
+  Future<void> _deleteRemoteLogQuietly(
+    WebDavRepository repository,
+    String logFileName,
+  ) async {
+    try {
+      await repository.deleteLog(logFileName);
+    } on Object catch (error) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.storage,
+        'log.webdav.delete_failed',
+        error: error,
+      );
+    }
+  }
+
   /// Synchronizes [state] reactively when [activeWorkspaceProvider] changes without bouncing through `AsyncLoading` on config saves.
   void _handleActiveWorkspaceChanged(
     AsyncValue<AppWorkspace>? previous,
@@ -706,7 +812,13 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
             _activeWorkspaceId != null && _activeWorkspaceId != value.id;
         _activeWorkspaceId = value.id;
         _lastPersistedConfig = value.config;
-        if (_inFlightWriteCount > 0 && !switchedWorkspace) {
+        if (switchedWorkspace) {
+          _writeGeneration++;
+        }
+        final hasInFlightWrites =
+            (_inFlightWritesByWorkspace[value.id] ?? 0) > 0 ||
+            (_inFlightWritesByWorkspace[''] ?? 0) > 0;
+        if (hasInFlightWrites && !switchedWorkspace) {
           return;
         }
         if (state.asData?.value != value.config) {
@@ -731,45 +843,40 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
     return workspace.config;
   }
 
+  /// Uploads the active diagnostic log to WebDAV in the background, logging failures at [LogLevel.warn].
+  Future<void> _syncLogToWebDavQuietly() async {
+    try {
+      await syncLogToWebDavNow();
+    } on Object catch (error) {
+      AppLogger.event(
+        LogLevel.warn,
+        LogTag.storage,
+        'log.webdav.sync_failed',
+        error: error,
+      );
+    }
+  }
+
   /// Synchronizes [AppLogger] state, path, and metadata for [config].
   void _syncLoggerForConfig(WebDavConfig config) {
     final baseDirectoryPath = ref.read(localStorageDirectoryPathProvider);
     final buildProfile = ref.read(appBuildProfileProvider);
     final clock = ref.read(clockProvider);
     final activeWorkspace = ref.read(activeWorkspaceProvider).asData?.value;
-    final appVersion = ref.read(appVersionProvider).asData?.value ?? '0.2.3';
-    AppLogger.clock = () => clock().toUtc();
-    final metadata = _buildLogMetadata(
-      config: config,
-      workspaceId: activeWorkspace?.id ?? AppWorkspace.defaultId,
-      workspaceName: activeWorkspace?.name ?? AppWorkspace.defaultName,
-      appVersion: appVersion,
-    );
-    final logFilePath = LocalFileRepository.resolveLogFilePath(
-      baseDirectoryPath: baseDirectoryPath,
-      utcNow: clock().toUtc(),
-      platform: metadata.platform,
-      workspaceId: metadata.workspaceId,
-      buildProfile: buildProfile,
-    );
-    final resolvedBaseDir =
-        baseDirectoryPath ??
-        LocalFileRepository.resolveDefaultDirectoryPath(
+    final appVersion =
+        ref.read(appVersionProvider).asData?.value ??
+        AppVersionRepository.defaultFullVersion;
+    ref
+        .read(_loggerSyncCoordinatorProvider)
+        .sync(
+          config: config,
+          workspaceId: activeWorkspace?.id ?? AppWorkspace.defaultId,
+          workspaceName: activeWorkspace?.name ?? AppWorkspace.defaultName,
+          appVersion: appVersion,
+          baseDirectoryPath: baseDirectoryPath,
           buildProfile: buildProfile,
+          clock: clock,
         );
-    if (!config.diagnosticsEnabled && !AppLogger.isEnabled) {
-      return;
-    }
-    AppLogger.setEnabled(
-      config.diagnosticsEnabled,
-      sink: LocalFileLogSink(buildProfile: buildProfile),
-      logFilePath: logFilePath,
-      baseDirectoryPath: resolvedBaseDir,
-      secretToRedact: config.password,
-      minimumLevel: config.logLevel,
-      metadata: metadata,
-      persistToDisk: config.logStorageMode.usesLocal,
-    );
   }
 
   /// Attempts to move the `.tdf` file back from [movedRepo] to [originalRepo] if config persistence fails.
@@ -785,6 +892,89 @@ class WebDavConfigNotifier extends AsyncNotifier<WebDavConfig> {
   }
 }
 
+/// Container-scoped coordinator deduplicating [AppLogger.setEnabled] calls across [diagnosticsEnabledProvider] and [WebDavConfigNotifier].
+class _LoggerSyncCoordinator {
+  /// Creates a [_LoggerSyncCoordinator].
+  _LoggerSyncCoordinator();
+
+  int _applyCount = 0;
+  _AppliedLoggerSignature? _lastApplied;
+
+  /// Total number of [AppLogger.setEnabled] invocations performed by this coordinator.
+  int get applyCount => _applyCount;
+
+  /// Applies [config] to [AppLogger] at most once per distinct effective logger configuration.
+  void sync({
+    required WebDavConfig config,
+    required String workspaceId,
+    required String workspaceName,
+    required String appVersion,
+    required String? baseDirectoryPath,
+    required AppBuildProfile buildProfile,
+    required DateTime Function() clock,
+  }) {
+    AppLogger.clock = () => clock().toUtc();
+    final metadata = _buildLogMetadata(
+      config: config,
+      workspaceId: workspaceId,
+      workspaceName: workspaceName,
+      appVersion: appVersion,
+    );
+    final logFilePath = LocalFileRepository.resolveLogFilePath(
+      baseDirectoryPath: baseDirectoryPath,
+      utcNow: clock().toUtc(),
+      platform: metadata.platform,
+      workspaceId: metadata.workspaceId,
+      buildProfile: buildProfile,
+    );
+    final resolvedBaseDir =
+        baseDirectoryPath ??
+        LocalFileRepository.resolveDefaultDirectoryPath(
+          buildProfile: buildProfile,
+        );
+    final signature = (
+      diagnosticsEnabled: config.diagnosticsEnabled,
+      logLevel: config.logLevel,
+      persistToDisk: config.logStorageMode.usesLocal,
+      password: config.password,
+      logFilePath: logFilePath,
+      baseDirectoryPath: resolvedBaseDir,
+      metadata: metadata,
+    );
+    if (_lastApplied == signature &&
+        AppLogger.isEnabled == config.diagnosticsEnabled &&
+        AppLogger.minimumLevel == config.logLevel) {
+      return;
+    }
+    _lastApplied = signature;
+    if (!config.diagnosticsEnabled && !AppLogger.isEnabled) {
+      return;
+    }
+    _applyCount++;
+    AppLogger.setEnabled(
+      config.diagnosticsEnabled,
+      sink: LocalFileLogSink(buildProfile: buildProfile),
+      logFilePath: logFilePath,
+      baseDirectoryPath: resolvedBaseDir,
+      secretToRedact: config.password,
+      minimumLevel: config.logLevel,
+      metadata: metadata,
+      persistToDisk: config.logStorageMode.usesLocal,
+    );
+  }
+}
+
+/// Immutable value signature capturing all fields passed into [AppLogger.setEnabled].
+typedef _AppliedLoggerSignature = ({
+  bool diagnosticsEnabled,
+  LogLevel logLevel,
+  bool persistToDisk,
+  String password,
+  String logFilePath,
+  String baseDirectoryPath,
+  LogMetadata metadata,
+});
+
 /// Reads the active [WebDavConfig] synchronously without registering reactive provider subscriptions.
 WebDavConfig readCurrentConfig(Ref ref) {
   final configAsync = ref.read(webDavConfigProvider);
@@ -792,16 +982,6 @@ WebDavConfig readCurrentConfig(Ref ref) {
     return config;
   }
   final workspaceAsync = ref.read(activeWorkspaceProvider);
-  return workspaceAsync.asData?.value.config ?? const WebDavConfig();
-}
-
-/// Resolves the active [WebDavConfig] synchronously from [webDavConfigProvider] or [activeWorkspaceProvider].
-WebDavConfig resolveCurrentConfig(Ref ref) {
-  final configAsync = ref.watch(webDavConfigProvider);
-  if (configAsync.asData?.value case final config?) {
-    return config;
-  }
-  final workspaceAsync = ref.watch(activeWorkspaceProvider);
   return workspaceAsync.asData?.value.config ?? const WebDavConfig();
 }
 
@@ -863,6 +1043,15 @@ _extractLoggerSlice(WebDavConfig config) {
 
 /// Uploads the active diagnostic log to WebDAV in the background, ignoring errors.
 Future<void> _flushLogToWebDavQuietly(Ref ref) async {
+  if (!ref.mounted) {
+    return;
+  }
+  final current = readCurrentConfig(ref);
+  if (!current.diagnosticsEnabled ||
+      !current.logStorageMode.usesWebDav ||
+      !current.isWebDavConfigured) {
+    return;
+  }
   try {
     await ref
         .read(webDavRepositoryProvider)

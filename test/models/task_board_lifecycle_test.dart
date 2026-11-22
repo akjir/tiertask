@@ -25,7 +25,7 @@ import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
   const tdfService = TdfService();
-  final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
+  final fixedDate = DateTime.utc(2026, 11, 1, 12);
 
   group('TDF Section 6 State Transitions, Subtasks Auto-Finish & Retention GC', () {
     test(
@@ -69,19 +69,16 @@ void main() {
       var board = TaskBoard.empty();
       board = board.addTask(
         'Task 1',
-        targetTier: TaskTier.planned,
-        currentDate: DateTime.utc(2026, 11, 1, 8, 0),
+        currentDate: DateTime.utc(2026, 11, 1, 8),
         id: '000001OkD2',
       );
       board = board.addTask(
         'Task 2',
-        targetTier: TaskTier.planned,
         currentDate: DateTime.utc(2026, 11, 1, 8, 5),
         id: '000002OkD2',
       );
       board = board.addTask(
         'Task 3',
-        targetTier: TaskTier.planned,
         currentDate: DateTime.utc(2026, 11, 1, 8, 10),
         id: '000003OkD2',
       );
@@ -182,7 +179,7 @@ task manualOkD2 {
             title: 'Finish spec',
             subtasks: const [
               SubtaskItem(title: 'Draft section 1', isCompleted: true),
-              SubtaskItem(title: 'Draft section 2', isCompleted: false),
+              SubtaskItem(title: 'Draft section 2'),
             ],
           ),
           TaskItem(id: 'f2', title: 'Task 2'),
@@ -193,7 +190,7 @@ task manualOkD2 {
           TaskItem(
             id: 'dep1',
             title: 'Waiting on f1',
-            createdAt: DateTime.utc(2026, 11, 1, 9, 0),
+            createdAt: DateTime.utc(2026, 11, 1, 9),
             blockedByTaskIds: const ['f1'],
           ),
         ],
@@ -203,19 +200,19 @@ task manualOkD2 {
             id: 'e_keep_29',
             title: '29 Days Ago',
             isCompleted: true,
-            completedAt: DateTime.utc(2026, 10, 3, 12, 0),
+            completedAt: DateTime.utc(2026, 10, 3, 12),
           ),
           TaskItem(
             id: 'e_keep_30',
             title: '30 Days Ago',
             isCompleted: true,
-            completedAt: DateTime.utc(2026, 10, 2, 12, 0),
+            completedAt: DateTime.utc(2026, 10, 2, 12),
           ),
           TaskItem(
             id: 'e_prune_31',
             title: '31 Days Ago',
             isCompleted: true,
-            completedAt: DateTime.utc(2026, 10, 1, 12, 0),
+            completedAt: DateTime.utc(2026, 10, 1, 12),
           ),
         ],
       );
@@ -277,7 +274,7 @@ task manualOkD2 {
         'f1',
         subtasks: const [
           SubtaskItem(title: 'Step 1', isCompleted: true),
-          SubtaskItem(title: 'Step 3', isCompleted: false),
+          SubtaskItem(title: 'Step 3'),
         ],
         currentDate: fixedDate.add(const Duration(minutes: 2)),
       );
@@ -345,7 +342,6 @@ task manualOkD2 {
 
       final noopRestoreOnOpen = afterSchedule.restoreTask(
         's1',
-        targetTier: TaskTier.planned,
         currentDate: fixedDate,
       );
       expect(
@@ -361,8 +357,8 @@ task manualOkD2 {
             title: 'Completed Priority Auto-Finish',
             isPriority: true,
             isCompleted: true,
-            createdAt: DateTime.utc(2026, 10, 20, 8, 0),
-            completedAt: DateTime.utc(2026, 10, 25, 10, 0),
+            createdAt: DateTime.utc(2026, 10, 20, 8),
+            completedAt: DateTime.utc(2026, 10, 25, 10),
             subtasksAutoFinish: true,
             subtasks: const [SubtaskItem(title: 'Step 1', isCompleted: true)],
           ),
@@ -475,10 +471,9 @@ task manualOkD2 {
       final recurringTask = TaskItem(
         id: 't_repeat',
         title: 'Daily routine',
-        createdAt: DateTime.utc(2026, 11, 1, 8, 0),
-        modifiedAt: DateTime.utc(2026, 11, 1, 8, 0),
+        createdAt: DateTime.utc(2026, 11, 1, 8),
+        modifiedAt: DateTime.utc(2026, 11, 1, 8),
         repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.days),
-        subtasksAutoFinish: false,
         subtasks: const [
           SubtaskItem(title: 'Step 1', isCompleted: true),
           SubtaskItem(title: 'Step 2', isCompleted: true),
@@ -487,7 +482,7 @@ task manualOkD2 {
       final regularTask1 = TaskItem(
         id: 't_reg1',
         title: 'Regular 1',
-        createdAt: DateTime.utc(2026, 11, 1, 9, 0),
+        createdAt: DateTime.utc(2026, 11, 1, 9),
       );
       final regularTask2 = TaskItem(
         id: 't_reg2',
@@ -532,7 +527,7 @@ task manualOkD2 {
       );
       expect(
         rescheduled.suspendedAt,
-        equals(DateTime.utc(2026, 11, 2, 22, 0)),
+        equals(DateTime.utc(2026, 11, 2, 22)),
         reason: 'localCompletion (2026-11-02 00:30) + 1 day at 00:00 local (UTC+2) must set suspendedAt to 2026-11-02 22:00 UTC per Section 6.10.3',
       );
       expect(
@@ -557,8 +552,8 @@ task manualOkD2 {
             'All subtasks must be reset to false for the next recurrence cycle',
       );
 
-      final wakeUtc = DateTime.utc(2026, 11, 2, 22, 0);
-      final wakeLocal = DateTime.utc(2026, 11, 3, 0, 0);
+      final wakeUtc = DateTime.utc(2026, 11, 2, 22);
+      final wakeLocal = DateTime.utc(2026, 11, 3);
       final wokenBoard = completedBoard.applyAutoPull(
         currentDate: wakeUtc,
         localEvaluationTime: wakeLocal,
@@ -580,7 +575,7 @@ task manualOkD2 {
       final monthlyTask = TaskItem(
         id: 't_month',
         title: 'End of month report',
-        createdAt: DateTime.utc(2026, 1, 1, 8, 0),
+        createdAt: DateTime.utc(2026, 1, 1, 8),
         suspendedAt: DateTime.utc(2026, 1, 31, 9, 30),
         repeatRule: const TaskRepeatRule(
           count: 1,
@@ -593,7 +588,7 @@ task manualOkD2 {
         tasks: [monthlyTask],
         evaluationTime: jan31Local,
         queueBlock: TdfQueueBlock(
-          modifiedAt: DateTime.utc(2026, 1, 1, 8, 0),
+          modifiedAt: DateTime.utc(2026, 1, 1, 8),
           taskIds: const <String>['t_month'],
         ),
       ).completeTask('t_month', currentDate: jan31Local);
@@ -605,7 +600,7 @@ task manualOkD2 {
         reason: '2026-01-31 + 1 month must clamp to 2026-02-28 and preserve 09:30 time of day',
       );
 
-      final leapJan31 = DateTime.utc(2028, 1, 31, 14, 0);
+      final leapJan31 = DateTime.utc(2028, 1, 31, 14);
       final leapTask = monthlyTask.copyWith(
         clearSuspendedAt: true,
         repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.months),
@@ -614,13 +609,13 @@ task manualOkD2 {
         tasks: [leapTask],
         evaluationTime: leapJan31,
         queueBlock: TdfQueueBlock(
-          modifiedAt: DateTime.utc(2026, 1, 1, 8, 0),
+          modifiedAt: DateTime.utc(2026, 1, 1, 8),
           taskIds: const <String>['t_month'],
         ),
       ).completeTask('t_month', currentDate: leapJan31);
       expect(
         leapBoard.findTask('t_month')!.suspendedAt,
-        equals(DateTime.utc(2028, 2, 29, 0, 0)),
+        equals(DateTime.utc(2028, 2, 29)),
         reason:
             '2028-01-31 + 1 month in leap year must clamp to 2028-02-29 00:00',
       );
@@ -628,31 +623,31 @@ task manualOkD2 {
 
     test('completes TDF 0.6.0 standard task preserving dueAt and origin, and completes Mode 2 recurring task with dueAt advancing dueAt and suspendedAt along fixed schedule', () {
       const origin = TaskOrigin(namespace: 'jira', externalKey: 'OPS-42');
-      final dueTime = DateTime.utc(2026, 3, 28, 16, 0);
+      final dueTime = DateTime.utc(2026, 3, 28, 16);
       final standardTask = TaskItem(
         id: 'tStdDue001',
         title: 'Standard Task With Due and Origin',
-        createdAt: DateTime.utc(2026, 3, 20, 8, 0),
+        createdAt: DateTime.utc(2026, 3, 20, 8),
         dueAt: dueTime,
         origin: origin,
       );
       final recurringDueTask = TaskItem(
         id: 'tRecDue001',
         title: 'Mode 2 Recurring Task With Lead Window',
-        createdAt: DateTime.utc(2026, 3, 20, 8, 0),
-        suspendedAt: DateTime.utc(2026, 3, 26, 8, 0),
+        createdAt: DateTime.utc(2026, 3, 20, 8),
+        suspendedAt: DateTime.utc(2026, 3, 26, 8),
         dueAt: dueTime,
         origin: origin,
         repeatRule: const TaskRepeatRule(
           count: 1,
           unit: RepeatUnit.weeks,
-          clock: TdfRepeatClock(hour: 9, minute: 0),
+          clock: TdfRepeatClock(hour: 9),
           leadDays: 2,
         ),
       );
 
       const berlinZone = TdfTimeZoneContext.europeBerlin;
-      final completionUtc = DateTime.utc(2026, 3, 28, 10, 0);
+      final completionUtc = DateTime.utc(2026, 3, 28, 10);
       final completionLocal = berlinZone.toLocalWallClock(completionUtc);
 
       var board = TaskBoard.evaluate(
@@ -661,7 +656,7 @@ task manualOkD2 {
         localEvaluationTime: completionLocal,
         timeZone: berlinZone,
         queueBlock: TdfQueueBlock(
-          modifiedAt: DateTime.utc(2026, 3, 20, 8, 0),
+          modifiedAt: DateTime.utc(2026, 3, 20, 8),
           taskIds: const ['tStdDue001', 'tRecDue001'],
         ),
       );
@@ -699,12 +694,12 @@ task manualOkD2 {
       expect(rescheduled.origin, equals(origin));
       expect(
         rescheduled.dueAt,
-        equals(DateTime.utc(2026, 4, 4, 15, 0)),
+        equals(DateTime.utc(2026, 4, 4, 15)),
         reason: 'Section 6.4 & 6.10.3: Mode 2 must advance due to 2026-04-04 17:00 CEST (15:00 UTC)',
       );
       expect(
         rescheduled.suspendedAt,
-        equals(DateTime.utc(2026, 4, 2, 7, 0)),
+        equals(DateTime.utc(2026, 4, 2, 7)),
         reason: 'Section 6.4 & 6.10.3: Mode 2 must preserve 2-day local calendar lead window to 2026-04-02 09:00 CEST (07:00 UTC)',
       );
     });
@@ -712,7 +707,7 @@ task manualOkD2 {
 
   group('TDF 0.7.0 Lifecycle Rules: Completion, Mode 2 Lead Omission, Restore & Dependent Cleanup', () {
     test('completes standard and Mode 2 recurring tasks with leadDays, omits already-elapsed newSuspendedUtc, cleans open dependents, and clears due/suspended notes on restore', () {
-      final now = DateTime.utc(2026, 11, 5, 14, 0, 0);
+      final now = DateTime.utc(2026, 11, 5, 14);
       final prereq = TaskItem(
         id: 'stdPrereq1',
         title: 'Standard Prereq With Passive Due And History',
@@ -735,7 +730,7 @@ task manualOkD2 {
         createdAt: now.subtract(const Duration(days: 2)),
         modifiedAt: now.subtract(const Duration(days: 1)),
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'stdPrereq1', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'stdPrereq1'),
         ],
       );
       // Mode 2 recurring task whose next due is tomorrow 18:00 UTC, with leadDays: 2 -> newSuspendedUtc is yesterday 09:00 UTC <= now!
@@ -746,13 +741,13 @@ task manualOkD2 {
         modifiedAt: now.subtract(const Duration(days: 1)),
         suspendedAt: now.subtract(const Duration(days: 2)),
         suspendedNote: 'One-off deferral note cleared on cycle',
-        dueAt: DateTime.utc(2026, 11, 5, 18, 0, 0),
+        dueAt: DateTime.utc(2026, 11, 5, 18),
         isDuePassive: true,
         dueNote: 'Recurring SLA note preserved across cycle',
         repeatRule: const TaskRepeatRule(
           count: 1,
           unit: RepeatUnit.days,
-          clock: TdfRepeatClock(hour: 9, minute: 0),
+          clock: TdfRepeatClock(hour: 9),
           leadDays: 2,
         ),
         history: <TaskHistoryEntry>[
@@ -802,7 +797,7 @@ task manualOkD2 {
       final cycled = board.findTask('recImmed01')!;
       expect(cycled.isCompleted, isFalse);
       expect(cycled.completions, equals(1));
-      expect(cycled.dueAt, equals(DateTime.utc(2026, 11, 6, 18, 0, 0)));
+      expect(cycled.dueAt, equals(DateTime.utc(2026, 11, 6, 18)));
       expect(
         cycled.suspendedAt,
         isNull,
@@ -824,7 +819,6 @@ task manualOkD2 {
       // Restore completed task -> clears finished, dueAt, isDuePassive, dueNote, suspended, suspendedNote while preserving history & origin:
       board = board.restoreTask(
         'stdPrereq1',
-        targetTier: TaskTier.planned,
         currentDate: now.add(const Duration(minutes: 5)),
       );
       final restored = board.findTask('stdPrereq1')!;
@@ -884,8 +878,8 @@ task manualOkD2 {
     });
 
     test('scheduleTask resets isDuePassive on explicit priority promotion (Section 6.2) and clears due on completed task scheduling (Section 6.5)', () {
-      final t0 = DateTime.utc(2026, 11, 15, 9, 0);
-      final dueTime = DateTime.utc(2026, 11, 16, 8, 0);
+      final t0 = DateTime.utc(2026, 11, 15, 9);
+      final dueTime = DateTime.utc(2026, 11, 16, 8);
       var board = TaskBoard.empty().addTask(
         'Someday Passive Task',
         targetTier: TaskTier.someday,
@@ -898,7 +892,7 @@ task manualOkD2 {
 
       // Scheduling without priority preserves isDuePassive == true:
       final t1 = t0.add(const Duration(minutes: 5));
-      board = board.scheduleTask(somedayId, isPriority: false, currentDate: t1);
+      board = board.scheduleTask(somedayId, currentDate: t1);
       expect(
         board.findTask(somedayId)!.isDuePassive,
         isTrue,
@@ -942,7 +936,7 @@ task manualOkD2 {
       board = board.completeTask(somedayId, currentDate: t5);
       expect(board.findTask(somedayId)!.dueAt, equals(dueTime));
       final t6 = t5.add(const Duration(minutes: 5));
-      board = board.scheduleTask(somedayId, isPriority: false, currentDate: t6);
+      board = board.scheduleTask(somedayId, currentDate: t6);
       final rescheduledCompleted = board.findTask(somedayId)!;
       expect(rescheduledCompleted.isCompleted, isFalse);
       expect(
@@ -955,8 +949,8 @@ task manualOkD2 {
     });
 
     test('TDF 0.8.0 restoreTask clears dueAt, dueAnchor, isDuePassive, and dueNote across Someday/Planned/Focus while scheduleTask preserves dueAnchor on Someday', () {
-      final t0 = DateTime.utc(2026, 1, 31, 9, 0);
-      final anchor = TdfLocalDateTime(2026, 1, 31, 18, 0, 0);
+      final t0 = DateTime.utc(2026, 1, 31, 9);
+      final anchor = TdfLocalDateTime(2026, 1, 31, 18);
       final openPrereq = TaskItem(
         id: 'openPre001',
         title: 'Open Prerequisite',
@@ -973,7 +967,7 @@ task manualOkD2 {
         isPriority: true,
         suspendedAt: t0.add(const Duration(days: 2)),
         suspendedNote: 'Old snooze',
-        dueAt: DateTime.utc(2026, 1, 31, 17, 0, 0),
+        dueAt: DateTime.utc(2026, 1, 31, 17),
         dueAnchor: anchor,
         isDuePassive: true,
         dueNote: 'Old SLA note',
@@ -985,7 +979,7 @@ task manualOkD2 {
           leadDays: 3,
         ),
         dependencies: const <TdfTaskDependency>[
-          TdfTaskDependency(taskId: 'openPre001', requiredCompletion: 1),
+          TdfTaskDependency(taskId: 'openPre001'),
         ],
         history: <TaskHistoryEntry>[
           TaskHistoryEntry(timestampUtc: t0, text: 'Filed report'),
@@ -1081,17 +1075,13 @@ task manualOkD2 {
         'Anchored Someday',
         id: 'ancSome001',
         targetTier: TaskTier.someday,
-        dueAt: DateTime.utc(2026, 2, 28, 17, 0, 0),
+        dueAt: DateTime.utc(2026, 2, 28, 17),
         dueAnchor: anchor,
         isDuePassive: true,
         dueNote: 'Carry anchor',
         currentDate: t0,
       );
-      someBoard = someBoard.scheduleTask(
-        'ancSome001',
-        isPriority: false,
-        currentDate: t1,
-      );
+      someBoard = someBoard.scheduleTask('ancSome001', currentDate: t1);
       expect(someBoard.findTask('ancSome001')!.dueAnchor, equals(anchor));
       expect(someBoard.findTask('ancSome001')!.isDuePassive, isTrue);
 
@@ -1106,7 +1096,7 @@ task manualOkD2 {
     });
 
     test('toggleSubtask and blockTask operate on scoped-only tasks just like global tasks', () {
-      final t0 = DateTime.utc(2026, 6, 1, 9, 0, 0);
+      final t0 = DateTime.utc(2026, 6, 1, 9);
       final t1 = t0.add(const Duration(minutes: 5));
       final t2 = t1.add(const Duration(minutes: 5));
       final t3 = t2.add(const Duration(minutes: 5));
@@ -1126,8 +1116,8 @@ task manualOkD2 {
         labelIds: const <String>['lblScp0001'],
         subtasksAutoFinish: true,
         subtasks: const <SubtaskItem>[
-          SubtaskItem(title: 'Step 1', isCompleted: false),
-          SubtaskItem(title: 'Step 2', isCompleted: false),
+          SubtaskItem(title: 'Step 1'),
+          SubtaskItem(title: 'Step 2'),
         ],
       );
       final doneScoped = TaskItem(
@@ -1233,7 +1223,7 @@ task manualOkD2 {
     });
 
     test('reevaluateBoard defaults to pruneExpiredCompleted=false and evaluate(pruneExpiredCompleted: true) strips dangling blocked refs', () {
-      final t0 = DateTime.utc(2026, 1, 1, 12, 0, 0);
+      final t0 = DateTime.utc(2026, 1, 1, 12);
       final t31 = t0.add(const Duration(days: 31));
       final expiredDone = TaskItem(
         id: 'expDone001',

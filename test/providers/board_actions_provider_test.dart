@@ -68,7 +68,7 @@ class _DelayedTaskNotifier extends FakeTaskNotifier {
   int pushCount = 0;
 
   @override
-  Future<void> pushToRemote(
+  Future<bool> pushToRemote(
     TaskBoard board, {
     TaskBoard? fallbackBoard,
     Map<String, TdfDeletionResolution> taskConflictResolutions = const {},
@@ -77,6 +77,7 @@ class _DelayedTaskNotifier extends FakeTaskNotifier {
     pushCount++;
     await gate.future;
     state = AsyncData(board);
+    return true;
   }
 }
 
@@ -100,7 +101,7 @@ class _MutableWorkspaceNotifier extends ActiveWorkspaceNotifier {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  final fixedNow = DateTime.utc(2026, 11, 10, 12, 0, 0);
+  final fixedNow = DateTime.utc(2026, 11, 10, 12);
   final localizations = lookupAppLocalizations(const Locale('en'));
 
   TaskBoard buildBaseBoard({
@@ -112,7 +113,6 @@ void main() {
       id: 'work000001',
       name: 'Work',
       color: '#2196F3',
-      isScoped: false,
       modifiedAt: fixedNow,
     );
     final scopedLabel = TdfLabel(
@@ -178,7 +178,6 @@ void main() {
     WebDavConfig config = const WebDavConfig(
       language: AppLanguage.english,
       timeZoneMode: AppTimeZoneMode.manual,
-      manualTimeZoneOffsetMinutes: 0,
     ),
     DateTime? now,
     TaskNotifier Function()? notifierFactory,
@@ -248,7 +247,7 @@ void main() {
       'immutable state and draft value equality, defaults, and copyWith',
       () {
         const stateA = BoardActionsState();
-        const stateB = BoardActionsState(isBusy: false, busyTaskId: null);
+        const stateB = BoardActionsState();
         expect(stateA, equals(stateB));
         expect(stateA.hashCode, equals(stateB.hashCode));
 
@@ -524,7 +523,6 @@ void main() {
           repeatUnit: RepeatUnit.weeks,
           rawRepeatLeadDays: '3',
           isSuspended: true,
-          suspendedIndefinitely: false,
           rawSuspendedUntil: '2026-11-15 09:00',
           rawSuspendedNote: 'Waiting on vendor',
           prerequisiteTaskIds: const <String>['taskA00001'],
@@ -570,7 +568,7 @@ void main() {
       expect(created?.repeatRule?.count, equals(2));
       expect(created?.repeatRule?.unit, equals(RepeatUnit.weeks));
       expect(created?.repeatRule?.leadDays, equals(3));
-      expect(created?.suspendedAt, equals(DateTime.utc(2026, 11, 15, 9, 0)));
+      expect(created?.suspendedAt, equals(DateTime.utc(2026, 11, 15, 9)));
       expect(created?.suspendedNote, equals('Waiting on vendor'));
       expect(created?.blockedByTaskIds, equals(const <String>['taskA00001']));
       expect(created?.conditions, hasLength(3));
@@ -646,12 +644,7 @@ void main() {
         );
 
         final badSuspended = await actions.createTaskDraft(
-          TaskDraftInput(
-            title: 'Bad Suspend Task',
-            isSuspended: true,
-            suspendedIndefinitely: false,
-            rawSuspendedUntil: '',
-          ),
+          TaskDraftInput(title: 'Bad Suspend Task', isSuspended: true),
         );
         expect(badSuspended, isA<ActionValidationFailed>());
 
@@ -787,7 +780,7 @@ void main() {
         subtasksAutoFinish: true,
         subtasks: const <SubtaskItem>[
           SubtaskItem(title: 'First', isCompleted: true),
-          SubtaskItem(title: 'Second', isCompleted: false),
+          SubtaskItem(title: 'Second'),
         ],
         createdAt: fixedNow,
         modifiedAt: fixedNow,
@@ -956,7 +949,7 @@ void main() {
       final fullHistory = <TaskHistoryEntry>[
         for (var i = 0; i < maxTdfHistoryPerTask; i++)
           TaskHistoryEntry(
-            timestampUtc: DateTime.utc(2026, 1, 1).add(Duration(minutes: i)),
+            timestampUtc: DateTime.utc(2026).add(Duration(minutes: i)),
             text: 'Entry $i',
           ),
       ];
@@ -1246,7 +1239,7 @@ void main() {
         'taskA00001',
         const <SubtaskItem>[
           SubtaskItem(title: 'Done step', isCompleted: true),
-          SubtaskItem(title: '   ', isCompleted: false),
+          SubtaskItem(title: '   '),
         ],
         autoFinish: true,
       );
@@ -1294,7 +1287,7 @@ void main() {
           .read(taskNotifierProvider)
           .requireValue
           .findTask('taskA00001');
-      expect(taskA?.dueAt, equals(DateTime.utc(2026, 11, 25, 18, 0)));
+      expect(taskA?.dueAt, equals(DateTime.utc(2026, 11, 25, 18)));
       expect(taskA?.isDuePassive, isTrue);
       expect(taskA?.dueNote, equals('Submit filing'));
 
@@ -1555,7 +1548,6 @@ void main() {
         const config = WebDavConfig(
           language: AppLanguage.english,
           timeZoneMode: AppTimeZoneMode.manual,
-          manualTimeZoneOffsetMinutes: 0,
         );
         const workspaceA = AppWorkspace(
           id: 'wsA0000001',
@@ -1570,7 +1562,6 @@ void main() {
         final gate = Completer<void>();
         late _MutableWorkspaceNotifier workspaceNotifier;
         final container = await createContainer(
-          config: config,
           workspaceNotifierFactory: () {
             workspaceNotifier = _MutableWorkspaceNotifier(workspaceA);
             return workspaceNotifier;
@@ -1609,14 +1600,12 @@ void main() {
     test('offline StorageMode.both inline edits succeed locally and close inline editor while remote WebDAV error stays in syncStateProvider', () async {
       const config = WebDavConfig(
         storageMode: StorageMode.both,
-        localFilePath: 'tasks.tdf',
         serverUrl: 'https://webdav.example.com',
         username: 'alice',
         password: 'secret-app-password',
         filePath: '/tasks.tdf',
         language: AppLanguage.english,
         timeZoneMode: AppTimeZoneMode.manual,
-        manualTimeZoneOffsetMinutes: 0,
       );
       final initialTdf = const TdfService().serialize(buildBaseBoard());
       final localRepo = _CountingLocalFileRepository(
@@ -1658,10 +1647,6 @@ void main() {
         container.read(shellProvider).activeInlineEdit,
         isNull,
         reason: 'Inline editor must close when local write committed',
-      );
-      expect(
-        container.read(taskNotifierProvider.notifier).lastMutationCommitted,
-        isTrue,
       );
       expect(
         container.read(syncStateProvider).errorMessage,
@@ -1707,7 +1692,7 @@ void main() {
       expect(historyAddResult, isA<ActionSucceeded>());
       final historyUpdateResult = await actions.updateHistoryEntry(
         'taskA00001',
-        oldTimestampUtcIso: DateTime.utc(2026, 11, 10, 11, 0).toIso8601String(),
+        oldTimestampUtcIso: DateTime.utc(2026, 11, 10, 11).toIso8601String(),
         oldText: 'Offline entry',
         rawNewText: 'Offline entry updated',
         rawNewTimestamp: '2026-11-10 11:00',
@@ -1730,10 +1715,8 @@ void main() {
       // 1. Local storage write failure rolls back and keeps inline editor open.
       const localConfig = WebDavConfig(
         storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
         language: AppLanguage.english,
         timeZoneMode: AppTimeZoneMode.manual,
-        manualTimeZoneOffsetMinutes: 0,
       );
       final initialTdf = const TdfService().serialize(buildBaseBoard());
       final failingLocalRepo = _CountingLocalFileRepository(
@@ -1755,12 +1738,6 @@ void main() {
           .read(boardActionsProvider.notifier)
           .saveNote('taskA00001', 'Unpersisted note');
       expect(localFail, isA<ActionPersistFailed>());
-      expect(
-        localContainer
-            .read(taskNotifierProvider.notifier)
-            .lastMutationCommitted,
-        isFalse,
-      );
       expect(
         localContainer.read(shellProvider).activeInlineEdit,
         equals(InlineEditTarget.task('taskA00001', TaskSectionKind.note)),
@@ -1785,7 +1762,6 @@ void main() {
         filePath: '/tasks.tdf',
         language: AppLanguage.english,
         timeZoneMode: AppTimeZoneMode.manual,
-        manualTimeZoneOffsetMinutes: 0,
       );
       var shouldFailWebDav = false;
       final remoteStore = <String, String>{
@@ -1816,12 +1792,6 @@ void main() {
           .saveTitle('taskA00001', 'Remote Failure Title');
       expect(webDavFail, isA<ActionPersistFailed>());
       expect(
-        webDavContainer
-            .read(taskNotifierProvider.notifier)
-            .lastMutationCommitted,
-        isFalse,
-      );
-      expect(
         webDavContainer.read(shellProvider).activeInlineEdit,
         equals(InlineEditTarget.task('taskA00001', TaskSectionKind.title)),
         reason: 'Inline editor must stay open when WebDAV-only save fails',
@@ -1840,10 +1810,8 @@ void main() {
     test('createAndAssignLabel executes in one single storage write', () async {
       const config = WebDavConfig(
         storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
         language: AppLanguage.english,
         timeZoneMode: AppTimeZoneMode.manual,
-        manualTimeZoneOffsetMinutes: 0,
       );
       final initialTdf = const TdfService().serialize(buildBaseBoard());
       final localRepo = _CountingLocalFileRepository(
@@ -1884,19 +1852,15 @@ void main() {
     test('saveSubtasks auto-finish executes in one single storage write and records Undo cleanly', () async {
       const config = WebDavConfig(
         storageMode: StorageMode.local,
-        localFilePath: 'tasks.tdf',
         language: AppLanguage.english,
         timeZoneMode: AppTimeZoneMode.manual,
-        manualTimeZoneOffsetMinutes: 0,
       );
       final repeatingTask = TaskItem(
         id: 'rsub000001',
         title: 'Weekly Checklist',
         repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.weeks),
         subtasksAutoFinish: true,
-        subtasks: const <SubtaskItem>[
-          SubtaskItem(title: 'Step A', isCompleted: false),
-        ],
+        subtasks: const <SubtaskItem>[SubtaskItem(title: 'Step A')],
         createdAt: fixedNow,
         modifiedAt: fixedNow,
       );
@@ -2005,7 +1969,7 @@ void main() {
         subtasksAutoFinish: true,
         subtasks: const <SubtaskItem>[
           SubtaskItem(title: 'Step A', isCompleted: true),
-          SubtaskItem(title: 'Step B', isCompleted: false),
+          SubtaskItem(title: 'Step B'),
         ],
         createdAt: fixedNow,
         modifiedAt: fixedNow,

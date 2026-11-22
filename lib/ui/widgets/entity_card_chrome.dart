@@ -158,13 +158,26 @@ class EntityInlineEditorFooter extends StatelessWidget {
           EntityInlineErrorText(message: errorMessage),
           SizedBox(height: tokens.spacing.space2),
         ],
-        _EntityInlineEditorActionRow(
-          clearLabel: clearLabel,
-          onClear: onClear,
-          onCancel: onCancel,
-          onSave: onSave,
-          isBusy: isBusy,
-          saveLabel: saveLabel,
+        DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(
+                color: tokens.colors.line,
+                width: tokens.radii.borderWidth,
+              ),
+            ),
+          ),
+          child: Padding(
+            padding: EdgeInsets.only(top: tokens.spacing.space2),
+            child: _EntityInlineEditorActionBar(
+              clearLabel: clearLabel,
+              onClear: onClear,
+              onCancel: onCancel,
+              onSave: onSave,
+              isBusy: isBusy,
+              saveLabel: saveLabel,
+            ),
+          ),
         ),
       ],
     );
@@ -241,7 +254,6 @@ class EntityModalActionFooter extends StatelessWidget {
         UiButton(
           key: cancelKey,
           label: localizations.actionCancel,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           onPressed: isBusy ? null : onCancel,
         ),
@@ -258,10 +270,10 @@ class EntityModalActionFooter extends StatelessWidget {
   }
 }
 
-/// Renders the optional destructive clear button alongside the Cancel/Save action group.
-class _EntityInlineEditorActionButtons extends StatelessWidget {
-  /// Creates an [_EntityInlineEditorActionButtons].
-  const _EntityInlineEditorActionButtons({
+/// Renders the optional left destructive clear button paired with right-aligned Cancel and Save actions.
+class _EntityInlineEditorActionBar extends StatelessWidget {
+  /// Creates an [_EntityInlineEditorActionBar].
+  const _EntityInlineEditorActionBar({
     required this.clearLabel,
     required this.onClear,
     required this.onCancel,
@@ -285,12 +297,13 @@ class _EntityInlineEditorActionButtons extends StatelessWidget {
   /// Save callback.
   final VoidCallback onSave;
 
-  /// Optional custom Save label.
+  /// Optional custom Save label overriding localized default copy.
   final String? saveLabel;
 
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
+    final localizations = AppLocalizations.of(context);
     final showClear = clearLabel != null && onClear != null;
 
     return Wrap(
@@ -308,117 +321,24 @@ class _EntityInlineEditorActionButtons extends StatelessWidget {
           )
         else
           const SizedBox.shrink(),
-        _EntityInlineEditorCommitButtons(
-          isBusy: isBusy,
-          onCancel: onCancel,
-          onSave: onSave,
-          saveLabel: saveLabel,
-        ),
-      ],
-    );
-  }
-}
-
-/// Renders the bordered action row inside [EntityInlineEditorFooter].
-class _EntityInlineEditorActionRow extends StatelessWidget {
-  /// Creates an [_EntityInlineEditorActionRow].
-  const _EntityInlineEditorActionRow({
-    required this.clearLabel,
-    required this.onClear,
-    required this.onCancel,
-    required this.onSave,
-    required this.isBusy,
-    required this.saveLabel,
-  });
-
-  /// Optional left clear button label.
-  final String? clearLabel;
-
-  /// Disables actions and spins Save indicator while true.
-  final bool isBusy;
-
-  /// Cancel callback.
-  final VoidCallback onCancel;
-
-  /// Optional clear callback.
-  final VoidCallback? onClear;
-
-  /// Save callback.
-  final VoidCallback onSave;
-
-  /// Optional custom Save label.
-  final String? saveLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        border: Border(
-          top: BorderSide(
-            color: tokens.colors.line,
-            width: tokens.radii.borderWidth,
-          ),
-        ),
-      ),
-      child: Padding(
-        padding: EdgeInsets.only(top: tokens.spacing.space2),
-        child: _EntityInlineEditorActionButtons(
-          clearLabel: clearLabel,
-          onClear: onClear,
-          onCancel: onCancel,
-          onSave: onSave,
-          isBusy: isBusy,
-          saveLabel: saveLabel,
-        ),
-      ),
-    );
-  }
-}
-
-/// Renders the right-aligned Cancel and Save buttons inside [_EntityInlineEditorActionButtons].
-class _EntityInlineEditorCommitButtons extends StatelessWidget {
-  /// Creates an [_EntityInlineEditorCommitButtons].
-  const _EntityInlineEditorCommitButtons({
-    required this.isBusy,
-    required this.onCancel,
-    required this.onSave,
-    required this.saveLabel,
-  });
-
-  /// Disables buttons and spins the Save indicator while true.
-  final bool isBusy;
-
-  /// Cancel callback.
-  final VoidCallback onCancel;
-
-  /// Save callback.
-  final VoidCallback onSave;
-
-  /// Optional custom Save label overriding localized default copy.
-  final String? saveLabel;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        UiButton(
-          label: localizations.actionCancel,
-          variant: UiButtonVariant.secondary,
-          density: UiButtonDensity.compact,
-          onPressed: isBusy ? null : onCancel,
-        ),
-        const SizedBox(width: 6.0),
-        UiButton(
-          label: saveLabel ?? localizations.actionSave,
-          leadingIcon: isBusy ? Icons.sync_rounded : null,
-          variant: UiButtonVariant.primary,
-          density: UiButtonDensity.compact,
-          isLoading: isBusy,
-          onPressed: isBusy ? null : onSave,
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            UiButton(
+              label: localizations.actionCancel,
+              density: UiButtonDensity.compact,
+              onPressed: isBusy ? null : onCancel,
+            ),
+            const SizedBox(width: 6.0),
+            UiButton(
+              label: saveLabel ?? localizations.actionSave,
+              leadingIcon: isBusy ? Icons.sync_rounded : null,
+              variant: UiButtonVariant.primary,
+              density: UiButtonDensity.compact,
+              isLoading: isBusy,
+              onPressed: isBusy ? null : onSave,
+            ),
+          ],
         ),
       ],
     );
@@ -549,11 +469,7 @@ class _EntityMetaBarLeadingCluster extends StatelessWidget {
           onPressed: onCopyId,
         ),
         if (pillText != null && pillText.isNotEmpty)
-          UiPill(
-            label: pillText,
-            variant: UiPillVariant.badge,
-            tone: statusPillTone,
-          ),
+          UiPill(label: pillText, tone: statusPillTone),
       ],
     );
   }

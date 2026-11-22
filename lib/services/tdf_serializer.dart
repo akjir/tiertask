@@ -14,71 +14,74 @@
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import '../models/task_board.dart';
+import '../models/task_board_evaluator.dart';
 import '../models/task_item.dart';
 import '../models/tdf_error.dart';
 import '../models/tdf_location.dart';
 import '../models/tdf_metadata.dart';
 import '../models/tdf_sync_metadata.dart';
 import '../models/tdf_timezone.dart';
-import 'tdf_directive_parser.dart';
 import 'tdf_parser.dart';
-import 'tdf_scanner.dart';
 
 /// Byte-exact canonical `tdf 0.8.0` serializer (`spec/TDF_SPEC_0.8.0.md` Section 7).
 abstract final class TdfSerializer {
   /// Serializes [board] into canonical `LF`-terminated `tdf 0.8.0` text and validates all output bounds (`TDF-SER-001`–`TDF-SER-005`).
-  static String serialize(TaskBoard board) {
-    final buffer = StringBuffer()
-      ..writeln('tdf ${TdfBlockParser.supportedVersion}');
-    var totalBlocks = 0;
+  static String serialize(TaskBoard board) =>
+      serializeWithByteCount(board).output;
 
-    totalBlocks = _incrementBlockCount(
-      totalBlocks,
-      _serializeDeletedBlock(buffer, board.deletedBlock),
-    );
-    totalBlocks = _incrementBlockCount(
-      totalBlocks,
-      _serializeQueueBlock(buffer, board.queueBlock),
-    );
-
-    final sortedLabels = List<TdfLabel>.from(board.labels)
-      ..sort((a, b) => a.id.compareTo(b.id));
-    for (final label in sortedLabels) {
-      buffer.writeln();
-      totalBlocks = _incrementBlockCount(
-        totalBlocks,
-        _serializeLabel(buffer, label),
-      );
-    }
-
+  /// Serializes [board] into canonical `LF`-terminated `tdf 0.8.0` text and returns both the output string and its validated UTF-8 byte length.
+  static ({String output, int utf8ByteLength}) serializeWithByteCount(
+    TaskBoard board,
+  ) {
     if (board.locations.length > maxTdfLocations) {
       _failLimitExceeded(
         'Document exceeds maximum of $maxTdfLocations location blocks.',
       );
     }
+    final allTasks = board.allTasks;
+    final totalBlocks = TaskBoardEvaluator.computeCanonicalBlockCount(
+      tasks: allTasks,
+      labels: board.labels,
+      locations: board.locations,
+      deletedBlock: board.deletedBlock,
+      queueBlock: board.queueBlock,
+    );
+    if (totalBlocks > maxTdfBlocksPerDoc) {
+      _failLimitExceeded(
+        'Canonical output exceeds maximum of $maxTdfBlocksPerDoc blocks.',
+      );
+    }
+
+    final buffer = StringBuffer()
+      ..writeln('tdf ${TdfBlockParser.supportedVersion}');
+
+    _serializeDeletedBlock(buffer, board.deletedBlock);
+    _serializeQueueBlock(buffer, board.queueBlock);
+
+    final sortedLabels = List<TdfLabel>.from(board.labels)
+      ..sort((a, b) => a.id.compareTo(b.id));
+    for (final label in sortedLabels) {
+      buffer.writeln();
+      _serializeLabel(buffer, label);
+    }
+
     final sortedLocations = List<TdfLocation>.from(board.locations)
       ..sort((a, b) => a.id.compareTo(b.id));
     for (final location in sortedLocations) {
       buffer.writeln();
-      totalBlocks = _incrementBlockCount(
-        totalBlocks,
-        _serializeLocation(buffer, location),
-      );
+      _serializeLocation(buffer, location);
     }
 
-    final sortedTasks = List<TaskItem>.from(board.allTasks)
+    final sortedTasks = List<TaskItem>.from(allTasks)
       ..sort((a, b) => a.id.compareTo(b.id));
     for (final task in sortedTasks) {
       buffer.writeln();
-      totalBlocks = _incrementBlockCount(
-        totalBlocks,
-        _serializeTask(buffer, task),
-      );
+      _serializeTask(buffer, task);
     }
 
     final output = buffer.toString();
-    _validateOutputBounds(output);
-    return output;
+    final utf8ByteLength = _validateOutputBounds(output);
+    return (output: output, utf8ByteLength: utf8ByteLength);
   }
 
   /// Appends a single coalesced [rule] into its canonical group bucket.
@@ -266,15 +269,18 @@ abstract final class TdfSerializer {
     return '$year-$month-$day $hour:$minute:$second';
   }
 
-  /// Adds [addedBlocks] to [currentTotal] and enforces `MAX_BLOCKS_PER_DOC = 4096`.
-  static int _incrementBlockCount(int currentTotal, int addedBlocks) {
-    final nextTotal = currentTotal + addedBlocks;
-    if (nextTotal > maxTdfBlocksPerDoc) {
-      _failLimitExceeded(
-        'Canonical output exceeds maximum of $maxTdfBlocksPerDoc blocks.',
-      );
+  /// Returns whether [unit] at [index] in [source] begins a valid UTF-16 surrogate pair.
+  static bool _isSurrogatePairAt(
+    String source,
+    int index,
+    int length,
+    int unit,
+  ) {
+    if (unit < 0xD800 || unit > 0xDBFF || index + 1 >= length) {
+      return false;
     }
-    return nextTotal;
+    final low = source.codeUnitAt(index + 1);
+    return low >= 0xDC00 && low <= 0xDFFF;
   }
 
   /// Orders and coalesces [conditions] canonically and enforces `MAX_CONDITION_RULES_PER_ENTITY` and `MAX_LOCATION_REFS_PER_ENTITY`.
@@ -303,7 +309,7 @@ abstract final class TdfSerializer {
     if (conditions.any((rule) => rule is GlobalResetTaskCondition)) {
       return const <TaskCondition>[GlobalResetTaskCondition()];
     }
-    final coalesced = TdfDirectiveParser.coalesceLocationConditions(conditions);
+    final coalesced = TdfMetadata.coalesceLocationConditions(conditions);
     final dayRules = <TaskCondition>[];
     final timeRules = <TaskCondition>[];
     final locationRules = <TaskCondition>[];
@@ -337,13 +343,13 @@ abstract final class TdfSerializer {
     buffer.writeln('    }');
   }
 
-  /// Emits the root-level `deleted` block when `generation > 0` or records exist, returning emitted block count (`0` or `1`).
-  static int _serializeDeletedBlock(
+  /// Emits the root-level `deleted` block when `generation > 0` or records exist.
+  static void _serializeDeletedBlock(
     StringBuffer buffer,
     TdfDeletedBlock deletedBlock,
   ) {
     if (deletedBlock.isDefaultEmpty) {
-      return 0;
+      return;
     }
     if (deletedBlock.generation > maxTdfSyncGeneration) {
       _failLimitExceeded(
@@ -362,9 +368,7 @@ abstract final class TdfSerializer {
       ..writeln()
       ..writeln('deleted {')
       ..writeln('    generation ${deletedBlock.generation}');
-    final sortedTasks = List<TdfDeletedTaskRecord>.from(deletedBlock.tasks)
-      ..sort((a, b) => a.taskId.compareTo(b.taskId));
-    for (final record in sortedTasks) {
+    for (final record in deletedBlock.tasks) {
       if (record.completionsCheckpoint > maxTdfCompletions) {
         _failLimitExceeded(
           'Deleted task checkpoint exceeds maximum of $maxTdfCompletions.',
@@ -379,25 +383,19 @@ abstract final class TdfSerializer {
         buffer.writeln('    task ${record.taskId} $timestamp');
       }
     }
-    final sortedLabels = List<TdfDeletedLabelRecord>.from(deletedBlock.labels)
-      ..sort((a, b) => a.labelId.compareTo(b.labelId));
-    for (final record in sortedLabels) {
+    for (final record in deletedBlock.labels) {
       final timestamp = _formatExplicitSecondsUtcTimestamp(record.deletedAt);
       buffer.writeln('    label ${record.labelId} $timestamp');
     }
-    final sortedLocations = List<TdfDeletedLocationRecord>.from(
-      deletedBlock.locations,
-    )..sort((a, b) => a.locationId.compareTo(b.locationId));
-    for (final record in sortedLocations) {
+    for (final record in deletedBlock.locations) {
       final timestamp = _formatExplicitSecondsUtcTimestamp(record.deletedAt);
       buffer.writeln('    location ${record.locationId} $timestamp');
     }
     buffer.writeln('}');
-    return 1;
   }
 
-  /// Emits a `label <id> [scoped] { ... }` block in the 6-position canonical order, returning emitted block count (`1` or `2`).
-  static int _serializeLabel(StringBuffer buffer, TdfLabel label) {
+  /// Emits a `label <id> [scoped] { ... }` block in the 6-position canonical order.
+  static void _serializeLabel(StringBuffer buffer, TdfLabel label) {
     if (label.links.length > maxTdfLinksPerLabel) {
       _failLimitExceeded(
         'Label exceeds maximum of $maxTdfLinksPerLabel links.',
@@ -448,11 +446,10 @@ abstract final class TdfSerializer {
       _serializeConditionBlock(buffer, orderedConditions);
     }
     buffer.writeln('}');
-    return hasConditionBlock ? 2 : 1;
   }
 
-  /// Emits a `location <id> { ... }` block in the 6-position canonical order, returning `1`.
-  static int _serializeLocation(StringBuffer buffer, TdfLocation location) {
+  /// Emits a `location <id> { ... }` block in the 6-position canonical order.
+  static void _serializeLocation(StringBuffer buffer, TdfLocation location) {
     if (location.radius > maxTdfLocationRadius) {
       _failLimitExceeded(
         'Location radius exceeds maximum of $maxTdfLocationRadius meters.',
@@ -495,16 +492,15 @@ abstract final class TdfSerializer {
     buffer.writeln('location ${location.id} {');
     _writeAlignedDirectives(buffer, lines);
     buffer.writeln('}');
-    return 1;
   }
 
-  /// Emits the root-level `queue` block when non-empty or `modified != epoch`, returning emitted block count (`0` or `1`).
-  static int _serializeQueueBlock(
+  /// Emits the root-level `queue` block when non-empty or `modified != epoch`.
+  static void _serializeQueueBlock(
     StringBuffer buffer,
     TdfQueueBlock queueBlock,
   ) {
     if (queueBlock.isDefaultEmpty) {
-      return 0;
+      return;
     }
     if (queueBlock.taskIds.length > maxTdfQueueEntries) {
       _failLimitExceeded(
@@ -521,11 +517,10 @@ abstract final class TdfSerializer {
       buffer.writeln('    task $taskId');
     }
     buffer.writeln('}');
-    return 1;
   }
 
-  /// Emits a `task <id> [priority] { ... }` block in the 16-position canonical order, returning emitted block count (`1..3`).
-  static int _serializeTask(StringBuffer buffer, TaskItem task) {
+  /// Emits a `task <id> [priority] { ... }` block in the 16-position canonical order.
+  static void _serializeTask(StringBuffer buffer, TaskItem task) {
     if (task.links.length > maxTdfLinksPerTask) {
       _failLimitExceeded('Task exceeds maximum of $maxTdfLinksPerTask links.');
     }
@@ -656,7 +651,6 @@ abstract final class TdfSerializer {
       buffer.writeln('    }');
     }
     buffer.writeln('}');
-    return 1 + (hasConditionBlock ? 1 : 0) + (hasSubtasksBlock ? 1 : 0);
   }
 
   /// Enforces `MAX_ARGS_PER_STMT = 64` on a serialized condition rule (`TDF-VAL-002`, `TDF-SER-001`).
@@ -683,38 +677,50 @@ abstract final class TdfSerializer {
     }
   }
 
-  /// Validates that serialized canonical output does not exceed `MAX_FILE_BYTES` or `MAX_LINE_COUNT` (`TDF-SER-001`).
-  static void _validateOutputBounds(String output) {
-    if (!TdfScanner.isUtf8ByteLengthWithinBound(output, maxTdfFileBytes)) {
-      _failLimitExceeded(
-        'Canonical output exceeds maximum of $maxTdfFileBytes bytes.',
-      );
-    }
+  /// Validates `MAX_FILE_BYTES` and `MAX_LINE_COUNT` in a single pass and returns the exact UTF-8 byte length (`TDF-SER-001`).
+  static int _validateOutputBounds(String output) {
+    final length = output.length;
+    var byteCount = 0;
     var lineCount = 0;
-    for (var i = 0; i < output.length; i++) {
-      if (output.codeUnitAt(i) == 0x0A) {
-        lineCount++;
-        if (lineCount > maxTdfLineCount) {
-          throw TdfException(
-            kind: TdfErrorKind.limitExceeded,
-            line: lineCount,
-            message:
-                'Canonical output exceeds maximum of $maxTdfLineCount lines.',
-          );
+    int? exceededLine;
+    for (var i = 0; i < length; i++) {
+      final unit = output.codeUnitAt(i);
+      if (unit < 0x80) {
+        byteCount += 1;
+        if (unit == 0x0A) {
+          lineCount++;
+          if (lineCount > maxTdfLineCount && exceededLine == null) {
+            exceededLine = lineCount;
+          }
         }
+      } else if (unit < 0x800) {
+        byteCount += 2;
+      } else if (_isSurrogatePairAt(output, i, length, unit)) {
+        byteCount += 4;
+        i++;
+      } else {
+        byteCount += 3;
       }
-    }
-    if (output.isNotEmpty && output.codeUnitAt(output.length - 1) != 0x0A) {
-      lineCount++;
-      if (lineCount > maxTdfLineCount) {
-        throw TdfException(
-          kind: TdfErrorKind.limitExceeded,
-          line: lineCount,
-          message:
-              'Canonical output exceeds maximum of $maxTdfLineCount lines.',
+      if (byteCount > maxTdfFileBytes) {
+        _failLimitExceeded(
+          'Canonical output exceeds maximum of $maxTdfFileBytes bytes.',
         );
       }
     }
+    if (length > 0 && output.codeUnitAt(length - 1) != 0x0A) {
+      lineCount++;
+      if (lineCount > maxTdfLineCount && exceededLine == null) {
+        exceededLine = lineCount;
+      }
+    }
+    if (exceededLine != null) {
+      throw TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: exceededLine,
+        message: 'Canonical output exceeds maximum of $maxTdfLineCount lines.',
+      );
+    }
+    return byteCount;
   }
 
   /// Validates that [value] contains valid Unicode scalars and does not exceed [maxScalars] (`TDF-TYPE-001`, `TDF-SER-001`).

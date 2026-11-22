@@ -140,13 +140,49 @@ void main() {
       );
       expect(
         erfurtFix.toString(),
-        contains('Erfurt'),
-        reason: 'LocationFix.toString must include placeName',
+        isNot(contains('Erfurt')),
+        reason: 'LocationFix.toString must redact placeName',
+      );
+      expect(
+        erfurtFix.toString(),
+        isNot(contains('50.9787')),
+        reason: 'LocationFix.toString must redact latitude',
+      );
+      expect(
+        erfurtFix.toString(),
+        isNot(contains('11.0328')),
+        reason: 'LocationFix.toString must redact longitude',
+      );
+      expect(
+        erfurtFix.toString(),
+        contains('hasPlaceName: true'),
+        reason: 'LocationFix.toString must report non-PII hasPlaceName flag',
+      );
+      expect(
+        erfurtFix.toString(),
+        contains('hasCoordinates: true'),
+        reason: 'LocationFix.toString must report non-PII hasCoordinates flag',
+      );
+      expect(
+        erfurtFix.toString(),
+        contains('source: gps'),
+        reason: 'LocationFix.toString must report non-PII source name',
+      );
+      expect(
+        placeOnlyFix.toString(),
+        isNot(contains('Munich')),
+        reason:
+            'LocationFix.toString must redact placeName without coordinates',
+      );
+      expect(
+        placeOnlyFix.toString(),
+        contains('hasCoordinates: false'),
+        reason: 'LocationFix.toString must report hasCoordinates false when missing',
       );
     });
 
     test('enforces resume refresh cooldown boundaries across all LocationStatus variants', () {
-      final baseTime = DateTime.utc(2026, 11, 3, 12, 0, 0);
+      final baseTime = DateTime.utc(2026, 11, 3, 12);
       const minInterval = Duration(minutes: 5);
       const fix = LocationFix(
         latitude: 50.9787,
@@ -246,6 +282,16 @@ void main() {
         foundState.toString(),
         contains('found'),
         reason: 'LocationState.toString must include status name',
+      );
+      expect(
+        foundState.toString(),
+        isNot(contains('Erfurt')),
+        reason: 'LocationState.toString must not leak fix placeName',
+      );
+      expect(
+        foundState.toString(),
+        isNot(contains('50.9787')),
+        reason: 'LocationState.toString must not leak fix coordinates',
       );
     });
   });
@@ -379,8 +425,29 @@ void main() {
       );
       expect(
         candidate1.toString(),
-        contains('Willy-Brandt-Platz 1'),
-        reason: 'GeocodingCandidate.toString must include displayName',
+        isNot(contains('Willy-Brandt-Platz')),
+        reason: 'GeocodingCandidate.toString must redact street address displayName',
+      );
+      expect(
+        candidate1.toString(),
+        isNot(contains('Erfurt')),
+        reason:
+            'GeocodingCandidate.toString must redact locality in displayName',
+      );
+      expect(
+        candidate1.toString(),
+        isNot(contains('50.9725')),
+        reason: 'GeocodingCandidate.toString must redact latitude',
+      );
+      expect(
+        candidate1.toString(),
+        isNot(contains('11.0378')),
+        reason: 'GeocodingCandidate.toString must redact longitude',
+      );
+      expect(
+        candidate1.toString(),
+        contains('<redacted>'),
+        reason: 'GeocodingCandidate.toString must display redaction markers',
       );
     });
   });

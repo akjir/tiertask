@@ -162,6 +162,9 @@ class SettingsCodec {
   /// Maximum allowed nesting depth for preserved unknown JSON values (`16`).
   static const int maxJsonNestingDepth = 16;
 
+  /// Maximum allowed raw JSON container nesting depth (`64`) enforced before `jsonDecode`.
+  static const int maxRawJsonNestingDepth = 64;
+
   /// Canonical file name for host-local application settings.
   static const String settingsFileName = 'settings.json';
 
@@ -192,7 +195,7 @@ class SettingsCodec {
     'localWatchEnabled',
     'dueLeadWindow',
   };
-  static const Utf8Codec _utf8Codec = Utf8Codec(allowMalformed: false);
+  static const Utf8Codec _utf8Codec = Utf8Codec();
 
   /// Decodes UTF-8 [bytes] into a [SettingsDecodeResult] with per-field fallbacks and warnings.
   static SettingsDecodeResult decodeJsonBytes(List<int> bytes) {
@@ -434,6 +437,12 @@ class SettingsCodec {
         WorkspaceErrorKind.corruptSettingsPayload,
         'Settings file is not valid UTF-8.',
         cause: error,
+      );
+    }
+    if (_exceedsRawJsonNestingDepth(jsonText)) {
+      throw const WorkspaceException(
+        WorkspaceErrorKind.corruptSettingsPayload,
+        'Settings JSON nesting depth exceeds maximum allowed bound.',
       );
     }
     final Object? decoded;
@@ -810,6 +819,35 @@ class SettingsCodec {
     LogLevel.warn => 'warn',
     LogLevel.error || LogLevel.crash => 'error',
   };
+
+  /// Returns `true` when raw JSON container nesting (`{`, `[`) in [jsonText] exceeds [maxRawJsonNestingDepth].
+  static bool _exceedsRawJsonNestingDepth(String jsonText) {
+    var inString = false;
+    var escaped = false;
+    var depth = 0;
+    for (var i = 0; i < jsonText.length; i++) {
+      final codeUnit = jsonText.codeUnitAt(i);
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (codeUnit == 0x5C) {
+          escaped = true;
+        } else if (codeUnit == 0x22) {
+          inString = false;
+        }
+        continue;
+      }
+      if (codeUnit == 0x22) {
+        inString = true;
+      } else if (codeUnit == 0x7B || codeUnit == 0x5B) {
+        depth++;
+        if (depth > maxRawJsonNestingDepth) return true;
+      } else if ((codeUnit == 0x7D || codeUnit == 0x5D) && depth > 0) {
+        depth--;
+      }
+    }
+    return false;
+  }
 
   /// Extracts and freezes unrecognized keys from [source], omitting `'password'` and values exceeding depth bounds.
   static Map<String, Object?> _extractUnknownFields(

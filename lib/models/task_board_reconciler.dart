@@ -18,6 +18,7 @@ import 'package:flutter/foundation.dart';
 import '../services/app_logger.dart';
 import 'task_board.dart';
 import 'task_item.dart';
+import 'tdf_entity_merger.dart';
 import 'tdf_error.dart';
 import 'tdf_location.dart';
 import 'tdf_metadata.dart';
@@ -97,11 +98,173 @@ class LocationReconciliationOutcome {
   final bool retiredByUndelete;
 }
 
+/// Prebuilt entity lookup maps shared across merge reconciliation phases to eliminate redundant $O(N)$ re-indexing.
+@immutable
+class SyncBoardIndices {
+  /// Creates a [SyncBoardIndices] snapshot with prebuilt entity maps.
+  const SyncBoardIndices._({
+    required this.primaryTasks,
+    required this.secondaryTasks,
+    required this.baselineTasks,
+    required this.primaryLabels,
+    required this.secondaryLabels,
+    required this.baselineLabels,
+    required this.primaryLocations,
+    required this.secondaryLocations,
+    required this.baselineLocations,
+  });
+
+  /// Builds lookup maps for tasks, labels, and locations across [primary], [secondary], and optional [baseline].
+  factory SyncBoardIndices.fromBoards(
+    TaskBoard primary,
+    TaskBoard secondary,
+    TaskBoard? baseline,
+  ) => SyncBoardIndices._(
+    primaryTasks: <String, TaskItem>{
+      for (final task in primary.allTasks) task.id: task,
+    },
+    secondaryTasks: <String, TaskItem>{
+      for (final task in secondary.allTasks) task.id: task,
+    },
+    baselineTasks: baseline == null
+        ? null
+        : <String, TaskItem>{
+            for (final task in baseline.allTasks) task.id: task,
+          },
+    primaryLabels: <String, TdfLabel>{
+      for (final label in primary.labels) label.id: label,
+    },
+    secondaryLabels: <String, TdfLabel>{
+      for (final label in secondary.labels) label.id: label,
+    },
+    baselineLabels: baseline == null
+        ? null
+        : <String, TdfLabel>{
+            for (final label in baseline.labels) label.id: label,
+          },
+    primaryLocations: <String, TdfLocation>{
+      for (final location in primary.locations) location.id: location,
+    },
+    secondaryLocations: <String, TdfLocation>{
+      for (final location in secondary.locations) location.id: location,
+    },
+    baselineLocations: baseline == null
+        ? null
+        : <String, TdfLocation>{
+            for (final location in baseline.locations) location.id: location,
+          },
+  );
+
+  /// Optional baseline labels indexed by ID.
+  final Map<String, TdfLabel>? baselineLabels;
+
+  /// Optional baseline locations indexed by ID.
+  final Map<String, TdfLocation>? baselineLocations;
+
+  /// Optional baseline tasks indexed by ID.
+  final Map<String, TaskItem>? baselineTasks;
+
+  /// Primary board labels indexed by ID.
+  final Map<String, TdfLabel> primaryLabels;
+
+  /// Primary board locations indexed by ID.
+  final Map<String, TdfLocation> primaryLocations;
+
+  /// Primary board tasks indexed by ID.
+  final Map<String, TaskItem> primaryTasks;
+
+  /// Secondary board labels indexed by ID.
+  final Map<String, TdfLabel> secondaryLabels;
+
+  /// Secondary board locations indexed by ID.
+  final Map<String, TdfLocation> secondaryLocations;
+
+  /// Secondary board tasks indexed by ID.
+  final Map<String, TaskItem> secondaryTasks;
+}
+
 /// Stateless per-entity three-way location, label, and task reconciliation engine for `TaskBoardSync`.
 @immutable
 class TaskBoardReconciler {
   /// Prevents instantiation of this stateless helper class.
   const TaskBoardReconciler._();
+
+  static final _EntityReconciliationAdapter<TdfLabel, TdfDeletedLabelRecord>
+  _labelAdapter = _EntityReconciliationAdapter<TdfLabel, TdfDeletedLabelRecord>(
+    idOf: (label) => label.id,
+    effectiveModifiedAtOf: (label) => label.effectiveModifiedAt,
+    deletedAtOf: (record) => record.deletedAt,
+    payloadSignatureOf: TdfPayloadComparison.labelPayloadSignature,
+    makeBaselineTombstone: (id, deletedAt, _) =>
+        TdfDeletedLabelRecord(labelId: id, deletedAt: deletedAt),
+    makeResolvedDeleteRecord: (id, revision, _, _, _) =>
+        TdfDeletedLabelRecord(labelId: id, deletedAt: revision),
+    buildUndeletedEntity: (surviving, _, _, revision) =>
+        surviving.copyWith(modifiedAt: revision),
+  );
+
+  static final _EntityReconciliationAdapter<
+    TdfLocation,
+    TdfDeletedLocationRecord
+  >
+  _locationAdapter =
+      _EntityReconciliationAdapter<TdfLocation, TdfDeletedLocationRecord>(
+        idOf: (location) => location.id,
+        effectiveModifiedAtOf: (location) => location.effectiveModifiedAt,
+        deletedAtOf: (record) => record.deletedAt,
+        payloadSignatureOf: TdfPayloadComparison.locationPayloadSignature,
+        makeBaselineTombstone: (id, deletedAt, _) =>
+            TdfDeletedLocationRecord(locationId: id, deletedAt: deletedAt),
+        makeResolvedDeleteRecord: (id, revision, _, _, _) =>
+            TdfDeletedLocationRecord(locationId: id, deletedAt: revision),
+        buildUndeletedEntity: (surviving, _, _, revision) =>
+            surviving.copyWith(modifiedAt: revision),
+      );
+
+  static final _EntityReconciliationAdapter<TaskItem, TdfDeletedTaskRecord>
+  _taskAdapter = _EntityReconciliationAdapter<TaskItem, TdfDeletedTaskRecord>(
+    idOf: (task) => task.id,
+    effectiveModifiedAtOf: (task) => task.effectiveModifiedAt,
+    deletedAtOf: (record) => record.deletedAt,
+    payloadSignatureOf: TdfPayloadComparison.taskPayloadSignature,
+    makeBaselineTombstone: (id, deletedAt, baselineTask) =>
+        TdfDeletedTaskRecord(
+          taskId: id,
+          deletedAt: deletedAt,
+          completionsCheckpoint: baselineTask.completions,
+        ),
+    makeResolvedDeleteRecord: (id, revision, surviving, baseline, existing) =>
+        TdfDeletedTaskRecord(
+          taskId: id,
+          deletedAt: revision,
+          completionsCheckpoint: _max3Int(
+            surviving.completions,
+            baseline?.completions ?? 0,
+            existing.completionsCheckpoint,
+          ),
+        ),
+    buildUndeletedEntity: (surviving, baseline, deletedRecord, revision) =>
+        surviving.copyWith(
+          completions: _max3Int(
+            surviving.completions,
+            baseline?.completions ?? 0,
+            deletedRecord.completionsCheckpoint,
+          ),
+          modifiedAt: revision,
+        ),
+    onUnchangedExistingTombstone: (id, existing, surviving, baseline, deleted) {
+      final maxComp = _max3Int(
+        existing.completionsCheckpoint,
+        surviving.completions,
+        baseline.completions,
+      );
+      deleted[id] = TdfDeletedTaskRecord(
+        taskId: id,
+        deletedAt: existing.deletedAt,
+        completionsCheckpoint: maxComp,
+      );
+    },
+  );
 
   /// Throws a [TdfSyncOutcomeException] when [locations], [labels], or [tasks] recorded deletion conflicts or ambiguous recovery items.
   static void checkSyncOutcomes(
@@ -166,34 +329,25 @@ class TaskBoardReconciler {
     Map<String, TdfBoundDeletionDecision> boundDecisions = const {},
     Map<String, TdfRecoveryResolution> recoveryResolutions = const {},
     Set<String> freshlyRecoveredIds = const <String>{},
-  }) {
-    final (primary, secondary, baseline) = boards;
-    final primaryMap = _indexById(primary.labels, (label) => label.id);
-    final secondaryMap = _indexById(secondary.labels, (label) => label.id);
-    final baselineMap = baseline != null
-        ? _indexById(baseline.labels, (label) => label.id)
-        : null;
-    final context = _reconcileContext(boards, options);
-    final allIds = <String>{...primaryMap.keys, ...secondaryMap.keys};
-    final result = <String>{};
-    for (final id in allIds) {
-      if (_isLabelExplicitlyDeletedOrDiscarded(
-        id: id,
-        primaryLabel: primaryMap[id],
-        secondaryLabel: secondaryMap[id],
-        baselineLabel: baselineMap?[id],
-        initialDeleted: initialDeletedLabels,
-        context: context,
-        resolutions: resolutions,
-        boundDecisions: boundDecisions,
-        recoveryResolutions: recoveryResolutions,
-        freshlyRecoveredIds: freshlyRecoveredIds,
-      )) {
-        result.add(id);
-      }
-    }
-    return result;
-  }
+    SyncBoardIndices? indices,
+  }) => _computeExplicitlyDeletedIds<TdfLabel, TdfDeletedLabelRecord>(
+    adapter: _labelAdapter,
+    maps: _resolveBoardMaps<TdfLabel>(
+      boards,
+      cachedPrimary: indices?.primaryLabels,
+      cachedSecondary: indices?.secondaryLabels,
+      cachedBaseline: indices?.baselineLabels,
+      hasIndices: indices != null,
+      extract: (board) => board.labels,
+      idOf: (label) => label.id,
+    ),
+    initialDeleted: initialDeletedLabels,
+    context: _reconcileContext(boards, options),
+    resolutions: resolutions,
+    boundDecisions: boundDecisions,
+    recoveryResolutions: recoveryResolutions,
+    freshlyRecoveredIds: freshlyRecoveredIds,
+  );
 
   /// Computes task IDs resolved for explicit `Delete` or recovery `discard` so they do not trigger newly-introduced label or location reference conflicts (`TDF-DEL-002`).
   static Set<String> computeExplicitlyDeletedTaskIds(
@@ -204,46 +358,40 @@ class TaskBoardReconciler {
     Map<String, TdfBoundDeletionDecision> boundDecisions = const {},
     Map<String, TdfRecoveryResolution> recoveryResolutions = const {},
     Set<String> freshlyRecoveredIds = const <String>{},
-  }) {
-    final (primary, secondary, baseline) = boards;
-    final primaryMap = _indexById(primary.allTasks, (task) => task.id);
-    final secondaryMap = _indexById(secondary.allTasks, (task) => task.id);
-    final baselineMap = baseline != null
-        ? _indexById(baseline.allTasks, (task) => task.id)
-        : null;
-    final context = _reconcileContext(boards, options);
-    final allIds = <String>{...primaryMap.keys, ...secondaryMap.keys};
-    final result = <String>{};
-    for (final id in allIds) {
-      if (_isTaskExplicitlyDeletedOrDiscarded(
-        id: id,
-        primaryTask: primaryMap[id],
-        secondaryTask: secondaryMap[id],
-        baselineTask: baselineMap?[id],
-        initialDeleted: initialDeletedTasks,
-        context: context,
-        resolutions: resolutions,
-        boundDecisions: boundDecisions,
-        recoveryResolutions: recoveryResolutions,
-        freshlyRecoveredIds: freshlyRecoveredIds,
-      )) {
-        result.add(id);
-      }
-    }
-    return result;
-  }
+    SyncBoardIndices? indices,
+  }) => _computeExplicitlyDeletedIds<TaskItem, TdfDeletedTaskRecord>(
+    adapter: _taskAdapter,
+    maps: _resolveBoardMaps<TaskItem>(
+      boards,
+      cachedPrimary: indices?.primaryTasks,
+      cachedSecondary: indices?.secondaryTasks,
+      cachedBaseline: indices?.baselineTasks,
+      hasIndices: indices != null,
+      extract: (board) => board.allTasks,
+      idOf: (task) => task.id,
+    ),
+    initialDeleted: initialDeletedTasks,
+    context: _reconcileContext(boards, options),
+    resolutions: resolutions,
+    boundDecisions: boundDecisions,
+    recoveryResolutions: recoveryResolutions,
+    freshlyRecoveredIds: freshlyRecoveredIds,
+  );
 
   /// Computes newly introduced label references $A_L(T) \cup A_R(T)$ across live and conflict-retained tasks (`TDF-DEL-002`).
   static Set<String> computeNewlyReferencedLabelIds(
     (TaskBoard, TaskBoard, TaskBoard?) boards,
     Map<String, TdfDeletedTaskRecord> initialDeletedTasks, {
     Set<String> explicitlyDeletedTaskIds = const <String>{},
+    SyncBoardIndices? indices,
   }) {
     final (primary, secondary, baseline) = boards;
     if (baseline == null) {
       return const <String>{};
     }
-    final baseTaskMap = _indexById(baseline.allTasks, (task) => task.id);
+    final baseTaskMap =
+        indices?.baselineTasks ??
+        _indexById(baseline.allTasks, (task) => task.id);
     final newlyReferenced = <String>{};
     for (final task in <TaskItem>[...primary.allTasks, ...secondary.allTasks]) {
       if (explicitlyDeletedTaskIds.contains(task.id)) {
@@ -266,41 +414,35 @@ class TaskBoardReconciler {
     Map<String, TdfDeletedLabelRecord> initialDeletedLabels, {
     Set<String> explicitlyDeletedTaskIds = const <String>{},
     Set<String> explicitlyDeletedLabelIds = const <String>{},
+    SyncBoardIndices? indices,
   }) {
     final (primary, secondary, baseline) = boards;
     if (baseline == null) {
       return const <String>{};
     }
-    final baseTaskMap = _indexById(baseline.allTasks, (task) => task.id);
-    final baseLabelMap = _indexById(baseline.labels, (label) => label.id);
+    final baseTaskMap =
+        indices?.baselineTasks ??
+        _indexById(baseline.allTasks, (task) => task.id);
+    final baseLabelMap =
+        indices?.baselineLabels ??
+        _indexById(baseline.labels, (label) => label.id);
     final newlyReferenced = <String>{};
-
-    for (final task in <TaskItem>[...primary.allTasks, ...secondary.allTasks]) {
-      if (explicitlyDeletedTaskIds.contains(task.id)) {
-        continue;
-      }
-      final taskLocs = _extractLocationIds(task.conditions);
-      final baseTask = baseTaskMap[task.id];
-      if (baseTask != null) {
-        final baseLocs = _extractLocationIds(baseTask.conditions);
-        _collectAddedStrings(taskLocs, baseLocs, newlyReferenced);
-      } else {
-        newlyReferenced.addAll(taskLocs);
-      }
-    }
-    for (final label in <TdfLabel>[...primary.labels, ...secondary.labels]) {
-      if (explicitlyDeletedLabelIds.contains(label.id)) {
-        continue;
-      }
-      final labelLocs = _extractLocationIds(label.conditions);
-      final baseLabel = baseLabelMap[label.id];
-      if (baseLabel != null) {
-        final baseLocs = _extractLocationIds(baseLabel.conditions);
-        _collectAddedStrings(labelLocs, baseLocs, newlyReferenced);
-      } else {
-        newlyReferenced.addAll(labelLocs);
-      }
-    }
+    _collectNewlyReferencedConditionLocations<TaskItem>(
+      entities: <TaskItem>[...primary.allTasks, ...secondary.allTasks],
+      excludedIds: explicitlyDeletedTaskIds,
+      baselineById: baseTaskMap,
+      idOf: (task) => task.id,
+      conditionsOf: (task) => task.conditions,
+      target: newlyReferenced,
+    );
+    _collectNewlyReferencedConditionLocations<TdfLabel>(
+      entities: <TdfLabel>[...primary.labels, ...secondary.labels],
+      excludedIds: explicitlyDeletedLabelIds,
+      baselineById: baseLabelMap,
+      idOf: (label) => label.id,
+      conditionsOf: (label) => label.conditions,
+      target: newlyReferenced,
+    );
     return newlyReferenced;
   }
 
@@ -315,48 +457,47 @@ class TaskBoardReconciler {
     Set<String> freshlyRecoveredIds = const <String>{},
     Set<String> tombstonedLocationIds = const <String>{},
     Set<String> newlyReferencedLabelIds = const <String>{},
+    SyncBoardIndices? indices,
   }) {
-    final (primary, secondary, baseline) = boards;
-    final primaryMap = _indexById(primary.labels, (label) => label.id);
-    final secondaryMap = _indexById(secondary.labels, (label) => label.id);
-    final baselineMap = baseline != null
-        ? _indexById(baseline.labels, (label) => label.id)
-        : null;
-    final context = _reconcileContext(boards, options);
-    final accumulator = (
-      live: <TdfLabel>[],
-      deleted: <String, TdfDeletedLabelRecord>{...initialDeleted},
-      conflicted: <String>[],
-      ambiguous: <String>[],
-      discarded: <String>{},
-      explicitlyDeleted: <String>{},
+    final result = _reconcileSimpleEntities<TdfLabel, TdfDeletedLabelRecord>(
+      adapter: _labelAdapter,
+      maps: _resolveBoardMaps<TdfLabel>(
+        boards,
+        cachedPrimary: indices?.primaryLabels,
+        cachedSecondary: indices?.secondaryLabels,
+        cachedBaseline: indices?.baselineLabels,
+        hasIndices: indices != null,
+        extract: (board) => board.labels,
+        idOf: (label) => label.id,
+      ),
+      initialDeleted: initialDeleted,
+      context: _reconcileContext(boards, options),
+      resolutions: resolutions,
+      boundDecisions: boundDecisions,
+      recoveryResolutions: recoveryResolutions,
+      freshlyRecoveredIds: freshlyRecoveredIds,
+      logEventName: 'sync.reconcile.label',
+      mergeTwoSided: (local, incoming, baseline) =>
+          TdfEntityMerger.mergeLabelWithBaseline(
+            local: local,
+            incoming: incoming,
+            baseline: baseline,
+            tombstonedLocationIds: tombstonedLocationIds,
+          ),
+      isUnchangedFromBaseline: (id, surviving, baseLabel) =>
+          surviving.effectiveModifiedAt == baseLabel.effectiveModifiedAt &&
+          TdfPayloadComparison.compareLabelPayloads(surviving, baseLabel) ==
+              0 &&
+          !newlyReferencedLabelIds.contains(id),
     );
-    var retired = false;
-    for (final id in <String>{...primaryMap.keys, ...secondaryMap.keys}) {
-      final pair = (primaryMap[id], secondaryMap[id], baselineMap?[id]);
-      if (_reconcileSingleLabel(
-        id,
-        pair,
-        context,
-        accumulator,
-        resolutions: resolutions,
-        boundDecisions: boundDecisions,
-        recoveryResolutions: recoveryResolutions,
-        freshlyRecoveredIds: freshlyRecoveredIds,
-        tombstonedLocationIds: tombstonedLocationIds,
-        newlyReferencedLabelIds: newlyReferencedLabelIds,
-      )) {
-        retired = true;
-      }
-    }
     return LabelReconciliationOutcome(
-      liveLabels: accumulator.live,
-      deletedLabelsById: accumulator.deleted,
-      conflictedIds: accumulator.conflicted,
-      ambiguousIds: accumulator.ambiguous,
-      retiredByUndelete: retired,
-      discardedIds: accumulator.discarded,
-      explicitlyDeletedIds: accumulator.explicitlyDeleted,
+      liveLabels: result.accumulator.live,
+      deletedLabelsById: result.accumulator.deleted,
+      conflictedIds: result.accumulator.conflicted,
+      ambiguousIds: result.accumulator.ambiguous,
+      retiredByUndelete: result.retiredByUndelete,
+      discardedIds: result.accumulator.discarded,
+      explicitlyDeletedIds: result.accumulator.explicitlyDeleted,
     );
   }
 
@@ -370,50 +511,51 @@ class TaskBoardReconciler {
     Map<String, TdfRecoveryResolution> recoveryResolutions = const {},
     Set<String> freshlyRecoveredIds = const <String>{},
     Set<String> newlyReferencedLocationIds = const <String>{},
+    SyncBoardIndices? indices,
   }) {
-    final (primary, secondary, baseline) = boards;
-    final primaryMap = _indexById(primary.locations, (location) => location.id);
-    final secondaryMap = _indexById(
-      secondary.locations,
-      (location) => location.id,
-    );
-    final baselineMap = baseline != null
-        ? _indexById(baseline.locations, (location) => location.id)
-        : null;
-    final context = _reconcileContext(boards, options);
-    final accumulator = (
-      live: <TdfLocation>[],
-      deleted: <String, TdfDeletedLocationRecord>{...initialDeleted},
-      conflicted: <String>[],
-      ambiguous: <String>[],
-      discarded: <String>{},
-      explicitlyDeleted: <String>{},
-    );
-    var retired = false;
-    for (final id in <String>{...primaryMap.keys, ...secondaryMap.keys}) {
-      final pair = (primaryMap[id], secondaryMap[id], baselineMap?[id]);
-      if (_reconcileSingleLocation(
-        id,
-        pair,
-        context,
-        accumulator,
-        resolutions: resolutions,
-        boundDecisions: boundDecisions,
-        recoveryResolutions: recoveryResolutions,
-        freshlyRecoveredIds: freshlyRecoveredIds,
-        newlyReferencedLocationIds: newlyReferencedLocationIds,
-      )) {
-        retired = true;
-      }
-    }
+    final result =
+        _reconcileSimpleEntities<TdfLocation, TdfDeletedLocationRecord>(
+          adapter: _locationAdapter,
+          maps: _resolveBoardMaps<TdfLocation>(
+            boards,
+            cachedPrimary: indices?.primaryLocations,
+            cachedSecondary: indices?.secondaryLocations,
+            cachedBaseline: indices?.baselineLocations,
+            hasIndices: indices != null,
+            extract: (board) => board.locations,
+            idOf: (location) => location.id,
+          ),
+          initialDeleted: initialDeleted,
+          context: _reconcileContext(boards, options),
+          resolutions: resolutions,
+          boundDecisions: boundDecisions,
+          recoveryResolutions: recoveryResolutions,
+          freshlyRecoveredIds: freshlyRecoveredIds,
+          logEventName: 'sync.reconcile.location',
+          mergeTwoSided: (local, incoming, baseline) =>
+              TdfEntityMerger.mergeLocationWithBaseline(
+                local: local,
+                incoming: incoming,
+                baseline: baseline,
+              ),
+          isUnchangedFromBaseline: (id, surviving, baseLocation) =>
+              surviving.effectiveModifiedAt ==
+                  baseLocation.effectiveModifiedAt &&
+              TdfPayloadComparison.compareLocationPayloads(
+                    surviving,
+                    baseLocation,
+                  ) ==
+                  0 &&
+              !newlyReferencedLocationIds.contains(id),
+        );
     return LocationReconciliationOutcome(
-      liveLocations: accumulator.live,
-      deletedLocationsById: accumulator.deleted,
-      conflictedIds: accumulator.conflicted,
-      ambiguousIds: accumulator.ambiguous,
-      retiredByUndelete: retired,
-      discardedIds: accumulator.discarded,
-      explicitlyDeletedIds: accumulator.explicitlyDeleted,
+      liveLocations: result.accumulator.live,
+      deletedLocationsById: result.accumulator.deleted,
+      conflictedIds: result.accumulator.conflicted,
+      ambiguousIds: result.accumulator.ambiguous,
+      retiredByUndelete: result.retiredByUndelete,
+      discardedIds: result.accumulator.discarded,
+      explicitlyDeletedIds: result.accumulator.explicitlyDeleted,
     );
   }
 
@@ -432,20 +574,24 @@ class TaskBoardReconciler {
     Set<String>? validLabelIds,
     Map<String, TdfLabel> postCascadeLabelsById = const <String, TdfLabel>{},
     TdfCleanupMode cleanupMode = TdfCleanupMode.finalStage,
+    SyncBoardIndices? indices,
   }) {
-    final (primary, secondary, baseline) = boards;
-    final primaryMap = _indexById(primary.allTasks, (task) => task.id);
-    final secondaryMap = _indexById(secondary.allTasks, (task) => task.id);
-    final baselineMap = baseline != null
-        ? _indexById(baseline.allTasks, (task) => task.id)
-        : null;
+    final maps = _resolveBoardMaps<TaskItem>(
+      boards,
+      cachedPrimary: indices?.primaryTasks,
+      cachedSecondary: indices?.secondaryTasks,
+      cachedBaseline: indices?.baselineTasks,
+      hasIndices: indices != null,
+      extract: (board) => board.allTasks,
+      idOf: (task) => task.id,
+    );
     final context = _reconcileContext(boards, options);
-    final allTaskIds = <String>{...primaryMap.keys, ...secondaryMap.keys};
+    final allTaskIds = <String>{...maps.primary.keys, ...maps.secondary.keys};
     final previewContext = _buildPreviewPrerequisiteContext(
       allTaskIds: allTaskIds,
-      primaryMap: primaryMap,
-      secondaryMap: secondaryMap,
-      baselineMap: baselineMap,
+      primaryMap: maps.primary,
+      secondaryMap: maps.secondary,
+      baselineMap: maps.baseline,
       initialDeleted: initialDeleted,
       context: context,
       resolutions: resolutions,
@@ -454,35 +600,42 @@ class TaskBoardReconciler {
       freshlyRecoveredIds: freshlyRecoveredIds,
     );
 
-    final accumulator = (
-      live: <TaskItem>[],
-      uncleanedById: <String, TaskItem>{},
-      undeletedIds: <String>{},
-      discardedIds: <String>{},
-      explicitlyDeletedIds: <String>{},
-      deleted: <String, TdfDeletedTaskRecord>{...initialDeleted},
-      conflicted: <String>[],
-      ambiguous: <String>[],
+    final accumulator = _newAccumulator<TaskItem, TdfDeletedTaskRecord>(
+      initialDeleted,
     );
+    final uncleanedById = <String, TaskItem>{};
+    final undeletedIds = <String>{};
     var retired = false;
 
     for (final id in allTaskIds) {
-      final primaryTask = primaryMap[id];
-      final secondaryTask = secondaryMap[id];
+      final primaryTask = maps.primary[id];
+      final secondaryTask = maps.secondary[id];
       if (primaryTask != null && secondaryTask != null) {
         continue;
       }
-      if (_reconcileOneSidedTask(
-        id,
-        (primaryTask, secondaryTask, baselineMap?[id]),
-        context,
-        accumulator,
+      if (_reconcileOneSidedEntity<TaskItem, TdfDeletedTaskRecord>(
+        adapter: _taskAdapter,
+        id: id,
+        entities: (primaryTask, secondaryTask, maps.baseline?[id]),
+        context: context,
+        accumulator: accumulator,
         resolutions: resolutions,
         boundDecisions: boundDecisions,
         recoveryResolutions: recoveryResolutions,
         freshlyRecoveredIds: freshlyRecoveredIds,
-        previewLiveTasksById: previewContext.liveById,
-        previewDeletedTaskIds: previewContext.deletedIds,
+        isUnchangedFromBaseline: (surviving, baseTask) =>
+            _isTaskUnchangedFromBaseline(
+              surviving,
+              baseTask,
+              previewLiveTasksById: previewContext.liveById,
+              previewDeletedTaskIds: previewContext.deletedIds,
+              nowUtc: context.now,
+            ),
+        onLiveAdded: (addedId, task) => uncleanedById[addedId] = task,
+        onUndeleted: (restoredId, restored) {
+          uncleanedById[restoredId] = restored;
+          undeletedIds.add(restoredId);
+        },
       )) {
         retired = true;
       }
@@ -494,7 +647,7 @@ class TaskBoardReconciler {
     };
     final mergedDeletedTaskIds = <String>{
       ...accumulator.deleted.keys,
-      ...accumulator.discardedIds,
+      ...accumulator.discarded,
     };
     final orderedLive = <TaskItem>[];
     final oneSidedById = _indexById(accumulator.live, (task) => task.id);
@@ -506,14 +659,14 @@ class TaskBoardReconciler {
     var reconciledTwoSidedCount = 0;
 
     for (final id in allTaskIds) {
-      final primaryTask = primaryMap[id];
-      final secondaryTask = secondaryMap[id];
+      final primaryTask = maps.primary[id];
+      final secondaryTask = maps.secondary[id];
       if (primaryTask != null && secondaryTask != null) {
         final step = _reconcileTwoSidedTask(
           id: id,
           local: primaryTask,
           incoming: secondaryTask,
-          baseline: baselineMap?[id],
+          baseline: maps.baseline?[id],
           now: context.now,
           cleanupMode: cleanupMode,
           mergedLiveTasksById: mergedHeadersById,
@@ -523,7 +676,7 @@ class TaskBoardReconciler {
           deletedLabelsIncoming: deletedLabelsIncoming,
           validLabelIds: validLabelIds,
           postCascadeLabelsById: postCascadeLabelsById,
-          uncleanedOut: accumulator.uncleanedById,
+          uncleanedOut: uncleanedById,
           debugEntriesOut: debugEntries,
         );
         orderedLive.add(step.task);
@@ -556,10 +709,10 @@ class TaskBoardReconciler {
       conflictedIds: accumulator.conflicted,
       ambiguousIds: accumulator.ambiguous,
       retiredByUndelete: retired,
-      uncleanedLiveTasksById: accumulator.uncleanedById,
-      undeletedTaskIds: accumulator.undeletedIds,
-      discardedTaskIds: accumulator.discardedIds,
-      explicitlyDeletedTaskIds: accumulator.explicitlyDeletedIds,
+      uncleanedLiveTasksById: uncleanedById,
+      undeletedTaskIds: undeletedIds,
+      discardedTaskIds: accumulator.discarded,
+      explicitlyDeletedTaskIds: accumulator.explicitlyDeleted,
     );
   }
 
@@ -595,6 +748,7 @@ class TaskBoardReconciler {
     (TaskBoard, TaskBoard, TaskBoard?)? boards,
     Set<String>? mutatedByNowCascadeOut,
     DateTime? now,
+    SyncBoardIndices? indices,
   }) {
     final baseIds = <String>{
       if (baselineLabels != null)
@@ -606,24 +760,28 @@ class TaskBoardReconciler {
         for (final label in baselineLabels)
           if (label.isScoped && !validIds.contains(label.id)) label.id,
     };
-    final primaryMap = boards != null
-        ? _indexById(boards.$1.allTasks, (task) => task.id)
-        : const <String, TaskItem>{};
-    final secondaryMap = boards != null
-        ? _indexById(boards.$2.allTasks, (task) => task.id)
-        : const <String, TaskItem>{};
-    final baselineMap = boards?.$3 != null
-        ? _indexById(
-            boards?.$3?.allTasks ?? const <TaskItem>[],
-            (task) => task.id,
+    final maps = boards != null
+        ? _resolveBoardMaps<TaskItem>(
+            boards,
+            cachedPrimary: indices?.primaryTasks,
+            cachedSecondary: indices?.secondaryTasks,
+            cachedBaseline: indices?.baselineTasks,
+            hasIndices: indices != null,
+            extract: (board) => board.allTasks,
+            idOf: (task) => task.id,
           )
-        : const <String, TaskItem>{};
+        : (
+            primary: indices?.primaryTasks ?? const <String, TaskItem>{},
+            secondary: indices?.secondaryTasks ?? const <String, TaskItem>{},
+            baseline: indices?.baselineTasks,
+          );
+    final baselineMap = maps.baseline ?? const <String, TaskItem>{};
     final alreadyQueuedUnlabelled = boards != null
         ? _computeAlreadyQueuedUnlabelledTaskIds(
             boards.$1,
             boards.$2,
-            primaryMap,
-            secondaryMap,
+            maps.primary,
+            maps.secondary,
           )
         : const <String>{};
     return <TaskItem>[
@@ -639,8 +797,8 @@ class TaskBoardReconciler {
           alreadyQueuedUnlabelledTaskIds: alreadyQueuedUnlabelled,
           evictedFromQueueOut: evictedFromQueueOut,
           sourceVariants: (
-            primaryMap[task.id],
-            secondaryMap[task.id],
+            maps.primary[task.id],
+            maps.secondary[task.id],
             baselineMap[task.id],
           ),
           mutatedByNowCascadeOut: mutatedByNowCascadeOut,
@@ -659,23 +817,28 @@ class TaskBoardReconciler {
     Set<String> explicitlyDeletedLocationIds = const <String>{},
     (TaskBoard, TaskBoard, TaskBoard?)? boards,
     DateTime? now,
+    SyncBoardIndices? indices,
   }) {
     final baseIds = <String>{
       if (baselineLocations != null)
         for (final location in baselineLocations) location.id,
     };
-    final primaryMap = boards != null
-        ? _indexById(boards.$1.labels, (label) => label.id)
-        : const <String, TdfLabel>{};
-    final secondaryMap = boards != null
-        ? _indexById(boards.$2.labels, (label) => label.id)
-        : const <String, TdfLabel>{};
-    final baselineMap = boards?.$3 != null
-        ? _indexById(
-            boards?.$3?.labels ?? const <TdfLabel>[],
-            (label) => label.id,
+    final maps = boards != null
+        ? _resolveBoardMaps<TdfLabel>(
+            boards,
+            cachedPrimary: indices?.primaryLabels,
+            cachedSecondary: indices?.secondaryLabels,
+            cachedBaseline: indices?.baselineLabels,
+            hasIndices: indices != null,
+            extract: (board) => board.labels,
+            idOf: (label) => label.id,
           )
-        : const <String, TdfLabel>{};
+        : (
+            primary: indices?.primaryLabels ?? const <String, TdfLabel>{},
+            secondary: indices?.secondaryLabels ?? const <String, TdfLabel>{},
+            baseline: indices?.baselineLabels,
+          );
+    final baselineMap = maps.baseline ?? const <String, TdfLabel>{};
     return <TdfLabel>[
       for (final label in labels)
         _stripDeletedLocationsFromSingleLabel(
@@ -686,8 +849,8 @@ class TaskBoardReconciler {
           discardedLocationIds: discardedLocationIds,
           explicitlyDeletedLocationIds: explicitlyDeletedLocationIds,
           sourceVariants: (
-            primaryMap[label.id],
-            secondaryMap[label.id],
+            maps.primary[label.id],
+            maps.secondary[label.id],
             baselineMap[label.id],
           ),
           now: now,
@@ -730,8 +893,9 @@ class TaskBoardReconciler {
   /// Verifies asymmetric `secondary.deleted.generation >= effectiveAckGen` (`TDF-REC-001`) and completion-counter monotonicity (`TDF-MERGE-010`).
   static void verifyGenerationsAndCompletionHistory(
     (TaskBoard, TaskBoard, TaskBoard?) boards,
-    int? effectiveAckGen,
-  ) {
+    int? effectiveAckGen, {
+    SyncBoardIndices? indices,
+  }) {
     final (primary, secondary, baseline) = boards;
     final rightGen = secondary.deletedBlock.generation;
     if (effectiveAckGen != null && rightGen < effectiveAckGen) {
@@ -743,8 +907,12 @@ class TaskBoardReconciler {
     if (baseline == null) {
       return;
     }
-    final primaryMap = _indexById(primary.allTasks, (task) => task.id);
-    final secondaryMap = _indexById(secondary.allTasks, (task) => task.id);
+    final primaryMap =
+        indices?.primaryTasks ??
+        _indexById(primary.allTasks, (task) => task.id);
+    final secondaryMap =
+        indices?.secondaryTasks ??
+        _indexById(secondary.allTasks, (task) => task.id);
     final regressedIds = <String>[];
     for (final baseTask in baseline.allTasks) {
       final primaryTask = primaryMap[baseTask.id];
@@ -843,6 +1011,35 @@ class TaskBoardReconciler {
     }
   }
 
+  /// Appends newly introduced `<location-id>` condition references across [entities] into [target].
+  static void _collectNewlyReferencedConditionLocations<T extends Object>({
+    required Iterable<T> entities,
+    required Set<String> excludedIds,
+    required Map<String, T> baselineById,
+    required String Function(T entity) idOf,
+    required List<TaskCondition> Function(T entity) conditionsOf,
+    required Set<String> target,
+  }) {
+    for (final entity in entities) {
+      final id = idOf(entity);
+      if (excludedIds.contains(id)) {
+        continue;
+      }
+      final currentLocs = TdfMetadata.collectDistinctLocationIds(
+        conditionsOf(entity),
+      );
+      final baseEntity = baselineById[id];
+      if (baseEntity != null) {
+        final baseLocs = TdfMetadata.collectDistinctLocationIds(
+          conditionsOf(baseEntity),
+        );
+        _collectAddedStrings(currentLocs, baseLocs, target);
+      } else {
+        target.addAll(currentLocs);
+      }
+    }
+  }
+
   /// Returns task IDs already listed in `queue` with `labelIds.isEmpty` on either [primary] or [secondary] (`TDF-MERGE-011` Point 1).
   static Set<String> _computeAlreadyQueuedUnlabelledTaskIds(
     TaskBoard primary,
@@ -888,15 +1085,38 @@ class TaskBoardReconciler {
     return decision;
   }
 
-  /// Extracts all referenced `<location-id>` tokens from [conditions].
-  static List<String> _extractLocationIds(List<TaskCondition> conditions) {
-    final ids = <String>[];
-    for (final rule in conditions) {
-      if (rule is LocationTaskCondition && rule.locationIds.isNotEmpty) {
-        ids.addAll(rule.locationIds);
+  /// Computes one-sided entity IDs resolved to explicit `Delete` or recovery `discard` (`TDF-DEL-002`).
+  static Set<String>
+  _computeExplicitlyDeletedIds<T extends Object, D extends Object>({
+    required _EntityReconciliationAdapter<T, D> adapter,
+    required _EntityBoardMaps<T> maps,
+    required Map<String, D> initialDeleted,
+    required _ReconcileContext context,
+    required Map<String, TdfDeletionResolution> resolutions,
+    required Map<String, TdfBoundDeletionDecision> boundDecisions,
+    required Map<String, TdfRecoveryResolution> recoveryResolutions,
+    required Set<String> freshlyRecoveredIds,
+  }) {
+    final allIds = <String>{...maps.primary.keys, ...maps.secondary.keys};
+    final result = <String>{};
+    for (final id in allIds) {
+      if (_isEntityExplicitlyDeletedOrDiscarded<T, D>(
+        adapter: adapter,
+        id: id,
+        primaryEntity: maps.primary[id],
+        secondaryEntity: maps.secondary[id],
+        baselineEntity: maps.baseline?[id],
+        initialDeleted: initialDeleted,
+        context: context,
+        resolutions: resolutions,
+        boundDecisions: boundDecisions,
+        recoveryResolutions: recoveryResolutions,
+        freshlyRecoveredIds: freshlyRecoveredIds,
+      )) {
+        result.add(id);
       }
     }
-    return ids;
+    return result;
   }
 
   /// Filters [locationIds] against [validLocationIds], [deletedLocationsById], [baselineLocationSet], and [discardedLocationIds].
@@ -945,121 +1165,62 @@ class TaskBoardReconciler {
     );
   }
 
-  /// Computes the post-cascade [TaskItem] and its deterministic `TDF-MERGE-004` / `TDF-DEL-003` revision after stripping deleted labels.
-  static TaskItem _finalizePostLabelCascadeTask(
-    TaskItem task, {
-    required List<String> retained,
-    required bool nextPriority,
+  /// Finalizes a post-cascade entity [candidate] with its deterministic `TDF-MERGE-004` / `TDF-DEL-003` revision.
+  static T _finalizePostCascadeEntity<T extends Object>({
+    required T original,
+    required T candidate,
     required bool strippedByMutation,
-    required (TaskItem?, TaskItem?, TaskItem?) sourceVariants,
+    required (T?, T?, T?) sourceVariants,
     required DateTime? now,
+    required DateTime Function(T entity) effectiveModifiedAtOf,
+    required DateTime? Function(T entity) modifiedAtOf,
+    required int Function(T left, T right) compareVersions,
+    required bool Function(T reference, T target) matchesPayload,
+    required T Function(T entity, DateTime? modifiedAt) withModifiedAt,
+    required bool checkOneSidedSourceMatch,
   }) {
-    final candidate = task.copyWith(
-      labelIds: retained,
-      isPriority: nextPriority,
-    );
     if (strippedByMutation && now != null) {
-      return candidate.copyWith(
-        modifiedAt: TaskItem.nextModifiedTimestamp(
-          now,
-          task.effectiveModifiedAt,
-        ),
+      return withModifiedAt(
+        candidate,
+        TaskItem.nextModifiedTimestamp(now, effectiveModifiedAtOf(original)),
       );
     }
-    final (primaryTask, secondaryTask, baselineTask) = sourceVariants;
-    if (primaryTask != null && secondaryTask != null) {
-      var greatest =
-          TdfPayloadComparison.compareTaskVersions(
-                primaryTask,
-                secondaryTask,
-              ) >=
-              0
-          ? primaryTask
-          : secondaryTask;
-      if (baselineTask != null &&
-          TdfPayloadComparison.compareTaskVersions(baselineTask, greatest) >
-              0) {
-        greatest = baselineTask;
+    final (primaryEntity, secondaryEntity, baselineEntity) = sourceVariants;
+    if (primaryEntity != null && secondaryEntity != null) {
+      var greatest = compareVersions(primaryEntity, secondaryEntity) >= 0
+          ? primaryEntity
+          : secondaryEntity;
+      if (baselineEntity != null &&
+          compareVersions(baselineEntity, greatest) > 0) {
+        greatest = baselineEntity;
       }
-      if (greatest.completions == candidate.completions &&
-          TdfPayloadComparison.compareTaskPayloads(greatest, candidate) == 0) {
-        return candidate.copyWith(
-          modifiedAt: greatest.modifiedAt,
-          clearModifiedAt: greatest.modifiedAt == null,
-        );
+      if (matchesPayload(greatest, candidate)) {
+        return withModifiedAt(candidate, modifiedAtOf(greatest));
       }
       var maxObserved = _laterDate(
-        primaryTask.effectiveModifiedAt,
-        secondaryTask.effectiveModifiedAt,
+        effectiveModifiedAtOf(primaryEntity),
+        effectiveModifiedAtOf(secondaryEntity),
       );
-      maxObserved = _laterDate(maxObserved, baselineTask?.effectiveModifiedAt);
-      return candidate.copyWith(
-        modifiedAt: _validatedPlusOneSecond(maxObserved),
-      );
-    }
-    return candidate.copyWith(
-      modifiedAt: _validatedPlusOneSecond(task.effectiveModifiedAt),
-    );
-  }
-
-  /// Computes the post-cascade [TdfLabel] and its deterministic `TDF-MERGE-004` / `TDF-DEL-003` revision after stripping deleted locations.
-  static TdfLabel _finalizePostLocationCascadeLabel(
-    TdfLabel label, {
-    required List<TaskCondition> updatedConditions,
-    required bool strippedByMutation,
-    required (TdfLabel?, TdfLabel?, TdfLabel?) sourceVariants,
-    required DateTime? now,
-  }) {
-    final candidate = label.copyWith(conditions: updatedConditions);
-    if (strippedByMutation && now != null) {
-      return candidate.copyWith(
-        modifiedAt: TaskItem.nextModifiedTimestamp(
-          now,
-          label.effectiveModifiedAt,
-        ),
-      );
-    }
-    final (primaryLabel, secondaryLabel, baselineLabel) = sourceVariants;
-    if (primaryLabel != null && secondaryLabel != null) {
-      var greatest =
-          TdfPayloadComparison.compareLabelVersions(
-                primaryLabel,
-                secondaryLabel,
-              ) >=
-              0
-          ? primaryLabel
-          : secondaryLabel;
-      if (baselineLabel != null &&
-          TdfPayloadComparison.compareLabelVersions(baselineLabel, greatest) >
-              0) {
-        greatest = baselineLabel;
-      }
-      if (TdfPayloadComparison.compareLabelPayloads(greatest, candidate) == 0) {
-        return candidate.copyWith(
-          modifiedAt: greatest.modifiedAt,
-          clearModifiedAt: greatest.modifiedAt == null,
+      if (baselineEntity != null) {
+        maxObserved = _laterDate(
+          maxObserved,
+          effectiveModifiedAtOf(baselineEntity),
         );
       }
-      var maxObserved = _laterDate(
-        primaryLabel.effectiveModifiedAt,
-        secondaryLabel.effectiveModifiedAt,
-      );
-      maxObserved = _laterDate(maxObserved, baselineLabel?.effectiveModifiedAt);
-      return candidate.copyWith(
-        modifiedAt: _validatedPlusOneSecond(maxObserved),
-      );
+      return withModifiedAt(candidate, _validatedPlusOneSecond(maxObserved));
     }
-    final sourceLabel = primaryLabel ?? secondaryLabel;
-    if (sourceLabel != null &&
-        TdfPayloadComparison.compareLabelPayloads(sourceLabel, candidate) ==
-            0) {
-      return candidate.copyWith(
-        modifiedAt: sourceLabel.modifiedAt,
-        clearModifiedAt: sourceLabel.modifiedAt == null,
-      );
+    if (checkOneSidedSourceMatch) {
+      final sourceEntity = primaryEntity ?? secondaryEntity;
+      if (sourceEntity != null && matchesPayload(sourceEntity, candidate)) {
+        return withModifiedAt(candidate, modifiedAtOf(sourceEntity));
+      }
+      final baseMod = effectiveModifiedAtOf(sourceEntity ?? original);
+      return withModifiedAt(candidate, _validatedPlusOneSecond(baseMod));
     }
-    final baseMod = (sourceLabel ?? label).effectiveModifiedAt;
-    return candidate.copyWith(modifiedAt: _validatedPlusOneSecond(baseMod));
+    return withModifiedAt(
+      candidate,
+      _validatedPlusOneSecond(effectiveModifiedAtOf(original)),
+    );
   }
 
   /// Returns whether any label in [labelIds] has a post-cascade `LocationTaskCondition` in [postCascadeLabelsById].
@@ -1069,7 +1230,8 @@ class TaskBoardReconciler {
   ) {
     for (final labelId in labelIds) {
       final label = postCascadeLabelsById[labelId];
-      if (label != null && _extractLocationIds(label.conditions).isNotEmpty) {
+      if (label != null &&
+          TdfMetadata.hasLocationConditionRule(label.conditions)) {
         return true;
       }
     }
@@ -1082,106 +1244,46 @@ class TaskBoardReconciler {
     String Function(T item) idOf,
   ) => <String, T>{for (final item in items) idOf(item): item};
 
-  /// Returns whether one-sided label [id] is resolved to explicit `Delete` or recovery `discard`.
-  static bool _isLabelExplicitlyDeletedOrDiscarded({
+  /// Returns whether one-sided entity [id] is resolved to explicit `Delete` or recovery `discard`.
+  static bool
+  _isEntityExplicitlyDeletedOrDiscarded<T extends Object, D extends Object>({
+    required _EntityReconciliationAdapter<T, D> adapter,
     required String id,
-    required TdfLabel? primaryLabel,
-    required TdfLabel? secondaryLabel,
-    required TdfLabel? baselineLabel,
-    required Map<String, TdfDeletedLabelRecord> initialDeleted,
+    required T? primaryEntity,
+    required T? secondaryEntity,
+    required T? baselineEntity,
+    required Map<String, D> initialDeleted,
     required _ReconcileContext context,
     required Map<String, TdfDeletionResolution> resolutions,
     required Map<String, TdfBoundDeletionDecision> boundDecisions,
     required Map<String, TdfRecoveryResolution> recoveryResolutions,
     required Set<String> freshlyRecoveredIds,
   }) {
-    if (primaryLabel != null && secondaryLabel != null) {
+    if (primaryEntity != null && secondaryEntity != null) {
       return false;
     }
-    final surviving = primaryLabel ?? secondaryLabel;
+    final surviving = primaryEntity ?? secondaryEntity;
     if (surviving == null || freshlyRecoveredIds.contains(id)) {
       return false;
     }
-    final isStale = primaryLabel != null
+    final isStale = primaryEntity != null
         ? context.primaryRefresh
         : context.secondaryRefresh;
     var record = initialDeleted[id];
-    if (record == null && baselineLabel != null && !isStale) {
+    if (record == null && baselineEntity != null && !isStale) {
       final synthAt = TaskItem.nextModifiedTimestamp(
         context.now,
-        baselineLabel.effectiveModifiedAt,
+        adapter.effectiveModifiedAtOf(baselineEntity),
       );
-      record = TdfDeletedLabelRecord(labelId: id, deletedAt: synthAt);
+      record = adapter.makeBaselineTombstone(id, synthAt, baselineEntity);
     }
     if (record != null) {
-      return _resolveEffectiveLabelDecision(
-            surviving,
-            record,
-            resolutions,
-            boundDecisions,
-          ) ==
-          TdfDeletionResolution.delete;
-    }
-    return isStale && recoveryResolutions[id] == TdfRecoveryResolution.discard;
-  }
-
-  /// Returns whether [label] is identical to [baseLabel] in payload and effective revision.
-  static bool _isLabelUnchangedFromBaseline(
-    TdfLabel label,
-    TdfLabel baseLabel,
-  ) =>
-      label.effectiveModifiedAt == baseLabel.effectiveModifiedAt &&
-      TdfPayloadComparison.compareLabelPayloads(label, baseLabel) == 0;
-
-  /// Returns whether [location] is identical to [baseLocation] in payload and effective revision.
-  static bool _isLocationUnchangedFromBaseline(
-    TdfLocation location,
-    TdfLocation baseLocation,
-  ) =>
-      location.effectiveModifiedAt == baseLocation.effectiveModifiedAt &&
-      TdfPayloadComparison.compareLocationPayloads(location, baseLocation) == 0;
-
-  /// Returns whether one-sided task [id] is resolved to explicit `Delete` or recovery `discard`.
-  static bool _isTaskExplicitlyDeletedOrDiscarded({
-    required String id,
-    required TaskItem? primaryTask,
-    required TaskItem? secondaryTask,
-    required TaskItem? baselineTask,
-    required Map<String, TdfDeletedTaskRecord> initialDeleted,
-    required _ReconcileContext context,
-    required Map<String, TdfDeletionResolution> resolutions,
-    required Map<String, TdfBoundDeletionDecision> boundDecisions,
-    required Map<String, TdfRecoveryResolution> recoveryResolutions,
-    required Set<String> freshlyRecoveredIds,
-  }) {
-    if (primaryTask != null && secondaryTask != null) {
-      return false;
-    }
-    final surviving = primaryTask ?? secondaryTask;
-    if (surviving == null || freshlyRecoveredIds.contains(id)) {
-      return false;
-    }
-    final isStale = primaryTask != null
-        ? context.primaryRefresh
-        : context.secondaryRefresh;
-    var record = initialDeleted[id];
-    if (record == null && baselineTask != null && !isStale) {
-      final synthAt = TaskItem.nextModifiedTimestamp(
-        context.now,
-        baselineTask.effectiveModifiedAt,
-      );
-      record = TdfDeletedTaskRecord(
-        taskId: id,
-        deletedAt: synthAt,
-        completionsCheckpoint: baselineTask.completions,
-      );
-    }
-    if (record != null) {
-      return _resolveEffectiveTaskDecision(
-            surviving,
-            record,
-            resolutions,
-            boundDecisions,
+      return _resolveEffectiveDecision<T, D>(
+            adapter: adapter,
+            surviving: surviving,
+            deletedRecord: record,
+            resolutions: resolutions,
+            boundDecisions: boundDecisions,
           ) ==
           TdfDeletionResolution.delete;
     }
@@ -1224,72 +1326,24 @@ class TaskBoardReconciler {
       (right != null && right.isAfter(left)) ? right : left;
 
   /// Verifies whether [bound] matches [surviving] and [deletedRecord] (`TDF-DEL-003`).
-  static bool _matchesBoundLabelDecision(
-    TdfBoundDeletionDecision bound,
-    TdfLabel surviving,
-    TdfDeletedLabelRecord deletedRecord,
-  ) {
+  static bool _matchesBoundDecision<T extends Object, D extends Object>({
+    required _EntityReconciliationAdapter<T, D> adapter,
+    required TdfBoundDeletionDecision bound,
+    required T surviving,
+    required D deletedRecord,
+  }) {
     if (bound.expectedLiveModifiedAt case final expectedMod?
         when TaskItem.normalizeTimestamp(expectedMod) !=
-            surviving.effectiveModifiedAt) {
+            adapter.effectiveModifiedAtOf(surviving)) {
       return false;
     }
     if (bound.expectedDeletionAt case final expectedDel?
         when TaskItem.normalizeTimestamp(expectedDel) !=
-            deletedRecord.deletedAt) {
+            adapter.deletedAtOf(deletedRecord)) {
       return false;
     }
     if (bound.expectedLivePayloadSignature case final expectedSig?
-        when expectedSig !=
-            TdfPayloadComparison.labelPayloadSignature(surviving)) {
-      return false;
-    }
-    return true;
-  }
-
-  /// Verifies whether [bound] matches [surviving] and [deletedRecord] (`TDF-DEL-003`).
-  static bool _matchesBoundLocationDecision(
-    TdfBoundDeletionDecision bound,
-    TdfLocation surviving,
-    TdfDeletedLocationRecord deletedRecord,
-  ) {
-    if (bound.expectedLiveModifiedAt case final expectedMod?
-        when TaskItem.normalizeTimestamp(expectedMod) !=
-            surviving.effectiveModifiedAt) {
-      return false;
-    }
-    if (bound.expectedDeletionAt case final expectedDel?
-        when TaskItem.normalizeTimestamp(expectedDel) !=
-            deletedRecord.deletedAt) {
-      return false;
-    }
-    if (bound.expectedLivePayloadSignature case final expectedSig?
-        when expectedSig !=
-            TdfPayloadComparison.locationPayloadSignature(surviving)) {
-      return false;
-    }
-    return true;
-  }
-
-  /// Verifies whether [bound] matches [surviving] (including `dueAnchor`) and [deletedRecord] (`TDF-DEL-003`).
-  static bool _matchesBoundTaskDecision(
-    TdfBoundDeletionDecision bound,
-    TaskItem surviving,
-    TdfDeletedTaskRecord deletedRecord,
-  ) {
-    if (bound.expectedLiveModifiedAt case final expectedMod?
-        when TaskItem.normalizeTimestamp(expectedMod) !=
-            surviving.effectiveModifiedAt) {
-      return false;
-    }
-    if (bound.expectedDeletionAt case final expectedDel?
-        when TaskItem.normalizeTimestamp(expectedDel) !=
-            deletedRecord.deletedAt) {
-      return false;
-    }
-    if (bound.expectedLivePayloadSignature case final expectedSig?
-        when expectedSig !=
-            TdfPayloadComparison.taskPayloadSignature(surviving)) {
+        when expectedSig != adapter.payloadSignatureOf(surviving)) {
       return false;
     }
     return true;
@@ -1300,6 +1354,19 @@ class TaskBoardReconciler {
     final maxFirstSecond = first >= second ? first : second;
     return maxFirstSecond >= third ? maxFirstSecond : third;
   }
+
+  /// Creates an empty mutable [_EntityAccumulator] seeded with [initialDeleted].
+  static _EntityAccumulator<T, D> _newAccumulator<
+    T extends Object,
+    D extends Object
+  >(Map<String, D> initialDeleted) => (
+    live: <T>[],
+    deleted: <String, D>{...initialDeleted},
+    conflicted: <String>[],
+    ambiguous: <String>[],
+    discarded: <String>{},
+    explicitlyDeleted: <String>{},
+  );
 
   /// Classifies a single task [id] into [liveById], [twoSidedHeadersById], [deletedIds], or [pendingCandidates] for prerequisite previewing.
   static void _processSinglePreviewTask({
@@ -1319,7 +1386,7 @@ class TaskBoardReconciler {
     required List<_PreviewDeleteCandidate> pendingCandidates,
   }) {
     if (primaryTask != null && secondaryTask != null) {
-      final header = TdfPayloadComparison.previewMergedTaskPrerequisiteHeader(
+      final header = TdfEntityMerger.previewMergedTaskPrerequisiteHeader(
         local: primaryTask,
         incoming: secondaryTask,
         baseline: baselineTask,
@@ -1352,12 +1419,14 @@ class TaskBoardReconciler {
       );
     }
     if (previewRecord != null) {
-      final decision = _resolveEffectiveTaskDecision(
-        surviving,
-        previewRecord,
-        resolutions,
-        boundDecisions,
-      );
+      final decision =
+          _resolveEffectiveDecision<TaskItem, TdfDeletedTaskRecord>(
+            adapter: _taskAdapter,
+            surviving: surviving,
+            deletedRecord: previewRecord,
+            resolutions: resolutions,
+            boundDecisions: boundDecisions,
+          );
       if (decision == TdfDeletionResolution.undelete) {
         final maxComp = _max3Int(
           surviving.completions,
@@ -1445,63 +1514,56 @@ class TaskBoardReconciler {
     );
   }
 
-  /// Reconciles a one-sided task [id] and returns whether an explicit `Undelete` retired a deletion record.
-  static bool _reconcileOneSidedTask(
-    String id,
-    (TaskItem?, TaskItem?, TaskItem?) entities,
-    _ReconcileContext context,
-    _TaskAccumulator accumulator, {
+  /// Reconciles a one-sided entity [id] and returns whether an explicit `Undelete` retired a deletion record.
+  static bool _reconcileOneSidedEntity<T extends Object, D extends Object>({
+    required _EntityReconciliationAdapter<T, D> adapter,
+    required String id,
+    required (T?, T?, T?) entities,
+    required _ReconcileContext context,
+    required _EntityAccumulator<T, D> accumulator,
     required Map<String, TdfDeletionResolution> resolutions,
     required Map<String, TdfBoundDeletionDecision> boundDecisions,
     required Map<String, TdfRecoveryResolution> recoveryResolutions,
     required Set<String> freshlyRecoveredIds,
-    required Map<String, TaskItem> previewLiveTasksById,
-    required Set<String> previewDeletedTaskIds,
+    required bool Function(T surviving, T baseline) isUnchangedFromBaseline,
+    void Function(String id, T entity)? onLiveAdded,
+    void Function(String id, T restored)? onUndeleted,
   }) {
-    final (primaryTask, secondaryTask, baselineTask) = entities;
-    final surviving = primaryTask ?? secondaryTask;
+    final (primaryEntity, secondaryEntity, baselineEntity) = entities;
+    final surviving = primaryEntity ?? secondaryEntity;
     if (surviving == null) {
       return false;
     }
     if (freshlyRecoveredIds.contains(id)) {
       accumulator.live.add(surviving);
-      accumulator.uncleanedById[id] = surviving;
+      onLiveAdded?.call(id, surviving);
       return false;
     }
-    final isStale = primaryTask != null
+    final isStale = primaryEntity != null
         ? context.primaryRefresh
         : context.secondaryRefresh;
     final unchanged =
-        baselineTask != null &&
-        _isTaskUnchangedFromBaseline(
-          surviving,
-          baselineTask,
-          previewLiveTasksById: previewLiveTasksById,
-          previewDeletedTaskIds: previewDeletedTaskIds,
-          nowUtc: context.now,
-        );
+        baselineEntity != null &&
+        isUnchangedFromBaseline(surviving, baselineEntity);
 
-    final TdfDeletedTaskRecord conflictRecord;
+    final D conflictRecord;
     if (accumulator.deleted[id] case final existing?) {
       if (unchanged) {
-        final maxComp = _max3Int(
-          existing.completionsCheckpoint,
-          surviving.completions,
-          baselineTask.completions,
-        );
-        accumulator.deleted[id] = TdfDeletedTaskRecord(
-          taskId: id,
-          deletedAt: existing.deletedAt,
-          completionsCheckpoint: maxComp,
+        adapter.onUnchangedExistingTombstone?.call(
+          id,
+          existing,
+          surviving,
+          baselineEntity,
+          accumulator.deleted,
         );
         return false;
       }
       conflictRecord = existing;
-    } else if (baselineTask != null) {
+    } else if (baselineEntity != null) {
       if (isStale) {
         if (unchanged ||
             recoveryResolutions[id] == TdfRecoveryResolution.discard) {
-          accumulator.discardedIds.add(id);
+          accumulator.discarded.add(id);
         } else {
           accumulator.ambiguous.add(id);
         }
@@ -1509,12 +1571,12 @@ class TaskBoardReconciler {
       }
       final synthAt = TaskItem.nextModifiedTimestamp(
         context.now,
-        baselineTask.effectiveModifiedAt,
+        adapter.effectiveModifiedAtOf(baselineEntity),
       );
-      conflictRecord = TdfDeletedTaskRecord(
-        taskId: id,
-        deletedAt: synthAt,
-        completionsCheckpoint: baselineTask.completions,
+      conflictRecord = adapter.makeBaselineTombstone(
+        id,
+        synthAt,
+        baselineEntity,
       );
       if (unchanged) {
         accumulator.deleted[id] = conflictRecord;
@@ -1523,229 +1585,98 @@ class TaskBoardReconciler {
     } else {
       if (isStale) {
         if (recoveryResolutions[id] == TdfRecoveryResolution.discard) {
-          accumulator.discardedIds.add(id);
+          accumulator.discarded.add(id);
         } else {
           accumulator.ambiguous.add(id);
         }
       } else {
         accumulator.live.add(surviving);
-        accumulator.uncleanedById[id] = surviving;
+        onLiveAdded?.call(id, surviving);
       }
       return false;
     }
-    final conflict = (surviving, baselineTask, conflictRecord);
-    return _resolveTaskDeletionConflict(
-      conflict,
-      context,
-      accumulator,
+    return _resolveDeletionConflict<T, D>(
+      adapter: adapter,
+      surviving: surviving,
+      baselineEntity: baselineEntity,
+      deletedRecord: conflictRecord,
+      context: context,
+      accumulator: accumulator,
       resolutions: resolutions,
       boundDecisions: boundDecisions,
+      onUndeleted: onUndeleted,
     );
   }
 
-  /// Reconciles a single label [id] and returns whether an explicit `Undelete` retired a deletion record.
-  static bool _reconcileSingleLabel(
-    String id,
-    (TdfLabel?, TdfLabel?, TdfLabel?) entities,
-    _ReconcileContext context,
-    _LabelAccumulator accumulator, {
+  /// Reconciles all two-sided and one-sided entities of type [T] (`TdfLabel` or `TdfLocation`).
+  static ({_EntityAccumulator<T, D> accumulator, bool retiredByUndelete})
+  _reconcileSimpleEntities<T extends Object, D extends Object>({
+    required _EntityReconciliationAdapter<T, D> adapter,
+    required _EntityBoardMaps<T> maps,
+    required Map<String, D> initialDeleted,
+    required _ReconcileContext context,
     required Map<String, TdfDeletionResolution> resolutions,
     required Map<String, TdfBoundDeletionDecision> boundDecisions,
     required Map<String, TdfRecoveryResolution> recoveryResolutions,
     required Set<String> freshlyRecoveredIds,
-    required Set<String> tombstonedLocationIds,
-    required Set<String> newlyReferencedLabelIds,
+    required String logEventName,
+    required T Function(T local, T incoming, T? baseline) mergeTwoSided,
+    required bool Function(String id, T surviving, T baseline)
+    isUnchangedFromBaseline,
   }) {
-    final (primaryLabel, secondaryLabel, baselineLabel) = entities;
-    if (primaryLabel != null && secondaryLabel != null) {
-      final mergedLabel = TdfPayloadComparison.mergeLabelWithBaseline(
-        local: primaryLabel,
-        incoming: secondaryLabel,
-        baseline: baselineLabel,
-        tombstonedLocationIds: tombstonedLocationIds,
-      );
-      final winner = identical(mergedLabel, primaryLabel)
-          ? 'primary'
-          : (identical(mergedLabel, secondaryLabel) ? 'secondary' : 'merged');
-      AppLogger.event(
-        LogLevel.debug,
-        LogTag.sync,
-        'sync.reconcile.label',
-        fields: <String, Object?>{
-          'id': id,
-          'winner': winner,
-          'primary_rev': primaryLabel.effectiveModifiedAt.toIso8601String(),
-          'secondary_rev': secondaryLabel.effectiveModifiedAt.toIso8601String(),
-        },
-      );
-      accumulator.live.add(mergedLabel);
-      return false;
-    }
-
-    final surviving = primaryLabel ?? secondaryLabel;
-    if (surviving == null) {
-      return false;
-    }
-    if (freshlyRecoveredIds.contains(id)) {
-      accumulator.live.add(surviving);
-      return false;
-    }
-    final isStale = primaryLabel != null
-        ? context.primaryRefresh
-        : context.secondaryRefresh;
-    final unchanged =
-        baselineLabel != null &&
-        _isLabelUnchangedFromBaseline(surviving, baselineLabel) &&
-        !newlyReferencedLabelIds.contains(id);
-
-    final TdfDeletedLabelRecord conflictRecord;
-    if (accumulator.deleted[id] case final existingDeleted?) {
-      if (unchanged) {
-        return false;
-      }
-      conflictRecord = existingDeleted;
-    } else if (baselineLabel != null) {
-      if (isStale) {
-        if (unchanged ||
-            recoveryResolutions[id] == TdfRecoveryResolution.discard) {
-          accumulator.discarded.add(id);
-        } else {
-          accumulator.ambiguous.add(id);
+    final accumulator = _newAccumulator<T, D>(initialDeleted);
+    var retired = false;
+    final logDebug = AppLogger.shouldLog(LogLevel.debug);
+    for (final id in <String>{...maps.primary.keys, ...maps.secondary.keys}) {
+      final primaryEntity = maps.primary[id];
+      final secondaryEntity = maps.secondary[id];
+      final baselineEntity = maps.baseline?[id];
+      if (primaryEntity != null && secondaryEntity != null) {
+        final merged = mergeTwoSided(
+          primaryEntity,
+          secondaryEntity,
+          baselineEntity,
+        );
+        if (logDebug) {
+          final winner = identical(merged, primaryEntity)
+              ? 'primary'
+              : (identical(merged, secondaryEntity) ? 'secondary' : 'merged');
+          AppLogger.event(
+            LogLevel.debug,
+            LogTag.sync,
+            logEventName,
+            fields: <String, Object?>{
+              'id': id,
+              'winner': winner,
+              'primary_rev': adapter
+                  .effectiveModifiedAtOf(primaryEntity)
+                  .toIso8601String(),
+              'secondary_rev': adapter
+                  .effectiveModifiedAtOf(secondaryEntity)
+                  .toIso8601String(),
+            },
+          );
         }
-        return false;
+        accumulator.live.add(merged);
+        continue;
       }
-      final synthAt = TaskItem.nextModifiedTimestamp(
-        context.now,
-        baselineLabel.effectiveModifiedAt,
-      );
-      conflictRecord = TdfDeletedLabelRecord(labelId: id, deletedAt: synthAt);
-      if (unchanged) {
-        accumulator.deleted[id] = conflictRecord;
-        return false;
+      if (_reconcileOneSidedEntity<T, D>(
+        adapter: adapter,
+        id: id,
+        entities: (primaryEntity, secondaryEntity, baselineEntity),
+        context: context,
+        accumulator: accumulator,
+        resolutions: resolutions,
+        boundDecisions: boundDecisions,
+        recoveryResolutions: recoveryResolutions,
+        freshlyRecoveredIds: freshlyRecoveredIds,
+        isUnchangedFromBaseline: (surviving, baseEntity) =>
+            isUnchangedFromBaseline(id, surviving, baseEntity),
+      )) {
+        retired = true;
       }
-    } else {
-      if (isStale) {
-        if (recoveryResolutions[id] == TdfRecoveryResolution.discard) {
-          accumulator.discarded.add(id);
-        } else {
-          accumulator.ambiguous.add(id);
-        }
-      } else {
-        accumulator.live.add(surviving);
-      }
-      return false;
     }
-    final conflict = (surviving, baselineLabel, conflictRecord);
-    return _resolveLabelDeletionConflict(
-      conflict,
-      context,
-      accumulator,
-      resolutions: resolutions,
-      boundDecisions: boundDecisions,
-    );
-  }
-
-  /// Reconciles a single location [id] and returns whether an explicit `Undelete` retired a deletion record.
-  static bool _reconcileSingleLocation(
-    String id,
-    (TdfLocation?, TdfLocation?, TdfLocation?) entities,
-    _ReconcileContext context,
-    _LocationAccumulator accumulator, {
-    required Map<String, TdfDeletionResolution> resolutions,
-    required Map<String, TdfBoundDeletionDecision> boundDecisions,
-    required Map<String, TdfRecoveryResolution> recoveryResolutions,
-    required Set<String> freshlyRecoveredIds,
-    required Set<String> newlyReferencedLocationIds,
-  }) {
-    final (primaryLoc, secondaryLoc, baselineLoc) = entities;
-    if (primaryLoc != null && secondaryLoc != null) {
-      final mergedLoc = TdfPayloadComparison.mergeLocationWithBaseline(
-        local: primaryLoc,
-        incoming: secondaryLoc,
-        baseline: baselineLoc,
-      );
-      final winner = identical(mergedLoc, primaryLoc)
-          ? 'primary'
-          : (identical(mergedLoc, secondaryLoc) ? 'secondary' : 'merged');
-      AppLogger.event(
-        LogLevel.debug,
-        LogTag.sync,
-        'sync.reconcile.location',
-        fields: <String, Object?>{
-          'id': id,
-          'winner': winner,
-          'primary_rev': primaryLoc.effectiveModifiedAt.toIso8601String(),
-          'secondary_rev': secondaryLoc.effectiveModifiedAt.toIso8601String(),
-        },
-      );
-      accumulator.live.add(mergedLoc);
-      return false;
-    }
-
-    final surviving = primaryLoc ?? secondaryLoc;
-    if (surviving == null) {
-      return false;
-    }
-    if (freshlyRecoveredIds.contains(id)) {
-      accumulator.live.add(surviving);
-      return false;
-    }
-    final isStale = primaryLoc != null
-        ? context.primaryRefresh
-        : context.secondaryRefresh;
-    final unchanged =
-        baselineLoc != null &&
-        _isLocationUnchangedFromBaseline(surviving, baselineLoc) &&
-        !newlyReferencedLocationIds.contains(id);
-
-    final TdfDeletedLocationRecord conflictRecord;
-    if (accumulator.deleted[id] case final existingDeleted?) {
-      if (unchanged) {
-        return false;
-      }
-      conflictRecord = existingDeleted;
-    } else if (baselineLoc != null) {
-      if (isStale) {
-        if (unchanged ||
-            recoveryResolutions[id] == TdfRecoveryResolution.discard) {
-          accumulator.discarded.add(id);
-        } else {
-          accumulator.ambiguous.add(id);
-        }
-        return false;
-      }
-      final synthAt = TaskItem.nextModifiedTimestamp(
-        context.now,
-        baselineLoc.effectiveModifiedAt,
-      );
-      conflictRecord = TdfDeletedLocationRecord(
-        locationId: id,
-        deletedAt: synthAt,
-      );
-      if (unchanged) {
-        accumulator.deleted[id] = conflictRecord;
-        return false;
-      }
-    } else {
-      if (isStale) {
-        if (recoveryResolutions[id] == TdfRecoveryResolution.discard) {
-          accumulator.discarded.add(id);
-        } else {
-          accumulator.ambiguous.add(id);
-        }
-      } else {
-        accumulator.live.add(surviving);
-      }
-      return false;
-    }
-    final conflict = (surviving, baselineLoc, conflictRecord);
-    return _resolveLocationDeletionConflict(
-      conflict,
-      context,
-      accumulator,
-      resolutions: resolutions,
-      boundDecisions: boundDecisions,
-    );
+    return (accumulator: accumulator, retiredByUndelete: retired);
   }
 
   /// Reconciles a two-sided task [id] present on both boards and records its `uncleaned` counterpart into [uncleanedOut].
@@ -1766,7 +1697,7 @@ class TaskBoardReconciler {
     required Map<String, TaskItem> uncleanedOut,
     List<({String event, Map<String, Object?> fields})>? debugEntriesOut,
   }) {
-    final mergedResult = TdfPayloadComparison.mergeTaskWithBaselineAndUncleaned(
+    final mergedResult = TdfEntityMerger.mergeTaskWithBaselineAndUncleaned(
       local: local,
       incoming: incoming,
       baseline: baseline,
@@ -1807,190 +1738,105 @@ class TaskBoardReconciler {
     return (task: mergedTask, wasUnchanged: isIdenticalUnchanged);
   }
 
-  /// Resolves the verified [TdfDeletionResolution] for [surviving] and [deletedRecord] from [boundDecisions] or [resolutions].
-  static TdfDeletionResolution? _resolveEffectiveLabelDecision(
-    TdfLabel surviving,
-    TdfDeletedLabelRecord deletedRecord,
-    Map<String, TdfDeletionResolution> resolutions,
-    Map<String, TdfBoundDeletionDecision> boundDecisions,
-  ) {
-    final id = surviving.id;
-    if (boundDecisions[id] case final bound?) {
-      if (!_matchesBoundLabelDecision(bound, surviving, deletedRecord)) {
-        return null;
-      }
-      return bound.resolution;
-    }
-    return resolutions[id];
+  /// Resolves primary, secondary, and optional baseline maps for entity type [T], reusing cached [SyncBoardIndices] when provided.
+  static _EntityBoardMaps<T> _resolveBoardMaps<T extends Object>(
+    (TaskBoard, TaskBoard, TaskBoard?) boards, {
+    required Map<String, T>? cachedPrimary,
+    required Map<String, T>? cachedSecondary,
+    required Map<String, T>? cachedBaseline,
+    required bool hasIndices,
+    required Iterable<T> Function(TaskBoard board) extract,
+    required String Function(T entity) idOf,
+  }) {
+    final (primary, secondary, baseline) = boards;
+    return (
+      primary: cachedPrimary ?? _indexById(extract(primary), idOf),
+      secondary: cachedSecondary ?? _indexById(extract(secondary), idOf),
+      baseline: hasIndices
+          ? cachedBaseline
+          : (baseline != null ? _indexById(extract(baseline), idOf) : null),
+    );
   }
 
-  /// Resolves the verified [TdfDeletionResolution] for [surviving] and [deletedRecord] from [boundDecisions] or [resolutions].
-  static TdfDeletionResolution? _resolveEffectiveLocationDecision(
-    TdfLocation surviving,
-    TdfDeletedLocationRecord deletedRecord,
-    Map<String, TdfDeletionResolution> resolutions,
-    Map<String, TdfBoundDeletionDecision> boundDecisions,
-  ) {
-    final id = surviving.id;
-    if (boundDecisions[id] case final bound?) {
-      if (!_matchesBoundLocationDecision(bound, surviving, deletedRecord)) {
-        return null;
-      }
-      return bound.resolution;
-    }
-    return resolutions[id];
-  }
-
-  /// Resolves the verified [TdfDeletionResolution] for [surviving] and [deletedRecord] from [boundDecisions] or [resolutions].
-  static TdfDeletionResolution? _resolveEffectiveTaskDecision(
-    TaskItem surviving,
-    TdfDeletedTaskRecord deletedRecord,
-    Map<String, TdfDeletionResolution> resolutions,
-    Map<String, TdfBoundDeletionDecision> boundDecisions,
-  ) {
-    final id = surviving.id;
-    if (boundDecisions[id] case final bound?) {
-      if (!_matchesBoundTaskDecision(bound, surviving, deletedRecord)) {
-        return null;
-      }
-      return bound.resolution;
-    }
-    return resolutions[id];
-  }
-
-  /// Applies the verified conflict resolution (or records a `DeletionConflict`) for [conflict] (`TDF-DEL-003`).
-  static bool _resolveLabelDeletionConflict(
-    (TdfLabel, TdfLabel?, TdfDeletedLabelRecord) conflict,
-    _ReconcileContext context,
-    _LabelAccumulator accumulator, {
+  /// Applies the verified conflict resolution (or records a `DeletionConflict`) for [surviving] and [deletedRecord] (`TDF-DEL-003`).
+  static bool _resolveDeletionConflict<T extends Object, D extends Object>({
+    required _EntityReconciliationAdapter<T, D> adapter,
+    required T surviving,
+    required T? baselineEntity,
+    required D deletedRecord,
+    required _ReconcileContext context,
+    required _EntityAccumulator<T, D> accumulator,
     required Map<String, TdfDeletionResolution> resolutions,
     required Map<String, TdfBoundDeletionDecision> boundDecisions,
+    void Function(String id, T restored)? onUndeleted,
   }) {
-    final (surviving, baselineLabel, deletedRecord) = conflict;
-    final id = surviving.id;
-    final resolution = _resolveEffectiveLabelDecision(
-      surviving,
-      deletedRecord,
-      resolutions,
-      boundDecisions,
+    final id = adapter.idOf(surviving);
+    final resolution = _resolveEffectiveDecision<T, D>(
+      adapter: adapter,
+      surviving: surviving,
+      deletedRecord: deletedRecord,
+      resolutions: resolutions,
+      boundDecisions: boundDecisions,
     );
     if (resolution == null) {
       accumulator.conflicted.add(id);
       return false;
     }
     final revisions = (
-      surviving.effectiveModifiedAt,
-      deletedRecord.deletedAt,
-      baselineLabel?.effectiveModifiedAt,
+      adapter.effectiveModifiedAtOf(surviving),
+      adapter.deletedAtOf(deletedRecord),
+      baselineEntity != null
+          ? adapter.effectiveModifiedAtOf(baselineEntity)
+          : null,
     );
     final revision = _computeDecisionRevision(revisions, context.now);
     switch (resolution) {
       case TdfDeletionResolution.delete:
-        accumulator.deleted[id] = TdfDeletedLabelRecord(
-          labelId: id,
-          deletedAt: revision,
+        accumulator.deleted[id] = adapter.makeResolvedDeleteRecord(
+          id,
+          revision,
+          surviving,
+          baselineEntity,
+          deletedRecord,
         );
         accumulator.explicitlyDeleted.add(id);
         return false;
       case TdfDeletionResolution.undelete:
         accumulator.deleted.remove(id);
-        accumulator.live.add(surviving.copyWith(modifiedAt: revision));
-        return true;
-    }
-  }
-
-  /// Applies the verified conflict resolution (or records a `DeletionConflict`) for [conflict] (`TDF-DEL-003`).
-  static bool _resolveLocationDeletionConflict(
-    (TdfLocation, TdfLocation?, TdfDeletedLocationRecord) conflict,
-    _ReconcileContext context,
-    _LocationAccumulator accumulator, {
-    required Map<String, TdfDeletionResolution> resolutions,
-    required Map<String, TdfBoundDeletionDecision> boundDecisions,
-  }) {
-    final (surviving, baselineLoc, deletedRecord) = conflict;
-    final id = surviving.id;
-    final resolution = _resolveEffectiveLocationDecision(
-      surviving,
-      deletedRecord,
-      resolutions,
-      boundDecisions,
-    );
-    if (resolution == null) {
-      accumulator.conflicted.add(id);
-      return false;
-    }
-    final revisions = (
-      surviving.effectiveModifiedAt,
-      deletedRecord.deletedAt,
-      baselineLoc?.effectiveModifiedAt,
-    );
-    final revision = _computeDecisionRevision(revisions, context.now);
-    switch (resolution) {
-      case TdfDeletionResolution.delete:
-        accumulator.deleted[id] = TdfDeletedLocationRecord(
-          locationId: id,
-          deletedAt: revision,
-        );
-        accumulator.explicitlyDeleted.add(id);
-        return false;
-      case TdfDeletionResolution.undelete:
-        accumulator.deleted.remove(id);
-        accumulator.live.add(surviving.copyWith(modifiedAt: revision));
-        return true;
-    }
-  }
-
-  /// Applies the verified conflict resolution (or records a `DeletionConflict`) for [conflict] (`TDF-DEL-003`).
-  static bool _resolveTaskDeletionConflict(
-    (TaskItem, TaskItem?, TdfDeletedTaskRecord) conflict,
-    _ReconcileContext context,
-    _TaskAccumulator accumulator, {
-    required Map<String, TdfDeletionResolution> resolutions,
-    required Map<String, TdfBoundDeletionDecision> boundDecisions,
-  }) {
-    final (surviving, baselineTask, deletedRecord) = conflict;
-    final id = surviving.id;
-    final resolution = _resolveEffectiveTaskDecision(
-      surviving,
-      deletedRecord,
-      resolutions,
-      boundDecisions,
-    );
-    if (resolution == null) {
-      accumulator.conflicted.add(id);
-      return false;
-    }
-    final revisions = (
-      surviving.effectiveModifiedAt,
-      deletedRecord.deletedAt,
-      baselineTask?.effectiveModifiedAt,
-    );
-    final revision = _computeDecisionRevision(revisions, context.now);
-    final maxComp = _max3Int(
-      surviving.completions,
-      baselineTask?.completions ?? 0,
-      deletedRecord.completionsCheckpoint,
-    );
-    switch (resolution) {
-      case TdfDeletionResolution.delete:
-        accumulator.deleted[id] = TdfDeletedTaskRecord(
-          taskId: id,
-          deletedAt: revision,
-          completionsCheckpoint: maxComp,
-        );
-        accumulator.explicitlyDeletedIds.add(id);
-        return false;
-      case TdfDeletionResolution.undelete:
-        accumulator.deleted.remove(id);
-        final restored = surviving.copyWith(
-          completions: maxComp,
-          modifiedAt: revision,
+        final restored = adapter.buildUndeletedEntity(
+          surviving,
+          baselineEntity,
+          deletedRecord,
+          revision,
         );
         accumulator.live.add(restored);
-        accumulator.uncleanedById[id] = restored;
-        accumulator.undeletedIds.add(id);
+        onUndeleted?.call(id, restored);
         return true;
     }
+  }
+
+  /// Resolves the verified [TdfDeletionResolution] for [surviving] and [deletedRecord] from [boundDecisions] or [resolutions].
+  static TdfDeletionResolution?
+  _resolveEffectiveDecision<T extends Object, D extends Object>({
+    required _EntityReconciliationAdapter<T, D> adapter,
+    required T surviving,
+    required D deletedRecord,
+    required Map<String, TdfDeletionResolution> resolutions,
+    required Map<String, TdfBoundDeletionDecision> boundDecisions,
+  }) {
+    final id = adapter.idOf(surviving);
+    if (boundDecisions[id] case final bound?) {
+      if (!_matchesBoundDecision<T, D>(
+        adapter: adapter,
+        bound: bound,
+        surviving: surviving,
+        deletedRecord: deletedRecord,
+      )) {
+        return null;
+      }
+      return bound.resolution;
+    }
+    return resolutions[id];
   }
 
   /// Strips deleted or discarded labels from a single [task], applies `TDF-MERGE-011` `scoped` flood protection, and validates remaining label references.
@@ -2058,13 +1904,82 @@ class TaskBoardReconciler {
     if (lostLastScopedLabel && evictedFromQueueOut != null) {
       evictedFromQueueOut.add(task.id);
     }
-    return _finalizePostLabelCascadeTask(
-      task,
-      retained: retained,
-      nextPriority: lostLastScopedLabel ? false : task.isPriority,
+    final candidate = task.copyWith(
+      labelIds: retained,
+      isPriority: !lostLastScopedLabel && task.isPriority,
+    );
+    return _finalizePostCascadeEntity<TaskItem>(
+      original: task,
+      candidate: candidate,
       strippedByMutation: strippedByMutation,
       sourceVariants: sourceVariants,
       now: now,
+      effectiveModifiedAtOf: (item) => item.effectiveModifiedAt,
+      modifiedAtOf: (item) => item.modifiedAt,
+      compareVersions: TdfPayloadComparison.compareTaskVersions,
+      matchesPayload: (reference, target) =>
+          reference.completions == target.completions &&
+          TdfPayloadComparison.compareTaskPayloads(reference, target) == 0,
+      withModifiedAt: (item, modifiedAt) => item.copyWith(
+        modifiedAt: modifiedAt,
+        clearModifiedAt: modifiedAt == null,
+      ),
+      checkOneSidedSourceMatch: false,
+    );
+  }
+
+  /// Strips deleted or discarded locations from [conditions] of a label or task, inserting `condition location any` when [insertResetWhenEmptied] is true.
+  static ({
+    List<TaskCondition> conditions,
+    bool strippedAny,
+    bool strippedByMutation,
+  })
+  _stripDeletedLocationsFromConditions({
+    required String entityKind,
+    required String entityId,
+    required List<TaskCondition> conditions,
+    required Set<String> validLocationIds,
+    required Map<String, TdfDeletedLocationRecord> deletedLocationsById,
+    required Set<String> baselineLocationSet,
+    required Set<String> discardedLocationIds,
+    required Set<String> explicitlyDeletedLocationIds,
+    required bool insertResetWhenEmptied,
+  }) {
+    final updatedConditions = <TaskCondition>[];
+    var strippedAny = false;
+    var strippedByMutation = false;
+
+    for (final rule in conditions) {
+      if (rule is! LocationTaskCondition || rule.locationIds.isEmpty) {
+        updatedConditions.add(rule);
+        continue;
+      }
+      final filtered = _filterLocationIdsForEntity(
+        entityKind: entityKind,
+        entityId: entityId,
+        locationIds: rule.locationIds,
+        validLocationIds: validLocationIds,
+        deletedLocationsById: deletedLocationsById,
+        baselineLocationSet: baselineLocationSet,
+        discardedLocationIds: discardedLocationIds,
+        explicitlyDeletedLocationIds: explicitlyDeletedLocationIds,
+      );
+      strippedAny = strippedAny || filtered.strippedAny;
+      strippedByMutation = strippedByMutation || filtered.strippedByMutation;
+      if (filtered.retainedIds.isNotEmpty) {
+        updatedConditions.add(
+          LocationTaskCondition(locationIds: filtered.retainedIds),
+        );
+      } else if (insertResetWhenEmptied) {
+        updatedConditions.add(
+          const GroupResetTaskCondition(targetGroup: ConditionGroup.location),
+        );
+      }
+    }
+    return (
+      conditions: updatedConditions,
+      strippedAny: strippedAny,
+      strippedByMutation: strippedByMutation,
     );
   }
 
@@ -2082,47 +1997,36 @@ class TaskBoardReconciler {
     if (label.conditions.isEmpty) {
       return label;
     }
-    final updatedConditions = <TaskCondition>[];
-    var strippedAny = false;
-    var strippedByMutation = false;
-
-    for (final rule in label.conditions) {
-      if (rule is! LocationTaskCondition || rule.locationIds.isEmpty) {
-        updatedConditions.add(rule);
-        continue;
-      }
-      final filtered = _filterLocationIdsForEntity(
-        entityKind: 'label',
-        entityId: label.id,
-        locationIds: rule.locationIds,
-        validLocationIds: validLocationIds,
-        deletedLocationsById: deletedLocationsById,
-        baselineLocationSet: baselineLocationSet,
-        discardedLocationIds: discardedLocationIds,
-        explicitlyDeletedLocationIds: explicitlyDeletedLocationIds,
-      );
-      if (filtered.strippedAny) {
-        strippedAny = true;
-        if (filtered.strippedByMutation) {
-          strippedByMutation = true;
-        }
-      }
-      if (filtered.retainedIds.isNotEmpty) {
-        updatedConditions.add(
-          LocationTaskCondition(locationIds: filtered.retainedIds),
-        );
-      }
-    }
-
-    if (!strippedAny) {
+    final stripped = _stripDeletedLocationsFromConditions(
+      entityKind: 'label',
+      entityId: label.id,
+      conditions: label.conditions,
+      validLocationIds: validLocationIds,
+      deletedLocationsById: deletedLocationsById,
+      baselineLocationSet: baselineLocationSet,
+      discardedLocationIds: discardedLocationIds,
+      explicitlyDeletedLocationIds: explicitlyDeletedLocationIds,
+      insertResetWhenEmptied: false,
+    );
+    if (!stripped.strippedAny) {
       return label;
     }
-    return _finalizePostLocationCascadeLabel(
-      label,
-      updatedConditions: updatedConditions,
-      strippedByMutation: strippedByMutation,
+    return _finalizePostCascadeEntity<TdfLabel>(
+      original: label,
+      candidate: label.copyWith(conditions: stripped.conditions),
+      strippedByMutation: stripped.strippedByMutation,
       sourceVariants: sourceVariants,
       now: now,
+      effectiveModifiedAtOf: (item) => item.effectiveModifiedAt,
+      modifiedAtOf: (item) => item.modifiedAt,
+      compareVersions: TdfPayloadComparison.compareLabelVersions,
+      matchesPayload: (reference, target) =>
+          TdfPayloadComparison.compareLabelPayloads(reference, target) == 0,
+      withModifiedAt: (item, modifiedAt) => item.copyWith(
+        modifiedAt: modifiedAt,
+        clearModifiedAt: modifiedAt == null,
+      ),
+      checkOneSidedSourceMatch: true,
     );
   }
 
@@ -2141,51 +2045,29 @@ class TaskBoardReconciler {
     if (task.conditions.isEmpty) {
       return task;
     }
-    final updatedConditions = <TaskCondition>[];
-    var strippedAny = false;
-    var strippedByMutation = false;
-
-    final hasAssignedLabelLocation = _hasLiveLabelLocationRule(
-      task.labelIds,
-      postCascadeLabelsById,
+    final stripped = _stripDeletedLocationsFromConditions(
+      entityKind: 'task',
+      entityId: task.id,
+      conditions: task.conditions,
+      validLocationIds: validLocationIds,
+      deletedLocationsById: deletedLocationsById,
+      baselineLocationSet: baselineLocationSet,
+      discardedLocationIds: discardedLocationIds,
+      explicitlyDeletedLocationIds: explicitlyDeletedLocationIds,
+      insertResetWhenEmptied: _hasLiveLabelLocationRule(
+        task.labelIds,
+        postCascadeLabelsById,
+      ),
     );
-    for (final rule in task.conditions) {
-      if (rule is! LocationTaskCondition || rule.locationIds.isEmpty) {
-        updatedConditions.add(rule);
-        continue;
-      }
-      final filtered = _filterLocationIdsForEntity(
-        entityKind: 'task',
-        entityId: task.id,
-        locationIds: rule.locationIds,
-        validLocationIds: validLocationIds,
-        deletedLocationsById: deletedLocationsById,
-        baselineLocationSet: baselineLocationSet,
-        discardedLocationIds: discardedLocationIds,
-        explicitlyDeletedLocationIds: explicitlyDeletedLocationIds,
-      );
-      strippedAny = strippedAny || filtered.strippedAny;
-      strippedByMutation = strippedByMutation || filtered.strippedByMutation;
-      if (filtered.retainedIds.isNotEmpty) {
-        updatedConditions.add(
-          LocationTaskCondition(locationIds: filtered.retainedIds),
-        );
-      } else if (hasAssignedLabelLocation) {
-        updatedConditions.add(
-          const GroupResetTaskCondition(targetGroup: ConditionGroup.location),
-        );
-      }
-    }
-
-    if (!strippedAny) {
+    if (!stripped.strippedAny) {
       return task;
     }
-    if (strippedByMutation) {
+    if (stripped.strippedByMutation) {
       mutatedByNowCascadeOut?.add(task.id);
     }
-    if (strippedByMutation && now != null) {
+    if (stripped.strippedByMutation && now != null) {
       return task.copyWith(
-        conditions: updatedConditions,
+        conditions: stripped.conditions,
         modifiedAt: TaskItem.nextModifiedTimestamp(
           now,
           task.effectiveModifiedAt,
@@ -2193,7 +2075,7 @@ class TaskBoardReconciler {
       );
     }
     return task.copyWith(
-      conditions: updatedConditions,
+      conditions: stripped.conditions,
       modifiedAt: _validatedPlusOneSecond(task.effectiveModifiedAt),
     );
   }
@@ -2256,24 +2138,77 @@ class TaskReconciliationOutcome {
   final Set<String> undeletedTaskIds;
 }
 
-/// Mutable accumulator used while reconciling labels across two boards.
-typedef _LabelAccumulator = ({
-  List<TdfLabel> live,
-  Map<String, TdfDeletedLabelRecord> deleted,
+/// Typed adapter parameterizing shared entity/tombstone reconciliation across labels, locations, and tasks.
+@immutable
+class _EntityReconciliationAdapter<T extends Object, D extends Object> {
+  /// Creates an [_EntityReconciliationAdapter] binding entity [T] and tombstone [D] operations.
+  const _EntityReconciliationAdapter({
+    required this.idOf,
+    required this.effectiveModifiedAtOf,
+    required this.deletedAtOf,
+    required this.payloadSignatureOf,
+    required this.makeBaselineTombstone,
+    required this.makeResolvedDeleteRecord,
+    required this.buildUndeletedEntity,
+    this.onUnchangedExistingTombstone,
+  });
+
+  /// Builds the restored entity [T] when an explicit `Undelete` resolves a conflict at [revision].
+  final T Function(T surviving, T? baseline, D deletedRecord, DateTime revision)
+  buildUndeletedEntity;
+
+  /// Extracts the deletion timestamp from tombstone [record].
+  final DateTime Function(D record) deletedAtOf;
+
+  /// Extracts the effective modification timestamp from [entity].
+  final DateTime Function(T entity) effectiveModifiedAtOf;
+
+  /// Extracts the canonical entity identifier from [entity].
+  final String Function(T entity) idOf;
+
+  /// Constructs a baseline-implied tombstone record [D] for [id] at [deletedAt].
+  final D Function(String id, DateTime deletedAt, T baselineEntity)
+  makeBaselineTombstone;
+
+  /// Constructs a resolved explicit-delete tombstone record [D] at [revision].
+  final D Function(
+    String id,
+    DateTime revision,
+    T surviving,
+    T? baseline,
+    D existingRecord,
+  )
+  makeResolvedDeleteRecord;
+
+  /// Optional hook invoked when an unchanged one-sided entity already has a tombstone in [deleted].
+  final void Function(
+    String id,
+    D existing,
+    T surviving,
+    T baseline,
+    Map<String, D> deleted,
+  )?
+  onUnchangedExistingTombstone;
+
+  /// Computes the normalized payload signature of [entity] for bound conflict decision verification.
+  final String Function(T entity) payloadSignatureOf;
+}
+
+/// Mutable accumulator used while reconciling entities of type [T] and deletion records of type [D].
+typedef _EntityAccumulator<T extends Object, D extends Object> = ({
+  List<T> live,
+  Map<String, D> deleted,
   List<String> conflicted,
   List<String> ambiguous,
   Set<String> discarded,
   Set<String> explicitlyDeleted,
 });
 
-/// Mutable accumulator used while reconciling locations across two boards.
-typedef _LocationAccumulator = ({
-  List<TdfLocation> live,
-  Map<String, TdfDeletedLocationRecord> deleted,
-  List<String> conflicted,
-  List<String> ambiguous,
-  Set<String> discarded,
-  Set<String> explicitlyDeleted,
+/// Indexed primary, secondary, and optional baseline maps for a single entity type [T].
+typedef _EntityBoardMaps<T extends Object> = ({
+  Map<String, T> primary,
+  Map<String, T> secondary,
+  Map<String, T>? baseline,
 });
 
 /// One-sided deletion candidate pending baseline-cleanup unchanged verification during prerequisite preview.
@@ -2288,16 +2223,4 @@ typedef _ReconcileContext = ({
   bool primaryRefresh,
   bool secondaryRefresh,
   DateTime now,
-});
-
-/// Mutable accumulator used while reconciling tasks across two boards.
-typedef _TaskAccumulator = ({
-  List<TaskItem> live,
-  Map<String, TaskItem> uncleanedById,
-  Set<String> undeletedIds,
-  Set<String> discardedIds,
-  Set<String> explicitlyDeletedIds,
-  Map<String, TdfDeletedTaskRecord> deleted,
-  List<String> conflicted,
-  List<String> ambiguous,
 });

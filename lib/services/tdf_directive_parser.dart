@@ -759,45 +759,12 @@ abstract final class TdfDirectiveParser {
     }
   }
 
-  /// Coalesces multiple [LocationTaskCondition] rules in [conditions] into one canonical [LocationTaskCondition] in first-seen `<location-id>` order (`TDF-MODEL-006`).
-  static List<TaskCondition> coalesceLocationConditions(
-    List<TaskCondition> conditions,
-  ) {
-    final seenLocationIds = <String>{};
-    final orderedLocationIds = <String>[];
-    for (final condition in conditions) {
-      if (condition case final LocationTaskCondition locationCondition) {
-        _collectDistinctLocationIds(
-          locationCondition.locationIds,
-          seenLocationIds,
-          orderedLocationIds,
-        );
-      }
-    }
-    if (orderedLocationIds.isEmpty) {
-      return conditions;
-    }
-    final coalesced = <TaskCondition>[];
-    var emittedLocation = false;
-    for (final condition in conditions) {
-      if (condition is LocationTaskCondition) {
-        if (!emittedLocation) {
-          coalesced.add(LocationTaskCondition(locationIds: orderedLocationIds));
-          emittedLocation = true;
-        }
-      } else {
-        coalesced.add(condition);
-      }
-    }
-    return coalesced;
-  }
-
   /// Throws a [TdfException] with [kind], [line], and [message].
   static Never fail(TdfErrorKind kind, int line, String message) =>
       TdfScanner.fail(kind, line, message);
 
   /// Checks whether [id] is a canonical 10-character Base62 entity identifier (`[0-9A-Za-z]{10}`).
-  static bool isValidEntityId(String id) => _isValidBase62EntityId(id);
+  static bool isValidEntityId(String id) => TdfEntityId.isValid(id);
 
   /// Parses a `step <bool> "<text>"` directive inside a `subtasks` block (`TDF-DIR-008`).
   static SubtaskItem parseStepDirective(List<TdfScannedToken> args, int line) {
@@ -1257,19 +1224,6 @@ abstract final class TdfDirectiveParser {
     fields.suspendedAt = parseUtcTimestamp(args, line);
   }
 
-  /// Appends unseen `<location-id>` values from [source] into [ordered] using [seen].
-  static void _collectDistinctLocationIds(
-    List<String> source,
-    Set<String> seen,
-    List<String> ordered,
-  ) {
-    for (final id in source) {
-      if (seen.add(id)) {
-        ordered.add(id);
-      }
-    }
-  }
-
   /// Enforces `MAX_DELETED_RECORDS` before allocating a new tombstone record (`P-BOUND-ALLOC`).
   static void _ensureDeletedRecordCapacity(
     TdfDeletedDirectiveFields fields,
@@ -1339,20 +1293,6 @@ abstract final class TdfDirectiveParser {
       unit == 0x2B ||
       unit == 0x2D ||
       unit == 0x2E;
-
-  /// Checks whether [id] is a canonical 10-character Base62 entity identifier (`[0-9A-Za-z]{10}`).
-  static bool _isValidBase62EntityId(String id) {
-    if (id.length != tdfEntityIdLength) {
-      return false;
-    }
-    for (var i = 0; i < tdfEntityIdLength; i++) {
-      final unit = id.codeUnitAt(i);
-      if (!_isAsciiAlpha(unit) && !TdfScanner.isAsciiDigit(unit)) {
-        return false;
-      }
-    }
-    return true;
-  }
 
   /// Parses `blocked <task-id>[:<count>] ...` arguments, retaining the greatest `<count>` for duplicate target IDs.
   static void _parseBlockedDependencies(
@@ -1522,19 +1462,6 @@ abstract final class TdfDirectiveParser {
     return (dueAt: parsedDueAt, dueAnchor: parsedAnchor);
   }
 
-  /// Parses [length] ASCII decimal digits starting at [offset] in [source], or returns `null`.
-  static int? _parseFixedDigits(String source, int offset, int length) {
-    var result = 0;
-    for (var i = 0; i < length; i++) {
-      final unit = source.codeUnitAt(offset + i);
-      if (!TdfScanner.isAsciiDigit(unit)) {
-        return null;
-      }
-      result = result * 10 + (unit - 0x30);
-    }
-    return result;
-  }
-
   /// Parses `labels <id1> [<id2> ...]` arguments.
   static void _parseLabelRefs(
     List<TdfScannedToken> args,
@@ -1605,23 +1532,15 @@ abstract final class TdfDirectiveParser {
       );
     }
     final raw = token.value;
-    if (raw.length != 5 || raw.codeUnitAt(2) != 0x3A) {
+    final minutes = TdfMetadata.tryParseTimeMinutes(raw);
+    if (minutes == null) {
       fail(
         TdfErrorKind.invalidCondition,
         line,
-        'Invalid time window token "$raw": expected HH:MM.',
+        'Invalid time window token "$raw": expected 00:00..23:59 HH:MM.',
       );
     }
-    final hour = _parseFixedDigits(raw, 0, 2);
-    final minute = _parseFixedDigits(raw, 3, 2);
-    if (hour == null || minute == null || hour > 23 || minute > 59) {
-      fail(
-        TdfErrorKind.invalidCondition,
-        line,
-        'Time window "$raw" is out of 00:00..23:59 range.',
-      );
-    }
-    return hour * 60 + minute;
+    return minutes;
   }
 
   /// Parses a canonical positive integer token (`[1-9][0-9]*`) within `1..maxLimit`.
@@ -2140,15 +2059,12 @@ abstract final class TdfDirectiveParser {
         'Link <uri> exceeds maximum of $maxTdfUriLength Unicode scalar values.',
       );
     }
-    for (var i = 0; i < uri.length; i++) {
-      final unit = uri.codeUnitAt(i);
-      if (unit < 0x20 || unit == 0x7F) {
-        fail(
-          TdfErrorKind.invalidUri,
-          line,
-          'Link <uri> cannot contain control characters.',
-        );
-      }
+    if (TdfMetadata.containsAsciiControlChar(uri)) {
+      fail(
+        TdfErrorKind.invalidUri,
+        line,
+        'Link <uri> cannot contain control characters.',
+      );
     }
     if (!_hasValidUriSchemePrefix(uri)) {
       fail(

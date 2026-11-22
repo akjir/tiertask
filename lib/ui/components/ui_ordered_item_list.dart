@@ -19,6 +19,9 @@ import '../primitives/ui_button.dart';
 import '../primitives/ui_pill.dart';
 import '../tokens/ui_theme_tokens.dart';
 
+/// Minimum estimated row height (`32px`) used to switch bounded lists into lazy virtualization.
+const double _minOrderedRowHeight = 32.0;
+
 /// Signature building row content inside [UiOrderedItemList].
 typedef UiOrderedItemBuilder<T> = Widget Function(
   BuildContext context,
@@ -187,11 +190,14 @@ class UiOrderedItemList<T> extends StatelessWidget {
     );
   }
 
-  /// Builds either a height-capped scrollable or parent-scroll-friendly `ListView.builder`.
+  /// Builds either a height-capped lazily virtualized or parent-scroll-friendly `ListView.builder`.
   Widget _buildListView() {
+    final limit = maxHeight;
+    final virtualizeBounded =
+        limit != null && items.length * _minOrderedRowHeight >= limit;
     final listView = ListView.builder(
-      shrinkWrap: true,
-      physics: maxHeight == null ? const NeverScrollableScrollPhysics() : null,
+      shrinkWrap: !virtualizeBounded,
+      physics: limit == null ? const NeverScrollableScrollPhysics() : null,
       itemCount: items.length,
       itemBuilder: (context, index) {
         final item = items[index];
@@ -213,7 +219,10 @@ class UiOrderedItemList<T> extends StatelessWidget {
       },
     );
 
-    if (maxHeight case final limit?) {
+    if (limit != null) {
+      if (virtualizeBounded) {
+        return SizedBox(height: limit, child: listView);
+      }
       return ConstrainedBox(
         constraints: BoxConstraints(maxHeight: limit),
         child: listView,
@@ -310,15 +319,13 @@ class _UiOrderedRow<T> extends StatelessWidget {
 
     return Padding(
       padding: EdgeInsets.only(bottom: index < totalCount - 1 ? 4.0 : 0.0),
-      child: AnimatedContainer(
-        duration: tokens.focus.hoverDuration,
+      child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 6.0, vertical: 4.0),
         decoration: BoxDecoration(
           color: isEditing ? colors.soft : Colors.transparent,
           borderRadius: BorderRadius.circular(tokens.radii.md),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             Expanded(child: child),
             if (onReorder case final reorder?) ...<Widget>[

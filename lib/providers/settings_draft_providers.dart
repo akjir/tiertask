@@ -19,17 +19,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../l10n/app_localizations.dart';
-import '../l10n/storage_file_read_localization_extension.dart';
-import '../l10n/tier_localization_extension.dart';
-import '../models/app_workspace.dart';
 import '../models/tdf_file_path.dart';
+import '../models/tdf_metadata.dart';
 import '../models/webdav_config.dart';
 import '../repositories/local_file_repository.dart';
-import '../repositories/webdav_repository.dart';
 import '../services/app_logger.dart';
 import 'config_providers.dart';
 import 'shell_providers.dart';
-import 'sync_providers.dart';
+import 'sync_error_formatter.dart';
 import 'task_providers.dart';
 import 'ui_telemetry.dart';
 import 'workspace_providers.dart';
@@ -74,6 +71,7 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
   static final RegExp _pathSeparatorPattern = RegExp(r'[/\\]');
 
   String? _activeWorkspaceId;
+  int _workspaceGeneration = 0;
 
   /// Whether any inline WebDAV validation error is currently set on [state].
   bool get _hasValidationErrors =>
@@ -84,6 +82,7 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
 
   @override
   SettingsDraftState build() {
+    _workspaceGeneration = 0;
     final initialConfig = readCurrentConfig(ref);
     _activeWorkspaceId = ref.read(activeWorkspaceProvider).asData?.value.id;
     final initialLocalPathPreview = ref
@@ -182,13 +181,16 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.localDirectoryMovedBanner,
-      action: () async {
+      action: (generation) async {
         final repository = _createLocalRepository(previousConfig);
         final currentDirectory = repository.tryResolveDirectoryPath();
         final currentFileName = repository.extractFileName();
         final selectedDirectory = await ref.read(directoryPickerProvider)(
           initialDirectory: currentDirectory,
         );
+        if (!_isGenerationActive(generation)) {
+          return false;
+        }
         if (selectedDirectory == null ||
             selectedDirectory.trim().isEmpty ||
             selectedDirectory == currentDirectory) {
@@ -243,7 +245,7 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.localFileRenamedBanner,
-      action: () async {
+      action: (_) async {
         await ref
             .read(webDavConfigProvider.notifier)
             .changeLocalFileLocation(candidateConfig);
@@ -268,11 +270,11 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
     Future<void> Function(WebDavConfigNotifier notifier) persist, {
     Locale? locale,
   }) async {
-    final workspaceId = _activeWorkspaceId;
+    final generation = _workspaceGeneration;
     final localizations = _resolveLocalizations(locale);
     try {
       await persist(ref.read(webDavConfigProvider.notifier));
-      if (!ref.mounted || _activeWorkspaceId != workspaceId) {
+      if (!_isGenerationActive(generation)) {
         return const ActionSucceeded();
       }
       if (state.statusBanner?.tone == SettingsBannerTone.danger) {
@@ -280,8 +282,11 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       }
       return const ActionSucceeded();
     } on Object catch (error) {
-      final message = _formatSettingsError(error, localizations);
-      if (!ref.mounted || _activeWorkspaceId != workspaceId) {
+      final message = SyncErrorFormatter.formatSettingsError(
+        error,
+        localizations,
+      );
+      if (!_isGenerationActive(generation)) {
         return ActionPersistFailed(message: message);
       }
       showErrorBanner(message);
@@ -306,7 +311,7 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       operation: SettingsBusyOperation.saveWebDav,
       localizations: localizations,
       successMessage: localizations.credentialsSavedBanner,
-      action: () async {
+      action: (_) async {
         await ref
             .read(webDavConfigProvider.notifier)
             .updateConfig(candidateConfig);
@@ -343,11 +348,14 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.localFileSelectedBanner,
-      action: () async {
+      action: (generation) async {
         final targetPath = await _resolveSelectLocalTargetPath(
           previousConfig,
           chosenFileName,
         );
+        if (!_isGenerationActive(generation)) {
+          return false;
+        }
         if (targetPath == null) {
           return false;
         }
@@ -424,7 +432,7 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       operation: SettingsBusyOperation.testConnectionAndSync,
       localizations: localizations,
       successMessage: localizations.connectionSuccessBanner,
-      action: () async {
+      action: (_) async {
         await ref
             .read(taskNotifierProvider.notifier)
             .testConnectionAndSync(candidateConfig);
@@ -521,7 +529,7 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.localFileWipedBanner,
-      action: () async {
+      action: (_) async {
         await ref
             .read(taskNotifierProvider.notifier)
             .wipeLocalFile(targetConfig, createBackup: createBackup);
@@ -557,7 +565,7 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       operation: SettingsBusyOperation.storageOperation,
       localizations: localizations,
       successMessage: localizations.remoteFileWipedBanner,
-      action: () async {
+      action: (_) async {
         await ref
             .read(taskNotifierProvider.notifier)
             .wipeRemoteFile(targetConfig, createBackup: createBackup);
@@ -749,6 +757,7 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
     if (!switchedWorkspace) {
       return;
     }
+    _workspaceGeneration++;
     if (state.isDirty) {
       UiTelemetry.logSettingsWebDavDraftDiscarded('workspace_switch');
     }
@@ -766,6 +775,10 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       resolvedLocalPathPreview: nextLocalPathPreview,
     );
   }
+
+  /// Returns `true` when this notifier is still mounted and [generation] matches the active workspace session.
+  bool _isGenerationActive(int generation) =>
+      ref.mounted && _workspaceGeneration == generation;
 
   /// Combines [chosenFileName] with the resolved directory of [config] when a base or explicit directory applies.
   String _resolveChosenLocalFileName(
@@ -817,15 +830,15 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
     required SettingsBusyOperation operation,
     required AppLocalizations localizations,
     required String successMessage,
-    required Future<bool> Function() action,
+    required Future<bool> Function(int generation) action,
     void Function(SettingsStatusBanner successBanner)? onSuccess,
     void Function(SettingsStatusBanner failureBanner)? onFailure,
   }) async {
-    final workspaceId = _activeWorkspaceId;
+    final generation = _workspaceGeneration;
     state = state.copyWith(busyOperation: operation, clearStatusBanner: true);
     try {
-      final completed = await action();
-      if (!ref.mounted || _activeWorkspaceId != workspaceId) {
+      final completed = await action(generation);
+      if (!_isGenerationActive(generation)) {
         return const ActionSucceeded();
       }
       if (!completed) {
@@ -846,8 +859,11 @@ class SettingsDraftNotifier extends Notifier<SettingsDraftState> {
       }
       return ActionSucceeded(noticeMessage: successMessage);
     } on Object catch (error) {
-      final message = _formatSettingsError(error, localizations);
-      if (!ref.mounted || _activeWorkspaceId != workspaceId) {
+      final message = SyncErrorFormatter.formatSettingsError(
+        error,
+        localizations,
+      );
+      if (!_isGenerationActive(generation)) {
         return ActionPersistFailed(message: message);
       }
       final banner = SettingsStatusBanner(
@@ -1136,35 +1152,6 @@ typedef _WebDavConfigSlice = ({
   String username,
 });
 
-/// Formats a settings storage or workspace [error] into a sanitized localized status message.
-String _formatSettingsError(Object error, AppLocalizations localizations) {
-  return switch (error) {
-    final WorkspaceException workspaceError =>
-      localizations.localizeWorkspaceError(workspaceError),
-    final StorageFileReadException fileReadError => AppLogger.sanitize(
-      localizations.formatStorageFileReadMessage(fileReadError.report),
-    ),
-    final LocalFileException localFileError => AppLogger.sanitize(
-      localFileError.message,
-    ),
-    final WebDavException webDavError => AppLogger.sanitize(
-      webDavError.toString(),
-    ),
-    _ => AppLogger.sanitize(error.toString()),
-  };
-}
-
-/// Returns `true` when [value] contains ASCII control characters (`0x00..0x1F`) or `DEL` (`0x7F`).
-bool _hasControlCharacters(String value) {
-  for (var i = 0; i < value.length; i++) {
-    final codeUnit = value.codeUnitAt(i);
-    if (codeUnit < 0x20 || codeUnit == 0x7F) {
-      return true;
-    }
-  }
-  return false;
-}
-
 /// Returns `true` when [segments] contains `.` or `..` path traversal elements.
 bool _hasInvalidPathSegments(Iterable<String> segments) {
   for (final segment in segments) {
@@ -1177,7 +1164,7 @@ bool _hasInvalidPathSegments(Iterable<String> segments) {
 
 /// Returns `true` when [rawName] is a safe single local `.tdf` filename without separators, `..`, or control characters.
 bool _isValidLocalSingleFileName(String rawName) {
-  if (_hasControlCharacters(rawName)) {
+  if (TdfMetadata.containsAsciiControlChar(rawName)) {
     return false;
   }
   final trimmed = rawName.trim();
@@ -1193,7 +1180,7 @@ String? _validateRemoteFilePath(
   String rawFilePath,
   AppLocalizations localizations,
 ) {
-  if (_hasControlCharacters(rawFilePath)) {
+  if (TdfMetadata.containsAsciiControlChar(rawFilePath)) {
     return localizations.webDavPathInvalidError;
   }
   final trimmed = rawFilePath.trim();

@@ -33,6 +33,101 @@ import '../tokens/ui_theme_tokens.dart';
 import '../tokens/ui_typography_tokens.dart';
 import 'entity_card_chrome.dart';
 
+/// Pure reusable Reference Links reorderable list and inline add/edit form body (`U-COMP-006`).
+class EntityLinksEditorBody extends StatelessWidget {
+  /// Creates an [EntityLinksEditorBody].
+  const EntityLinksEditorBody({
+    super.key,
+    required this.links,
+    required this.editingIndex,
+    required this.titleController,
+    required this.uriController,
+    required this.onReorder,
+    required this.onStartRowEdit,
+    required this.onDeleteRow,
+    required this.onCommitLink,
+    required this.onCancelRowEdit,
+    this.inputErrorText,
+    this.onInputChanged,
+    this.enabled = true,
+    this.autofocusTitle = false,
+    this.itemKeyPrefix = 'entity_link',
+  });
+
+  /// Requests initial focus on the title input when mounted (used for live inline edit).
+  final bool autofocusTitle;
+
+  /// Row index currently being updated inline, or `null` when adding a new link.
+  final int? editingIndex;
+
+  /// Whether row actions, inputs, and submit buttons accept interaction.
+  final bool enabled;
+
+  /// Optional validation error for the inline title/URI inputs.
+  final String? inputErrorText;
+
+  /// Deterministic prefix applied to each ordered row [ValueKey].
+  final String itemKeyPrefix;
+
+  /// Current editable links list.
+  final List<TaskLink> links;
+
+  /// Callback cancelling an active row edit.
+  final VoidCallback onCancelRowEdit;
+
+  /// Callback adding or updating the typed link row.
+  final VoidCallback onCommitLink;
+
+  /// Callback removing a link row.
+  final UiOrderedItemActionCallback<TaskLink> onDeleteRow;
+
+  /// Optional callback notified whenever title or URI text changes.
+  final ValueChanged<String>? onInputChanged;
+
+  /// Callback moving a link row up or down.
+  final UiOrderedItemReorderCallback onReorder;
+
+  /// Callback loading an existing link row into the inline form inputs.
+  final UiOrderedItemActionCallback<TaskLink> onStartRowEdit;
+
+  /// Title text controller.
+  final TextEditingController titleController;
+
+  /// URI text controller.
+  final TextEditingController uriController;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    return UiOrderedItemList<TaskLink>(
+      items: links,
+      itemKey: (link, index) =>
+          ValueKey<String>('${itemKeyPrefix}_${index}_${link.uri}'),
+      editingIndex: editingIndex,
+      onReorder: enabled ? onReorder : null,
+      moveUpTooltip: localizations.tooltipMoveLinkUp,
+      moveDownTooltip: localizations.tooltipMoveLinkDown,
+      onEdit: enabled ? onStartRowEdit : null,
+      editTooltip: localizations.tooltipEditLink,
+      onDelete: enabled ? onDeleteRow : null,
+      deleteTooltip: localizations.tooltipRemoveLink,
+      itemBuilder: (context, link, index, isEditingRow) =>
+          _EntityLinkListItem(link: link),
+      addBar: _EntityLinkFormBar(
+        titleController: titleController,
+        uriController: uriController,
+        isEditingExisting: editingIndex != null,
+        autofocusTitle: autofocusTitle,
+        errorText: inputErrorText,
+        enabled: enabled,
+        onChanged: onInputChanged,
+        onSubmitLink: onCommitLink,
+        onCancelRowEdit: onCancelRowEdit,
+      ),
+    );
+  }
+}
+
 /// Shared read-only and inline-editable Reference Links section for Tasks and Labels (`U-COMP-006`).
 class EntityLinksSection extends ConsumerStatefulWidget {
   /// Creates an [EntityLinksSection].
@@ -127,58 +222,6 @@ class _EntityFocusRingBox extends StatelessWidget {
   }
 }
 
-/// Renders the Add/Update link button and optional row-edit Cancel button.
-class _EntityLinkFormActions extends StatelessWidget {
-  /// Creates an [_EntityLinkFormActions].
-  const _EntityLinkFormActions({
-    required this.isEditingExisting,
-    required this.enabled,
-    required this.onSubmitLink,
-    required this.onCancelRowEdit,
-  });
-
-  /// Whether buttons accept interaction.
-  final bool enabled;
-
-  /// Switches label from `Add link` to `Update link` and exposes `Cancel`.
-  final bool isEditingExisting;
-
-  /// Callback cancelling an active row edit.
-  final VoidCallback onCancelRowEdit;
-
-  /// Callback adding or updating the link row.
-  final VoidCallback onSubmitLink;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Wrap(
-      spacing: 6.0,
-      runSpacing: 6.0,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: <Widget>[
-        UiButton(
-          label: isEditingExisting
-              ? localizations.tooltipSaveLink
-              : localizations.tooltipAddLink,
-          leadingIcon: isEditingExisting ? null : Icons.add_rounded,
-          variant: UiButtonVariant.secondary,
-          density: UiButtonDensity.compact,
-          onPressed: enabled ? onSubmitLink : null,
-        ),
-        if (isEditingExisting)
-          UiButton(
-            label: localizations.actionCancel,
-            variant: UiButtonVariant.text,
-            density: UiButtonDensity.compact,
-            tooltip: localizations.tooltipCancelEditLink,
-            onPressed: enabled ? onCancelRowEdit : null,
-          ),
-      ],
-    );
-  }
-}
-
 /// Renders inline title + URI fields, validation error, and Add/Update link buttons.
 class _EntityLinkFormBar extends StatelessWidget {
   /// Creates an [_EntityLinkFormBar].
@@ -186,12 +229,16 @@ class _EntityLinkFormBar extends StatelessWidget {
     required this.titleController,
     required this.uriController,
     required this.isEditingExisting,
+    required this.autofocusTitle,
     required this.errorText,
     required this.enabled,
     required this.onChanged,
     required this.onSubmitLink,
     required this.onCancelRowEdit,
   });
+
+  /// Requests initial focus on the title field when true.
+  final bool autofocusTitle;
 
   /// Whether inputs and submit button are enabled.
   final bool enabled;
@@ -205,8 +252,8 @@ class _EntityLinkFormBar extends StatelessWidget {
   /// Callback cancelling an active row edit.
   final VoidCallback onCancelRowEdit;
 
-  /// Callback notified when either input changes.
-  final ValueChanged<String> onChanged;
+  /// Optional callback notified when either input changes.
+  final ValueChanged<String>? onChanged;
 
   /// Callback validating and committing the typed link row.
   final VoidCallback onSubmitLink;
@@ -220,6 +267,7 @@ class _EntityLinkFormBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
+    final localizations = AppLocalizations.of(context);
     final error = errorText;
 
     return Column(
@@ -229,6 +277,7 @@ class _EntityLinkFormBar extends StatelessWidget {
         _EntityLinkFormInputsGrid(
           titleController: titleController,
           uriController: uriController,
+          autofocusTitle: autofocusTitle,
           enabled: enabled,
           onChanged: onChanged,
           onSubmitLink: onSubmitLink,
@@ -238,11 +287,28 @@ class _EntityLinkFormBar extends StatelessWidget {
           EntityInlineErrorText(message: error),
         ],
         SizedBox(height: tokens.spacing.space2),
-        _EntityLinkFormActions(
-          isEditingExisting: isEditingExisting,
-          enabled: enabled,
-          onSubmitLink: onSubmitLink,
-          onCancelRowEdit: onCancelRowEdit,
+        Wrap(
+          spacing: 6.0,
+          runSpacing: 6.0,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: <Widget>[
+            UiButton(
+              label: isEditingExisting
+                  ? localizations.tooltipSaveLink
+                  : localizations.tooltipAddLink,
+              leadingIcon: isEditingExisting ? null : Icons.add_rounded,
+              density: UiButtonDensity.compact,
+              onPressed: enabled ? onSubmitLink : null,
+            ),
+            if (isEditingExisting)
+              UiButton(
+                label: localizations.actionCancel,
+                variant: UiButtonVariant.text,
+                density: UiButtonDensity.compact,
+                tooltip: localizations.tooltipCancelEditLink,
+                onPressed: enabled ? onCancelRowEdit : null,
+              ),
+          ],
         ),
       ],
     );
@@ -255,16 +321,20 @@ class _EntityLinkFormInputsGrid extends StatelessWidget {
   const _EntityLinkFormInputsGrid({
     required this.titleController,
     required this.uriController,
+    required this.autofocusTitle,
     required this.enabled,
     required this.onChanged,
     required this.onSubmitLink,
   });
 
+  /// Requests initial focus on the title input when true.
+  final bool autofocusTitle;
+
   /// Whether inputs accept interaction.
   final bool enabled;
 
-  /// Callback notified when either input changes.
-  final ValueChanged<String> onChanged;
+  /// Optional callback notified when either input changes.
+  final ValueChanged<String>? onChanged;
 
   /// Callback validating and committing the typed link row.
   final VoidCallback onSubmitLink;
@@ -285,19 +355,18 @@ class _EntityLinkFormInputsGrid extends StatelessWidget {
       runSpacing: tokens.spacing.space2,
       children: <Widget>[
         UiField(
-          kind: UiFieldKind.text,
           controller: titleController,
           hintText: localizations.linkTitleHint,
           maxLength: maxTdfTextLength,
-          autofocus: true,
+          autofocus: autofocusTitle,
           enabled: enabled,
           onChanged: onChanged,
           onSubmitted: (_) => onSubmitLink(),
         ),
         UiField(
-          kind: UiFieldKind.text,
           controller: uriController,
           hintText: localizations.linkUriHint,
+          maxLength: maxTdfTextLength,
           isMonospace: true,
           enabled: enabled,
           onChanged: onChanged,
@@ -308,7 +377,7 @@ class _EntityLinkFormInputsGrid extends StatelessWidget {
   }
 }
 
-/// Renders one link title and monospace URI stack inside read-only cards and [UiOrderedItemList].
+/// Renders one link title and monospace URI stack inside read-only cards and [EntityLinksEditorBody].
 class _EntityLinkListItem extends StatelessWidget {
   /// Creates an [_EntityLinkListItem].
   const _EntityLinkListItem({required this.link});
@@ -343,206 +412,6 @@ class _EntityLinkListItem extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Renders the inline editing inset card for [EntityLinksSection].
-class _EntityLinksEditCard extends StatelessWidget {
-  /// Creates an [_EntityLinksEditCard].
-  const _EntityLinksEditCard({
-    required this.draftLinks,
-    required this.maxLinks,
-    required this.hasPersistedLinks,
-    required this.editingIndex,
-    required this.titleController,
-    required this.uriController,
-    required this.inputErrorText,
-    required this.saveErrorText,
-    required this.isBusy,
-    required this.onReorder,
-    required this.onStartRowEdit,
-    required this.onDeleteRow,
-    required this.onInputChanged,
-    required this.onCommitLinkInput,
-    required this.onCancelRowEdit,
-    required this.onClearAll,
-    required this.onCancel,
-    required this.onSave,
-  });
-
-  /// Editable draft links list.
-  final List<TaskLink> draftLinks;
-
-  /// Row index currently being updated inline, or `null` when adding.
-  final int? editingIndex;
-
-  /// Controls whether the footer Clear button is shown.
-  final bool hasPersistedLinks;
-
-  /// Optional validation error for the inline link form inputs.
-  final String? inputErrorText;
-
-  /// Disables controls while submitting.
-  final bool isBusy;
-
-  /// Maximum number of links permitted on this entity.
-  final int maxLinks;
-
-  /// Callback cancelling the whole links section edit.
-  final VoidCallback onCancel;
-
-  /// Callback cancelling an active row edit.
-  final VoidCallback onCancelRowEdit;
-
-  /// Callback clearing all persisted links.
-  final VoidCallback onClearAll;
-
-  /// Callback adding or updating the typed link row.
-  final VoidCallback onCommitLinkInput;
-
-  /// Callback removing a link row.
-  final UiOrderedItemActionCallback<TaskLink> onDeleteRow;
-
-  /// Callback clearing input validation error when text changes.
-  final ValueChanged<String> onInputChanged;
-
-  /// Callback moving a link row up or down.
-  final UiOrderedItemReorderCallback onReorder;
-
-  /// Callback saving the entire links list.
-  final VoidCallback onSave;
-
-  /// Callback starting inline edit on a link row.
-  final UiOrderedItemActionCallback<TaskLink> onStartRowEdit;
-
-  /// Optional persistence or validation error returned by `onSave`.
-  final String? saveErrorText;
-
-  /// Title text controller.
-  final TextEditingController titleController;
-
-  /// URI text controller.
-  final TextEditingController uriController;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiCard.inset(
-      isEditing: true,
-      headerIcon: Icons.link_rounded,
-      headerTitle: localizations.linksSectionTitle,
-      headerBadge: UiPill(
-        label: '${draftLinks.length} / $maxLinks',
-        variant: UiPillVariant.count,
-      ),
-      footer: EntityInlineEditorFooter(
-        errorText: saveErrorText,
-        clearLabel: hasPersistedLinks ? localizations.inlineClearAction : null,
-        onClear: hasPersistedLinks ? onClearAll : null,
-        onCancel: onCancel,
-        onSave: onSave,
-        isBusy: isBusy,
-      ),
-      child: _EntityLinksOrderedList(
-        draftLinks: draftLinks,
-        editingIndex: editingIndex,
-        titleController: titleController,
-        uriController: uriController,
-        inputErrorText: inputErrorText,
-        isBusy: isBusy,
-        onReorder: onReorder,
-        onStartRowEdit: onStartRowEdit,
-        onDeleteRow: onDeleteRow,
-        onInputChanged: onInputChanged,
-        onCommitLinkInput: onCommitLinkInput,
-        onCancelRowEdit: onCancelRowEdit,
-      ),
-    );
-  }
-}
-
-/// Renders the reorderable draft link items and inline add/edit bar inside [_EntityLinksEditCard].
-class _EntityLinksOrderedList extends StatelessWidget {
-  /// Creates an [_EntityLinksOrderedList].
-  const _EntityLinksOrderedList({
-    required this.draftLinks,
-    required this.editingIndex,
-    required this.titleController,
-    required this.uriController,
-    required this.inputErrorText,
-    required this.isBusy,
-    required this.onReorder,
-    required this.onStartRowEdit,
-    required this.onDeleteRow,
-    required this.onInputChanged,
-    required this.onCommitLinkInput,
-    required this.onCancelRowEdit,
-  });
-
-  /// Editable draft links list.
-  final List<TaskLink> draftLinks;
-
-  /// Row index currently being updated inline, or `null` when adding.
-  final int? editingIndex;
-
-  /// Optional validation error for the inline link form inputs.
-  final String? inputErrorText;
-
-  /// Disables row actions and inputs while submitting.
-  final bool isBusy;
-
-  /// Callback cancelling an active row edit.
-  final VoidCallback onCancelRowEdit;
-
-  /// Callback adding or updating the typed link row.
-  final VoidCallback onCommitLinkInput;
-
-  /// Callback removing a link row.
-  final UiOrderedItemActionCallback<TaskLink> onDeleteRow;
-
-  /// Callback clearing input validation error when text changes.
-  final ValueChanged<String> onInputChanged;
-
-  /// Callback moving a link row up or down.
-  final UiOrderedItemReorderCallback onReorder;
-
-  /// Callback starting inline edit on a link row.
-  final UiOrderedItemActionCallback<TaskLink> onStartRowEdit;
-
-  /// Title text controller.
-  final TextEditingController titleController;
-
-  /// URI text controller.
-  final TextEditingController uriController;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiOrderedItemList<TaskLink>(
-      items: draftLinks,
-      itemKey: (link, index) =>
-          ValueKey<String>('entity_link_${index}_${link.uri}'),
-      editingIndex: editingIndex,
-      onReorder: isBusy ? null : onReorder,
-      moveUpTooltip: localizations.tooltipMoveLinkUp,
-      moveDownTooltip: localizations.tooltipMoveLinkDown,
-      onEdit: isBusy ? null : onStartRowEdit,
-      editTooltip: localizations.tooltipEditLink,
-      onDelete: isBusy ? null : onDeleteRow,
-      deleteTooltip: localizations.tooltipRemoveLink,
-      itemBuilder: (context, link, index, isEditingRow) =>
-          _EntityLinkListItem(link: link),
-      addBar: _EntityLinkFormBar(
-        titleController: titleController,
-        uriController: uriController,
-        isEditingExisting: editingIndex != null,
-        errorText: inputErrorText,
-        enabled: !isBusy,
-        onChanged: onInputChanged,
-        onSubmitLink: onCommitLinkInput,
-        onCancelRowEdit: onCancelRowEdit,
-      ),
     );
   }
 }
@@ -674,25 +543,41 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
           : const SizedBox.shrink();
     }
 
-    return _EntityLinksEditCard(
-      draftLinks: _draftLinks,
-      maxLinks: maxLinks,
-      hasPersistedLinks: widget.links.isNotEmpty,
-      editingIndex: _editingIndex,
-      titleController: _titleController,
-      uriController: _uriController,
-      inputErrorText: _inputErrorText,
-      saveErrorText: _saveErrorText,
-      isBusy: widget.isBusy || _isSubmitting,
-      onReorder: _handleReorder,
-      onStartRowEdit: _handleStartRowEdit,
-      onDeleteRow: _handleDeleteRow,
-      onInputChanged: _handleInputChanged,
-      onCommitLinkInput: _handleCommitLinkInput,
-      onCancelRowEdit: _handleCancelRowEdit,
-      onClearAll: _handleClearAll,
-      onCancel: widget.onCancelEdit,
-      onSave: _handleSave,
+    final localizations = AppLocalizations.of(context);
+    final effectiveBusy = widget.isBusy || _isSubmitting;
+    return UiCard.inset(
+      isEditing: true,
+      headerIcon: Icons.link_rounded,
+      headerTitle: localizations.linksSectionTitle,
+      headerBadge: UiPill(
+        label: '${_draftLinks.length} / $maxLinks',
+        variant: UiPillVariant.count,
+      ),
+      footer: EntityInlineEditorFooter(
+        errorText: _saveErrorText,
+        clearLabel: widget.links.isNotEmpty
+            ? localizations.inlineClearAction
+            : null,
+        onClear: widget.links.isNotEmpty ? _handleClearAll : null,
+        onCancel: widget.onCancelEdit,
+        onSave: _handleSave,
+        isBusy: effectiveBusy,
+      ),
+      child: EntityLinksEditorBody(
+        links: _draftLinks,
+        editingIndex: _editingIndex,
+        titleController: _titleController,
+        uriController: _uriController,
+        inputErrorText: _inputErrorText,
+        enabled: !effectiveBusy,
+        autofocusTitle: true,
+        onReorder: _handleReorder,
+        onStartRowEdit: _handleStartRowEdit,
+        onDeleteRow: _handleDeleteRow,
+        onInputChanged: _handleInputChanged,
+        onCommitLink: _handleCommitLinkInput,
+        onCancelRowEdit: _handleCancelRowEdit,
+      ),
     );
   }
 
@@ -846,23 +731,22 @@ class _EntityLinksSectionState extends ConsumerState<EntityLinksSection> {
       _isSubmitting = true;
       _saveErrorText = null;
     });
-    final result = await widget.onSave(List<TaskLink>.unmodifiable(links));
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await widget.onSave(List<TaskLink>.unmodifiable(links));
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message):
+        case ActionPersistFailed(:final message):
+          setState(() => _saveErrorText = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _saveErrorText = message;
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _saveErrorText = message;
-        });
+      }
     }
   }
 }

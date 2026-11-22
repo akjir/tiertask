@@ -37,12 +37,13 @@ flutter gen-l10n
 flutter run -d linux
 ```
 
-Build and install the Linux desktop release into `$HOME/.local` (or remove with `./install.sh uninstall`), or build obfuscated release artifacts manually:
+Build and install the Linux desktop release into `$HOME/.local` (or remove with `./install.sh uninstall`), or build obfuscated release artifacts manually (use `--split-per-abi` for per-ABI Android APKs or `appbundle` for `.aab` distribution):
 
 ```bash
 ./install.sh
 flutter build linux --release --obfuscate --split-debug-info=build/symbols
-flutter build apk --release --obfuscate --split-debug-info=build/symbols
+flutter build apk --release --split-per-abi --obfuscate --split-debug-info=build/symbols
+flutter build appbundle --release --obfuscate --split-debug-info=build/symbols
 flutter build windows --release --obfuscate --split-debug-info=build/symbols
 ```
 

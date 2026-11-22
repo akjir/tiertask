@@ -13,11 +13,14 @@
 // You should have received a copy of the GNU General Public License along with
 // this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tiertask/models/settings_codec.dart';
 import 'package:tiertask/models/storage_file_read_status.dart';
 import 'package:tiertask/models/task_board.dart';
+import 'package:tiertask/models/task_item.dart';
 import 'package:tiertask/models/task_tier.dart';
 import 'package:tiertask/models/tdf_sync_metadata.dart';
 import 'package:tiertask/models/webdav_config.dart';
@@ -99,7 +102,7 @@ task taskB00002 {
       overrides: [
         settingsRepositoryProvider.overrideWithValue(settingsRepository),
         localFileRepositoryProvider.overrideWith((ref) => localRepository),
-        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 12, 0)),
+        clockProvider.overrideWithValue(() => DateTime.utc(2026, 11, 1, 12)),
       ],
     );
   }
@@ -896,13 +899,86 @@ task taskB00002 {
       expect(contextA.hashCode, equals(contextB.hashCode));
 
       final stateA = ShellState(
-        view: ShellView.tasks,
         activeTier: TaskTier.planned,
         returnContext: contextA,
       );
       final stateB = stateA.copyWith();
       expect(stateA, equals(stateB));
       expect(stateA.hashCode, equals(stateB.hashCode));
+    });
+
+    test('ref-counts overlapping runLocalEntityMutation calls on the same EntityRef', () async {
+      final fixedNow = DateTime.utc(2026, 11, 10, 12);
+      final initialBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[
+          TaskItem(
+            id: 'taskRef001',
+            title: 'Overlap Target',
+            createdAt: fixedNow,
+            modifiedAt: fixedNow,
+          ),
+        ],
+        queueBlock: TdfQueueBlock(
+          taskIds: const <String>['taskRef001'],
+          modifiedAt: fixedNow,
+        ),
+        evaluationTime: fixedNow,
+      );
+      final taskNotifier = _ControllableTaskNotifier(initialBoard);
+      final container = ProviderContainer(
+        overrides: [
+          settingsRepositoryProvider.overrideWithValue(
+            InMemorySettingsRepository(
+              const WebDavConfig(language: AppLanguage.english),
+            ),
+          ),
+          taskNotifierProvider.overrideWith(() => taskNotifier),
+          clockProvider.overrideWithValue(() => fixedNow),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(activeWorkspaceProvider.future);
+      await container.read(taskNotifierProvider.future);
+      final shellSub = container.listen(shellProvider, (_, _) {});
+      addTearDown(shellSub.close);
+      final noticeSub = container.listen(floatingNoticeProvider, (_, _) {});
+      addTearDown(noticeSub.close);
+
+      const target = EntityRef(kind: EntityKind.task, id: 'taskRef001');
+      final shell = container.read(shellProvider.notifier);
+      shell.expandEntity(target);
+
+      final firstGate = Completer<void>();
+      final secondGate = Completer<void>();
+      final firstMutation = shell.runLocalEntityMutation(
+        target,
+        () => firstGate.future,
+      );
+      final secondMutation = shell.runLocalEntityMutation(
+        target,
+        () => secondGate.future,
+      );
+
+      // Complete mutation #1 while mutation #2 is still in flight!
+      firstGate.complete();
+      await firstMutation;
+
+      // Board update removes target while mutation #2 is STILL holding suppression.
+      taskNotifier.emitBoard(TaskBoard.empty());
+      expect(
+        container.read(floatingNoticeProvider),
+        isNull,
+        reason: 'Overlapping runLocalEntityMutation must keep suppression active until the last call finishes',
+      );
+      expect(
+        container.read(shellProvider).expandedEntity,
+        equals(target),
+        reason: 'Ref-counted suppression must prevent premature external-removal collapse',
+      );
+
+      secondGate.complete();
+      await secondMutation;
     });
   });
 }

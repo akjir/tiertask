@@ -38,10 +38,10 @@ import '../primitives/ui_card.dart';
 import '../primitives/ui_field.dart';
 import '../primitives/ui_pill.dart';
 import '../primitives/ui_segmented_control.dart';
-import '../tokens/ui_breakpoints.dart';
 import '../tokens/ui_theme_tokens.dart';
 import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
+import '../widgets/entity_inline_name_editor.dart';
 import '../widgets/entity_note_section.dart';
 
 /// Default formatted geofence radius seeding an uncommitted [LocationDraftCard].
@@ -668,7 +668,6 @@ class _LocationCoordinatesActionRow extends StatelessWidget {
           leadingIcon: isResolving && isGps
               ? Icons.sync_rounded
               : Icons.my_location_rounded,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           isLoading: isResolving && isGps,
           onPressed: canUseGps ? onUseCurrentGps : null,
@@ -679,7 +678,6 @@ class _LocationCoordinatesActionRow extends StatelessWidget {
           leadingIcon: isResolving && !isGps
               ? Icons.sync_rounded
               : Icons.search_rounded,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           isLoading: isResolving && !isGps,
           onPressed: canResolve ? onResolveSource : null,
@@ -689,11 +687,64 @@ class _LocationCoordinatesActionRow extends StatelessWidget {
   }
 }
 
-/// Accent-bordered inset well hosting the inline Coordinates & Radius editor and footer.
-class _LocationCoordinatesEditCard extends StatelessWidget {
-  /// Creates a [_LocationCoordinatesEditCard].
-  const _LocationCoordinatesEditCard({
-    required this.locationId,
+/// Shared inset Coordinates & Radius editor body used by both live card edit and Location Draft Card.
+class _LocationCoordinatesEditorBody extends StatelessWidget {
+  /// Creates a [_LocationCoordinatesEditorBody].
+  const _LocationCoordinatesEditorBody({
+    this.cardKey,
+    required this.keyPrefix,
+    required this.data,
+    this.isEditing = false,
+    this.footer,
+  });
+
+  /// Optional stable key placed on the outer [UiCard.inset].
+  final Key? cardKey;
+
+  /// Bundled coordinate controllers, error texts, and lookup callbacks.
+  final _LocationCoordinatesFormData data;
+
+  /// Optional bottom footer rendered for live inline editing.
+  final Widget? footer;
+
+  /// Renders the accent editing border when true (live card inline edit).
+  final bool isEditing;
+
+  /// Deterministic prefix applied to all nested field and button keys.
+  final String keyPrefix;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
+    final tokens = UiThemeTokens.of(context);
+
+    return UiCard.inset(
+      key: cardKey,
+      isEditing: isEditing,
+      headerIcon: Icons.my_location_rounded,
+      headerTitle: localizations.locationCoordinatesSectionTitle,
+      footer: footer,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          _LocationSourceAndLookupFields(keyPrefix: keyPrefix, data: data),
+          SizedBox(height: tokens.spacing.space2),
+          _LocationLatitudeLongitudeRadiusFields(
+            keyPrefix: keyPrefix,
+            data: data,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Immutable bundle of Coordinates & Radius controllers, errors, and lookup callbacks.
+@immutable
+class _LocationCoordinatesFormData {
+  /// Creates a [_LocationCoordinatesFormData].
+  const _LocationCoordinatesFormData({
     required this.sourceType,
     required this.sourceController,
     required this.latitudeController,
@@ -701,130 +752,19 @@ class _LocationCoordinatesEditCard extends StatelessWidget {
     required this.radiusController,
     required this.sourceErrorText,
     required this.radiusErrorText,
-    required this.errorText,
     required this.isBusy,
     required this.isResolving,
     required this.onSourceTypeChanged,
     required this.onUseCurrentGps,
     required this.onResolveSource,
     required this.onFieldChanged,
-    required this.onCancel,
-    required this.onSave,
   });
 
-  /// Footer validation or resolution error message.
-  final String? errorText;
-
-  /// Disables actions while saving.
+  /// Disables inputs while saving.
   final bool isBusy;
 
-  /// Disables lookups while resolving GPS or geocoding.
+  /// Disables lookup actions while resolving GPS or geocoding.
   final bool isResolving;
-
-  /// Latitude text controller.
-  final TextEditingController latitudeController;
-
-  /// Canonical location identifier.
-  final String locationId;
-
-  /// Longitude text controller.
-  final TextEditingController longitudeController;
-
-  /// Callback cancelling inline edit mode.
-  final VoidCallback onCancel;
-
-  /// Callback clearing stale errors when inputs change.
-  final VoidCallback onFieldChanged;
-
-  /// Callback resolving address or Plus Code inputs.
-  final VoidCallback onResolveSource;
-
-  /// Callback saving edited coordinates and radius.
-  final VoidCallback onSave;
-
-  /// Callback switching [LocationSourceType].
-  final ValueChanged<LocationSourceType> onSourceTypeChanged;
-
-  /// Callback applying the active foreground GPS fix.
-  final VoidCallback onUseCurrentGps;
-
-  /// Geofence radius text controller.
-  final TextEditingController radiusController;
-
-  /// Inline radius field validation error.
-  final String? radiusErrorText;
-
-  /// Address or Plus Code source text controller.
-  final TextEditingController sourceController;
-
-  /// Inline source field validation error.
-  final String? sourceErrorText;
-
-  /// Currently selected coordinate source type.
-  final LocationSourceType sourceType;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiCard.inset(
-      key: ValueKey<String>('location_coords_editor_$locationId'),
-      isEditing: true,
-      headerIcon: Icons.my_location_rounded,
-      headerTitle: localizations.locationCoordinatesSectionTitle,
-      footer: EntityInlineEditorFooter(
-        errorText: errorText,
-        isBusy: isBusy,
-        onCancel: onCancel,
-        onSave: onSave,
-      ),
-      child: _LocationCoordinatesEditorFields(
-        keyPrefix: 'location_coords_$locationId',
-        sourceType: sourceType,
-        sourceController: sourceController,
-        latitudeController: latitudeController,
-        longitudeController: longitudeController,
-        radiusController: radiusController,
-        sourceErrorText: sourceErrorText,
-        radiusErrorText: radiusErrorText,
-        isBusy: isBusy,
-        isResolving: isResolving,
-        onSourceTypeChanged: onSourceTypeChanged,
-        onUseCurrentGps: onUseCurrentGps,
-        onResolveSource: onResolveSource,
-        onFieldChanged: onFieldChanged,
-      ),
-    );
-  }
-}
-
-/// Shared Coordinates & Radius form fields used by both Location Draft Card and inline card edit.
-class _LocationCoordinatesEditorFields extends StatelessWidget {
-  /// Creates a [_LocationCoordinatesEditorFields].
-  const _LocationCoordinatesEditorFields({
-    required this.keyPrefix,
-    required this.sourceType,
-    required this.sourceController,
-    required this.latitudeController,
-    required this.longitudeController,
-    required this.radiusController,
-    required this.isBusy,
-    required this.isResolving,
-    required this.onSourceTypeChanged,
-    required this.onUseCurrentGps,
-    required this.onResolveSource,
-    required this.onFieldChanged,
-    this.sourceErrorText,
-    this.radiusErrorText,
-  });
-
-  /// Whether a persistence mutation is currently active.
-  final bool isBusy;
-
-  /// Whether a GPS or geocoding lookup is currently active.
-  final bool isResolving;
-
-  /// Stable prefix for deterministic widget keys.
-  final String keyPrefix;
 
   /// Controller for the WGS-84 latitude input.
   final TextEditingController latitudeController;
@@ -844,7 +784,7 @@ class _LocationCoordinatesEditorFields extends StatelessWidget {
   /// Callback applying the current foreground GPS fix.
   final VoidCallback onUseCurrentGps;
 
-  /// Controller for the geofence radius input (`0.01m..100km`, accepting `m`/`km` and `,`/`.`).
+  /// Controller for the geofence radius input.
   final TextEditingController radiusController;
 
   /// Optional inline validation error for [radiusController].
@@ -858,41 +798,276 @@ class _LocationCoordinatesEditorFields extends StatelessWidget {
 
   /// Active coordinate source mode (`gps`, `address`, or `plusCode`).
   final LocationSourceType sourceType;
+}
 
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final isGps = sourceType == LocationSourceType.gps;
+/// Shared coordinate controllers, geocoding/GPS resolution, stale-token guards, and submit recovery.
+mixin _LocationCoordinatesFormMixin<T extends ConsumerStatefulWidget>
+    on ConsumerState<T> {
+  /// Controller for the WGS-84 latitude input.
+  late final TextEditingController latitudeController;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _LocationSourceAndLookupFields(
-          keyPrefix: keyPrefix,
-          sourceType: sourceType,
-          sourceController: sourceController,
-          sourceErrorText: sourceErrorText,
-          isBusy: isBusy,
-          isResolving: isResolving,
-          onSourceTypeChanged: onSourceTypeChanged,
-          onUseCurrentGps: onUseCurrentGps,
-          onResolveSource: onResolveSource,
-          onFieldChanged: onFieldChanged,
-        ),
-        SizedBox(height: tokens.spacing.space2),
-        _LocationLatitudeLongitudeRadiusFields(
-          keyPrefix: keyPrefix,
-          isGps: isGps,
-          isBusy: isBusy,
-          latitudeController: latitudeController,
-          longitudeController: longitudeController,
-          radiusController: radiusController,
-          radiusErrorText: radiusErrorText,
-          onFieldChanged: onFieldChanged,
-        ),
-      ],
+  /// Controller for the WGS-84 longitude input.
+  late final TextEditingController longitudeController;
+
+  /// Controller for the geofence radius input.
+  late final TextEditingController radiusController;
+
+  /// Controller for the optional address or Plus Code source input.
+  late final TextEditingController sourceController;
+
+  /// Banner or footer-level validation or lookup error message.
+  String? errorText;
+
+  /// Per-field inline validation errors keyed by logical field identifier.
+  Map<String, String> fieldErrors = const <String, String>{};
+
+  /// Re-entrancy guard preventing overlapping GPS or geocoding resolutions.
+  bool isResolvingLocal = false;
+
+  /// Re-entrancy guard preventing overlapping save/create submissions.
+  bool isSubmitting = false;
+
+  /// Monotonic token invalidating stale async GPS or geocoding lookups.
+  int resolveRequestToken = 0;
+
+  /// Currently active coordinate source mode (`gps`, `address`, or `plusCode`).
+  LocationSourceType sourceType = LocationSourceType.gps;
+
+  /// Whether the form is currently mounted and open for resolution results.
+  bool get isFormActive => true;
+
+  /// Whether an ancestor mutation is currently in progress.
+  bool get isParentBusy;
+
+  /// Builds the immutable [_LocationCoordinatesFormData] snapshot for [_LocationCoordinatesEditorBody].
+  _LocationCoordinatesFormData buildCoordinatesFormData({
+    required bool isResolving,
+  }) {
+    return _LocationCoordinatesFormData(
+      sourceType: sourceType,
+      sourceController: sourceController,
+      latitudeController: latitudeController,
+      longitudeController: longitudeController,
+      radiusController: radiusController,
+      sourceErrorText: fieldErrors['source'],
+      radiusErrorText: fieldErrors['radius'],
+      isBusy: isParentBusy || isSubmitting,
+      isResolving: isResolving,
+      onSourceTypeChanged: handleSourceTypeChanged,
+      onUseCurrentGps: () => unawaited(handleUseCurrentGps()),
+      onResolveSource: () => unawaited(handleResolveSource()),
+      onFieldChanged: clearCoordinateErrors,
     );
+  }
+
+  /// Clears inline validation and lookup errors when the user edits an input.
+  void clearCoordinateErrors() {
+    if (errorText == null && fieldErrors.isEmpty) {
+      return;
+    }
+    setState(() {
+      errorText = null;
+      fieldErrors = const <String, String>{};
+    });
+  }
+
+  /// Disposes the four shared coordinate/source controllers.
+  void disposeCoordinatesControllers() {
+    sourceController.dispose();
+    latitudeController.dispose();
+    longitudeController.dispose();
+    radiusController.dispose();
+  }
+
+  /// Resolves address or Plus Code input and opens disambiguation when multiple matches exist.
+  Future<void> handleResolveSource() async {
+    if (isParentBusy || isSubmitting || isResolvingLocal) {
+      return;
+    }
+    final token = ++resolveRequestToken;
+    setState(() {
+      isResolvingLocal = true;
+      errorText = null;
+      fieldErrors = const <String, String>{};
+    });
+    try {
+      final outcome = await _resolveLocationSourceWithDisambiguation(
+        context,
+        ref,
+        sourceType: sourceType,
+        rawSource: sourceController.text,
+        isRequestCurrent: () =>
+            mounted && isFormActive && token == resolveRequestToken,
+      );
+      if (!mounted ||
+          !isFormActive ||
+          token != resolveRequestToken ||
+          outcome == null) {
+        return;
+      }
+      _applyResolveOutcome(outcome);
+    } finally {
+      if (mounted && token == resolveRequestToken) {
+        setState(() => isResolvingLocal = false);
+      }
+    }
+  }
+
+  /// Switches the active coordinate source mode and invalidates any in-flight lookup request.
+  void handleSourceTypeChanged(LocationSourceType nextSourceType) {
+    resolveRequestToken++;
+    setState(() {
+      sourceType = nextSourceType;
+      isResolvingLocal = false;
+      errorText = null;
+      fieldErrors = const <String, String>{};
+    });
+  }
+
+  /// Populates latitude and longitude inputs from the current foreground GPS fix.
+  Future<void> handleUseCurrentGps() async {
+    if (isParentBusy || isSubmitting || isResolvingLocal) {
+      return;
+    }
+    final token = ++resolveRequestToken;
+    setState(() {
+      isResolvingLocal = true;
+      errorText = null;
+      fieldErrors = const <String, String>{};
+    });
+    try {
+      final coordinates = await ref
+          .read(entityActionsProvider.notifier)
+          .resolveCurrentGpsPosition(locale: Localizations.localeOf(context));
+      if (!mounted || !isFormActive || token != resolveRequestToken) {
+        return;
+      }
+      _applyGpsCoordinates(coordinates);
+    } finally {
+      if (mounted && token == resolveRequestToken) {
+        setState(() => isResolvingLocal = false);
+      }
+    }
+  }
+
+  /// Initializes the four shared coordinate/source controllers from initial form text.
+  void initCoordinatesControllers({
+    required LocationSourceType initialSourceType,
+    required String sourceText,
+    required String latitudeText,
+    required String longitudeText,
+    required String radiusText,
+  }) {
+    sourceType = initialSourceType;
+    sourceController = TextEditingController(text: sourceText);
+    latitudeController = TextEditingController(text: latitudeText);
+    longitudeController = TextEditingController(text: longitudeText);
+    radiusController = TextEditingController(text: radiusText);
+  }
+
+  /// Invalidates any in-flight GPS or geocoding resolution token.
+  void invalidatePendingResolution() {
+    resolveRequestToken++;
+    isResolvingLocal = false;
+  }
+
+  /// Runs a guarded async submit [action] with `try/finally` recovery and inline error mapping.
+  Future<void> runGuardedSubmit({
+    required Future<ActionResult> Function() action,
+    required Set<String> inlineFieldKeys,
+  }) async {
+    if (isParentBusy || isSubmitting) {
+      return;
+    }
+    setState(() {
+      isSubmitting = true;
+      errorText = null;
+      fieldErrors = const <String, String>{};
+    });
+    try {
+      final result = await action();
+      if (!mounted) {
+        return;
+      }
+      _applyActionResult(result, inlineFieldKeys: inlineFieldKeys);
+    } finally {
+      if (mounted) {
+        setState(() => isSubmitting = false);
+      }
+    }
+  }
+
+  /// Applies [result] from submitting coordinates or a draft to inline field and banner errors.
+  void _applyActionResult(
+    ActionResult result, {
+    required Set<String> inlineFieldKeys,
+  }) {
+    switch (result) {
+      case ActionSucceeded():
+        break;
+      case ActionValidationFailed(:final message, :final fieldErrors):
+        setState(() {
+          this.fieldErrors = fieldErrors;
+          errorText = _resolveBannerErrorText(
+            fallbackMessage: message,
+            fieldErrors: fieldErrors,
+            inlineFieldKeys: inlineFieldKeys,
+          );
+        });
+      case ActionPersistFailed(:final message):
+        setState(() => errorText = message);
+    }
+  }
+
+  /// Applies resolved foreground GPS [coordinates] or displays the unavailable status error.
+  void _applyGpsCoordinates(
+    ({String latitudeText, String longitudeText})? coordinates,
+  ) {
+    if (coordinates case (:final latitudeText, :final longitudeText)) {
+      setState(() {
+        latitudeController.text = latitudeText;
+        longitudeController.text = longitudeText;
+        errorText = null;
+        fieldErrors = const <String, String>{};
+      });
+      return;
+    }
+    setState(() {
+      errorText = AppLocalizations.of(context).locationStatusUnavailable;
+    });
+  }
+
+  /// Applies geocoding or Plus Code [outcome] to active coordinate controllers.
+  void _applyResolveOutcome(LocationSourceResolutionResult outcome) {
+    final localizations = AppLocalizations.of(context);
+    switch (outcome) {
+      case LocationSourceResolved(
+        :final latitude,
+        :final longitude,
+        :final normalizedSource,
+        :final sourceType,
+      ):
+        setState(() {
+          this.sourceType = sourceType;
+          sourceController.text = normalizedSource;
+          latitudeController.text = TdfLocation.formatRoundedDouble(
+            latitude,
+            6,
+          );
+          longitudeController.text = TdfLocation.formatRoundedDouble(
+            longitude,
+            6,
+          );
+          errorText = null;
+          fieldErrors = const <String, String>{};
+        });
+      case LocationSourceResolutionError(:final localizedMessage):
+        setState(() => errorText = localizedMessage);
+      case LocationSourceNeedsDisambiguation():
+        setState(() => errorText = localizations.locationResolveErrorNotFound);
+      case LocationSourceNotNeeded():
+        break;
+    }
   }
 }
 
@@ -1041,7 +1216,6 @@ class _LocationCoordinatesReadOnlyCard extends StatelessWidget {
       headerTitle: localizations.locationCoordinatesSectionTitle,
       headerBadge: UiPill(
         label: _locationSourceTypeLabel(sourceType, localizations),
-        variant: UiPillVariant.badge,
       ),
       headerTrailing: UiButton(
         key: ValueKey<String>('location_edit_coords_button_${location.id}'),
@@ -1092,33 +1266,29 @@ class _LocationCoordinatesSection extends ConsumerStatefulWidget {
 
 /// Manages inline coordinate/source controllers, geocoding resolution, and save validation for [_LocationCoordinatesSection].
 class _LocationCoordinatesSectionState
-    extends ConsumerState<_LocationCoordinatesSection> {
-  late final TextEditingController _latitudeController;
-  late final TextEditingController _longitudeController;
-  late final TextEditingController _radiusController;
-  late final TextEditingController _sourceController;
+    extends ConsumerState<_LocationCoordinatesSection>
+    with _LocationCoordinatesFormMixin<_LocationCoordinatesSection> {
+  @override
+  bool get isFormActive => widget.isEditing;
 
-  String? _errorText;
-  Map<String, String> _fieldErrors = const <String, String>{};
-  bool _isSubmitting = false;
-  late LocationSourceType _sourceType;
+  @override
+  bool get isParentBusy => widget.isBusy;
 
   @override
   void initState() {
     super.initState();
-    final sourceType = PlusCodeService.classifySource(widget.location.source);
-    _sourceType = sourceType;
-    _sourceController = TextEditingController(
-      text: _locationSourceDisplayValue(widget.location, sourceType),
+    final initialSourceType = PlusCodeService.classifySource(
+      widget.location.source,
     );
-    _latitudeController = TextEditingController(
-      text: widget.location.latitudeText,
-    );
-    _longitudeController = TextEditingController(
-      text: widget.location.longitudeText,
-    );
-    _radiusController = TextEditingController(
-      text: TaskScheduleHelper.formatRadiusMeters(widget.location.radius),
+    initCoordinatesControllers(
+      initialSourceType: initialSourceType,
+      sourceText: _locationSourceDisplayValue(
+        widget.location,
+        initialSourceType,
+      ),
+      latitudeText: widget.location.latitudeText,
+      longitudeText: widget.location.longitudeText,
+      radiusText: TaskScheduleHelper.formatRadiusMeters(widget.location.radius),
     );
   }
 
@@ -1126,20 +1296,19 @@ class _LocationCoordinatesSectionState
   void didUpdateWidget(covariant _LocationCoordinatesSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!oldWidget.isEditing && widget.isEditing) {
+      invalidatePendingResolution();
       _resetDraftFromLocation(widget.location);
     } else if (oldWidget.isEditing && !widget.isEditing) {
-      _errorText = null;
-      _fieldErrors = const <String, String>{};
-      _isSubmitting = false;
+      invalidatePendingResolution();
+      errorText = null;
+      fieldErrors = const <String, String>{};
+      isSubmitting = false;
     }
   }
 
   @override
   void dispose() {
-    _sourceController.dispose();
-    _latitudeController.dispose();
-    _longitudeController.dispose();
-    _radiusController.dispose();
+    disposeCoordinatesControllers();
     super.dispose();
   }
 
@@ -1155,187 +1324,65 @@ class _LocationCoordinatesSectionState
     final isResolving = ref.watch(
       entityActionsProvider.select((state) => state.isResolvingLocation),
     );
-    return _LocationCoordinatesEditCard(
-      locationId: widget.location.id,
-      sourceType: _sourceType,
-      sourceController: _sourceController,
-      latitudeController: _latitudeController,
-      longitudeController: _longitudeController,
-      radiusController: _radiusController,
-      sourceErrorText: _fieldErrors['source'],
-      radiusErrorText: _fieldErrors['radius'],
-      errorText: _errorText,
-      isBusy: widget.isBusy || _isSubmitting,
-      isResolving: isResolving,
-      onSourceTypeChanged: _handleSourceTypeChanged,
-      onUseCurrentGps: () => unawaited(_handleUseCurrentGps()),
-      onResolveSource: () => unawaited(_handleResolveSource()),
-      onFieldChanged: _clearErrors,
-      onCancel: widget.onCancelEdit,
-      onSave: () => unawaited(_handleSave()),
+    return _LocationCoordinatesEditorBody(
+      cardKey: ValueKey<String>('location_coords_editor_${widget.location.id}'),
+      keyPrefix: 'location_coords_${widget.location.id}',
+      isEditing: true,
+      data: buildCoordinatesFormData(isResolving: isResolving),
+      footer: EntityInlineEditorFooter(
+        errorText: errorText,
+        isBusy: widget.isBusy || isSubmitting,
+        onCancel: widget.onCancelEdit,
+        onSave: () => unawaited(_handleSave()),
+      ),
     );
-  }
-
-  /// Clears inline validation and lookup errors when the user edits an input.
-  void _clearErrors() {
-    if (_errorText == null && _fieldErrors.isEmpty) {
-      return;
-    }
-    setState(() {
-      _errorText = null;
-      _fieldErrors = const <String, String>{};
-    });
-  }
-
-  /// Resolves address or Plus Code input and opens disambiguation when multiple matches exist.
-  Future<void> _handleResolveSource() async {
-    _clearErrors();
-    final outcome = await _resolveLocationSourceWithDisambiguation(
-      context,
-      ref,
-      sourceType: _sourceType,
-      rawSource: _sourceController.text,
-    );
-    if (!mounted || outcome == null) {
-      return;
-    }
-    final localizations = AppLocalizations.of(context);
-    switch (outcome) {
-      case LocationSourceResolved(
-        :final latitude,
-        :final longitude,
-        :final normalizedSource,
-        :final sourceType,
-      ):
-        setState(() {
-          _sourceType = sourceType;
-          _sourceController.text = normalizedSource;
-          _latitudeController.text = TdfLocation.formatRoundedDouble(
-            latitude,
-            6,
-          );
-          _longitudeController.text = TdfLocation.formatRoundedDouble(
-            longitude,
-            6,
-          );
-          _errorText = null;
-          _fieldErrors = const <String, String>{};
-        });
-      case LocationSourceResolutionError(:final localizedMessage):
-        setState(() => _errorText = localizedMessage);
-      case LocationSourceNeedsDisambiguation():
-        setState(() => _errorText = localizations.locationResolveErrorNotFound);
-      case LocationSourceNotNeeded():
-        break;
-    }
   }
 
   /// Validates and persists coordinates, source, and radius via [EntityActionsNotifier.saveLocationCoordinates].
-  Future<void> _handleSave() async {
-    if (widget.isBusy || _isSubmitting) {
-      return;
-    }
-    setState(() {
-      _isSubmitting = true;
-      _errorText = null;
-      _fieldErrors = const <String, String>{};
-    });
-    final result = await ref
-        .read(entityActionsProvider.notifier)
-        .saveLocationCoordinates(
-          widget.location.id,
-          sourceType: _sourceType,
-          rawSource: _sourceController.text,
-          rawLatitude: _latitudeController.text,
-          rawLongitude: _longitudeController.text,
-          rawRadius: _radiusController.text,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
-        setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message, :final fieldErrors):
-        setState(() {
-          _isSubmitting = false;
-          _fieldErrors = fieldErrors;
-          _errorText = _resolveBannerErrorText(
-            fallbackMessage: message,
-            fieldErrors: fieldErrors,
-            inlineFieldKeys: const <String>{'source', 'radius'},
-          );
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
-    }
-  }
-
-  /// Updates the active source mode and clears stale lookup errors.
-  void _handleSourceTypeChanged(LocationSourceType nextSourceType) {
-    setState(() {
-      _sourceType = nextSourceType;
-      _errorText = null;
-      _fieldErrors = const <String, String>{};
-    });
-  }
-
-  /// Populates latitude and longitude inputs from the current foreground GPS fix.
-  Future<void> _handleUseCurrentGps() async {
-    _clearErrors();
-    final coordinates = await ref
-        .read(entityActionsProvider.notifier)
-        .resolveCurrentGpsPosition(locale: Localizations.localeOf(context));
-    if (!mounted) {
-      return;
-    }
-    if (coordinates case (:final latitudeText, :final longitudeText)) {
-      setState(() {
-        _latitudeController.text = latitudeText;
-        _longitudeController.text = longitudeText;
-        _errorText = null;
-        _fieldErrors = const <String, String>{};
-      });
-      return;
-    }
-    setState(() {
-      _errorText = AppLocalizations.of(context).locationStatusUnavailable;
-    });
+  Future<void> _handleSave() {
+    return runGuardedSubmit(
+      inlineFieldKeys: const <String>{'source', 'radius'},
+      action: () => ref
+          .read(entityActionsProvider.notifier)
+          .saveLocationCoordinates(
+            widget.location.id,
+            sourceType: sourceType,
+            rawSource: sourceController.text,
+            rawLatitude: latitudeController.text,
+            rawLongitude: longitudeController.text,
+            rawRadius: radiusController.text,
+            locale: Localizations.localeOf(context),
+          ),
+    );
   }
 
   /// Re-seeds editor controllers from persisted [location] values when entering edit mode.
   void _resetDraftFromLocation(TdfLocation location) {
-    final sourceType = PlusCodeService.classifySource(location.source);
-    _sourceType = sourceType;
-    _sourceController.text = _locationSourceDisplayValue(location, sourceType);
-    _latitudeController.text = location.latitudeText;
-    _longitudeController.text = location.longitudeText;
-    _radiusController.text = TaskScheduleHelper.formatRadiusMeters(
+    final nextSourceType = PlusCodeService.classifySource(location.source);
+    sourceType = nextSourceType;
+    sourceController.text = _locationSourceDisplayValue(
+      location,
+      nextSourceType,
+    );
+    latitudeController.text = location.latitudeText;
+    longitudeController.text = location.longitudeText;
+    radiusController.text = TaskScheduleHelper.formatRadiusMeters(
       location.radius,
     );
-    _errorText = null;
-    _fieldErrors = const <String, String>{};
-    _isSubmitting = false;
+    errorText = null;
+    fieldErrors = const <String, String>{};
+    isSubmitting = false;
   }
 }
 
 /// Manages controllers, geocoding resolution, and commit submission for [LocationDraftCard].
-class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
-  late final TextEditingController _latitudeController;
-  late final TextEditingController _longitudeController;
+class _LocationDraftCardState extends ConsumerState<LocationDraftCard>
+    with _LocationCoordinatesFormMixin<LocationDraftCard> {
   late final TextEditingController _nameController;
   late final TextEditingController _noteController;
-  late final TextEditingController _radiusController;
-  late final TextEditingController _sourceController;
 
-  String? _errorText;
-  Map<String, String> _fieldErrors = const <String, String>{};
-  bool _isSubmitting = false;
-  LocationSourceType _sourceType = LocationSourceType.gps;
+  @override
+  bool get isParentBusy => widget.isBusy;
 
   @override
   void initState() {
@@ -1345,25 +1392,21 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
       hasActiveGpsFix: widget.hasActiveGpsFix,
     );
     _nameController = TextEditingController(text: widget.seedTitle);
-    _sourceController = TextEditingController();
-    _latitudeController = TextEditingController(
-      text: seededCoordinates.latitudeText,
-    );
-    _longitudeController = TextEditingController(
-      text: seededCoordinates.longitudeText,
-    );
-    _radiusController = TextEditingController(text: _defaultDraftRadiusText);
     _noteController = TextEditingController();
+    initCoordinatesControllers(
+      initialSourceType: LocationSourceType.gps,
+      sourceText: '',
+      latitudeText: seededCoordinates.latitudeText,
+      longitudeText: seededCoordinates.longitudeText,
+      radiusText: _defaultDraftRadiusText,
+    );
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _sourceController.dispose();
-    _latitudeController.dispose();
-    _longitudeController.dispose();
-    _radiusController.dispose();
     _noteController.dispose();
+    disposeCoordinatesControllers();
     super.dispose();
   }
 
@@ -1373,7 +1416,7 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
     final isResolving = ref.watch(
       entityActionsProvider.select((state) => state.isResolvingLocation),
     );
-    final effectiveBusy = widget.isBusy || _isSubmitting;
+    final effectiveBusy = widget.isBusy || isSubmitting;
 
     return UiCard.draft(
       key: const ValueKey<String>('location_draft_card'),
@@ -1381,7 +1424,7 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
       subtitle: localizations.draftUncommittedHint,
       closeTooltip: localizations.actionCancel,
       onClose: effectiveBusy ? null : _handleCancel,
-      errorText: _errorText,
+      errorText: errorText,
       footer: _LocationDraftFooter(
         isBusy: effectiveBusy,
         isResolving: isResolving,
@@ -1390,243 +1433,39 @@ class _LocationDraftCardState extends ConsumerState<LocationDraftCard> {
       ),
       child: _LocationDraftFormBody(
         nameController: _nameController,
-        sourceType: _sourceType,
-        sourceController: _sourceController,
-        latitudeController: _latitudeController,
-        longitudeController: _longitudeController,
-        radiusController: _radiusController,
         noteController: _noteController,
-        fieldErrors: _fieldErrors,
+        coordinatesData: buildCoordinatesFormData(isResolving: isResolving),
+        fieldErrors: fieldErrors,
         isBusy: effectiveBusy,
-        isResolving: isResolving,
-        onSourceTypeChanged: _handleSourceTypeChanged,
-        onUseCurrentGps: () => unawaited(_handleUseCurrentGps()),
-        onResolveSource: () => unawaited(_handleResolveSource()),
-        onFieldChanged: _clearErrors,
+        onFieldChanged: clearCoordinateErrors,
       ),
     );
-  }
-
-  /// Clears inline draft validation and resolution errors on input changes.
-  void _clearErrors() {
-    if (_errorText == null && _fieldErrors.isEmpty) {
-      return;
-    }
-    setState(() {
-      _errorText = null;
-      _fieldErrors = const <String, String>{};
-    });
   }
 
   /// Discards the uncommitted location draft without persisting changes.
   void _handleCancel() {
+    invalidatePendingResolution();
     ref.read(shellProvider.notifier).cancelDraft();
   }
 
-  /// Resolves the entered address or Plus Code source and handles candidate disambiguation.
-  Future<void> _handleResolveSource() async {
-    _clearErrors();
-    final outcome = await _resolveLocationSourceWithDisambiguation(
-      context,
-      ref,
-      sourceType: _sourceType,
-      rawSource: _sourceController.text,
-    );
-    if (!mounted || outcome == null) {
-      return;
-    }
-    final localizations = AppLocalizations.of(context);
-    switch (outcome) {
-      case LocationSourceResolved(
-        :final latitude,
-        :final longitude,
-        :final normalizedSource,
-        :final sourceType,
-      ):
-        setState(() {
-          _sourceType = sourceType;
-          _sourceController.text = normalizedSource;
-          _latitudeController.text = TdfLocation.formatRoundedDouble(
-            latitude,
-            6,
-          );
-          _longitudeController.text = TdfLocation.formatRoundedDouble(
-            longitude,
-            6,
-          );
-          _errorText = null;
-          _fieldErrors = const <String, String>{};
-        });
-      case LocationSourceResolutionError(:final localizedMessage):
-        setState(() => _errorText = localizedMessage);
-      case LocationSourceNeedsDisambiguation():
-        setState(() => _errorText = localizations.locationResolveErrorNotFound);
-      case LocationSourceNotNeeded():
-        break;
-    }
-  }
-
-  /// Switches the active coordinate source mode inside the draft card.
-  void _handleSourceTypeChanged(LocationSourceType nextSourceType) {
-    setState(() {
-      _sourceType = nextSourceType;
-      _errorText = null;
-      _fieldErrors = const <String, String>{};
-    });
-  }
-
   /// Validates and commits the uncommitted location draft via [EntityActionsNotifier.createLocationDraft].
-  Future<void> _handleSubmit() async {
-    if (widget.isBusy || _isSubmitting) {
-      return;
-    }
-    setState(() {
-      _isSubmitting = true;
-      _errorText = null;
-      _fieldErrors = const <String, String>{};
-    });
-    final result = await ref
-        .read(entityActionsProvider.notifier)
-        .createLocationDraft(
-          LocationDraftInput(
-            name: _nameController.text,
-            sourceType: _sourceType,
-            rawSource: _sourceController.text,
-            rawLatitude: _latitudeController.text,
-            rawLongitude: _longitudeController.text,
-            rawRadius: _radiusController.text,
-            note: _noteController.text,
+  Future<void> _handleSubmit() {
+    return runGuardedSubmit(
+      inlineFieldKeys: const <String>{'name', 'source', 'radius', 'note'},
+      action: () => ref
+          .read(entityActionsProvider.notifier)
+          .createLocationDraft(
+            LocationDraftInput(
+              name: _nameController.text,
+              sourceType: sourceType,
+              rawSource: sourceController.text,
+              rawLatitude: latitudeController.text,
+              rawLongitude: longitudeController.text,
+              rawRadius: radiusController.text,
+              note: _noteController.text,
+            ),
+            locale: Localizations.localeOf(context),
           ),
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
-        setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message, :final fieldErrors):
-        setState(() {
-          _isSubmitting = false;
-          _fieldErrors = fieldErrors;
-          _errorText = _resolveBannerErrorText(
-            fallbackMessage: message,
-            fieldErrors: fieldErrors,
-            inlineFieldKeys: const <String>{'name', 'source', 'radius', 'note'},
-          );
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
-    }
-  }
-
-  /// Populates draft coordinates from the current foreground GPS fix.
-  Future<void> _handleUseCurrentGps() async {
-    _clearErrors();
-    final coordinates = await ref
-        .read(entityActionsProvider.notifier)
-        .resolveCurrentGpsPosition(locale: Localizations.localeOf(context));
-    if (!mounted) {
-      return;
-    }
-    if (coordinates case (:final latitudeText, :final longitudeText)) {
-      setState(() {
-        _latitudeController.text = latitudeText;
-        _longitudeController.text = longitudeText;
-        _errorText = null;
-        _fieldErrors = const <String, String>{};
-      });
-      return;
-    }
-    setState(() {
-      _errorText = AppLocalizations.of(context).locationStatusUnavailable;
-    });
-  }
-}
-
-/// Inset well wrapping Coordinates & Radius controls inside [_LocationDraftFormBody].
-class _LocationDraftCoordinatesWell extends StatelessWidget {
-  /// Creates a [_LocationDraftCoordinatesWell].
-  const _LocationDraftCoordinatesWell({
-    required this.sourceType,
-    required this.sourceController,
-    required this.latitudeController,
-    required this.longitudeController,
-    required this.radiusController,
-    required this.sourceErrorText,
-    required this.radiusErrorText,
-    required this.isBusy,
-    required this.isResolving,
-    required this.onSourceTypeChanged,
-    required this.onUseCurrentGps,
-    required this.onResolveSource,
-    required this.onFieldChanged,
-  });
-
-  /// Disables inputs while saving.
-  final bool isBusy;
-
-  /// Disables lookup actions while resolving.
-  final bool isResolving;
-
-  /// Latitude controller.
-  final TextEditingController latitudeController;
-
-  /// Longitude controller.
-  final TextEditingController longitudeController;
-
-  /// Callback clearing errors on input edit.
-  final VoidCallback onFieldChanged;
-
-  /// Callback resolving source text.
-  final VoidCallback onResolveSource;
-
-  /// Callback switching source type.
-  final ValueChanged<LocationSourceType> onSourceTypeChanged;
-
-  /// Callback applying current GPS coordinates.
-  final VoidCallback onUseCurrentGps;
-
-  /// Geofence radius controller.
-  final TextEditingController radiusController;
-
-  /// Inline radius validation error.
-  final String? radiusErrorText;
-
-  /// Source text controller.
-  final TextEditingController sourceController;
-
-  /// Inline source validation error.
-  final String? sourceErrorText;
-
-  /// Active coordinate source mode.
-  final LocationSourceType sourceType;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiCard.inset(
-      headerIcon: Icons.my_location_rounded,
-      headerTitle: localizations.locationCoordinatesSectionTitle,
-      child: _LocationCoordinatesEditorFields(
-        keyPrefix: 'location_draft',
-        sourceType: sourceType,
-        sourceController: sourceController,
-        latitudeController: latitudeController,
-        longitudeController: longitudeController,
-        radiusController: radiusController,
-        sourceErrorText: sourceErrorText,
-        radiusErrorText: radiusErrorText,
-        isBusy: isBusy,
-        isResolving: isResolving,
-        onSourceTypeChanged: onSourceTypeChanged,
-        onUseCurrentGps: onUseCurrentGps,
-        onResolveSource: onResolveSource,
-        onFieldChanged: onFieldChanged,
-      ),
     );
   }
 }
@@ -1666,7 +1505,6 @@ class _LocationDraftFooter extends StatelessWidget {
           UiButton(
             key: const ValueKey<String>('location_draft_cancel_button'),
             label: localizations.actionCancel,
-            variant: UiButtonVariant.secondary,
             density: UiButtonDensity.compact,
             onPressed: isBusy ? null : onCancel,
           ),
@@ -1690,35 +1528,21 @@ class _LocationDraftFormBody extends StatelessWidget {
   /// Creates a [_LocationDraftFormBody].
   const _LocationDraftFormBody({
     required this.nameController,
-    required this.sourceType,
-    required this.sourceController,
-    required this.latitudeController,
-    required this.longitudeController,
-    required this.radiusController,
     required this.noteController,
+    required this.coordinatesData,
     required this.fieldErrors,
     required this.isBusy,
-    required this.isResolving,
-    required this.onSourceTypeChanged,
-    required this.onUseCurrentGps,
-    required this.onResolveSource,
     required this.onFieldChanged,
   });
+
+  /// Bundled Coordinates & Radius controllers, errors, and lookup callbacks.
+  final _LocationCoordinatesFormData coordinatesData;
 
   /// Per-field validation errors keyed by logical field identifier.
   final Map<String, String> fieldErrors;
 
   /// Disables inputs while saving.
   final bool isBusy;
-
-  /// Disables resolution actions while lookup is active.
-  final bool isResolving;
-
-  /// Latitude controller.
-  final TextEditingController latitudeController;
-
-  /// Longitude controller.
-  final TextEditingController longitudeController;
 
   /// Location name controller.
   final TextEditingController nameController;
@@ -1728,24 +1552,6 @@ class _LocationDraftFormBody extends StatelessWidget {
 
   /// Callback clearing stale errors when inputs change.
   final VoidCallback onFieldChanged;
-
-  /// Callback resolving address or Plus Code inputs.
-  final VoidCallback onResolveSource;
-
-  /// Callback switching [LocationSourceType].
-  final ValueChanged<LocationSourceType> onSourceTypeChanged;
-
-  /// Callback applying the current foreground GPS fix.
-  final VoidCallback onUseCurrentGps;
-
-  /// Geofence radius controller.
-  final TextEditingController radiusController;
-
-  /// Address or Plus Code source controller.
-  final TextEditingController sourceController;
-
-  /// Currently selected coordinate source type.
-  final LocationSourceType sourceType;
 
   @override
   Widget build(BuildContext context) {
@@ -1762,20 +1568,9 @@ class _LocationDraftFormBody extends StatelessWidget {
           onFieldChanged: onFieldChanged,
         ),
         SizedBox(height: tokens.spacing.space3),
-        _LocationDraftCoordinatesWell(
-          sourceType: sourceType,
-          sourceController: sourceController,
-          latitudeController: latitudeController,
-          longitudeController: longitudeController,
-          radiusController: radiusController,
-          sourceErrorText: fieldErrors['source'],
-          radiusErrorText: fieldErrors['radius'],
-          isBusy: isBusy,
-          isResolving: isResolving,
-          onSourceTypeChanged: onSourceTypeChanged,
-          onUseCurrentGps: onUseCurrentGps,
-          onResolveSource: onResolveSource,
-          onFieldChanged: onFieldChanged,
+        _LocationCoordinatesEditorBody(
+          keyPrefix: 'location_draft',
+          data: coordinatesData,
         ),
         SizedBox(height: tokens.spacing.space3),
         _LocationDraftNoteWell(
@@ -1990,7 +1785,7 @@ class _LocationExpandableCardView extends ConsumerWidget {
 }
 
 /// Inline location name editor swapped into the card header when editing [LocationSectionKind.title].
-class _LocationInlineNameEditor extends ConsumerStatefulWidget {
+class _LocationInlineNameEditor extends ConsumerWidget {
   /// Creates a [_LocationInlineNameEditor].
   const _LocationInlineNameEditor({
     required this.location,
@@ -2004,227 +1799,38 @@ class _LocationInlineNameEditor extends ConsumerStatefulWidget {
   final TdfLocation location;
 
   @override
-  ConsumerState<_LocationInlineNameEditor> createState() =>
-      _LocationInlineNameEditorState();
-}
-
-/// Compact Save and Cancel buttons paired with [_LocationInlineNameEditor].
-class _LocationInlineNameEditorActions extends StatelessWidget {
-  /// Creates a [_LocationInlineNameEditorActions].
-  const _LocationInlineNameEditorActions({
-    required this.locationId,
-    required this.isBusy,
-    required this.onSave,
-    required this.onCancel,
-  });
-
-  /// Disables actions and spins the Save button while submitting.
-  final bool isBusy;
-
-  /// Canonical location identifier.
-  final String locationId;
-
-  /// Callback cancelling inline name editing.
-  final VoidCallback onCancel;
-
-  /// Callback saving the edited name.
-  final VoidCallback onSave;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        UiButton(
-          key: ValueKey<String>('location_name_save_$locationId'),
-          label: localizations.actionSave,
-          variant: UiButtonVariant.primary,
-          density: UiButtonDensity.compact,
-          isLoading: isBusy,
-          onPressed: isBusy ? null : onSave,
-        ),
-        const SizedBox(width: 6.0),
-        UiButton(
-          key: ValueKey<String>('location_name_cancel_$locationId'),
-          label: localizations.actionCancel,
-          variant: UiButtonVariant.secondary,
-          density: UiButtonDensity.compact,
-          onPressed: isBusy ? null : onCancel,
-        ),
-      ],
+    final locale = Localizations.localeOf(context);
+    return EntityInlineNameEditor(
+      initialValue: location.name,
+      hintText: localizations.locationNameLabel,
+      semanticsLabel: localizations.inlineEditNameTooltip,
+      inputKey: ValueKey<String>('location_name_editor_${location.id}'),
+      saveKey: ValueKey<String>('location_name_save_${location.id}'),
+      cancelKey: ValueKey<String>('location_name_cancel_${location.id}'),
+      isBusy: isBusy,
+      onCancel: ref.read(shellProvider.notifier).closeInlineEdit,
+      onSave: (value) => ref
+          .read(entityActionsProvider.notifier)
+          .saveLocationName(location.id, value, locale: locale),
     );
   }
 }
 
-/// Arranges the inline name field and action buttons in a compact column or wide row.
-class _LocationInlineNameEditorLayout extends StatelessWidget {
-  /// Creates a [_LocationInlineNameEditorLayout].
-  const _LocationInlineNameEditorLayout({
-    required this.isCompact,
-    required this.field,
-    required this.actions,
-  });
-
-  /// Compact Save and Cancel button row.
-  final Widget actions;
-
-  /// Inline location name text input.
-  final Widget field;
-
-  /// Stacks [actions] below [field] on compact viewports.
-  final bool isCompact;
-
-  @override
-  Widget build(BuildContext context) {
-    if (isCompact) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          field,
-          const SizedBox(height: 6.0),
-          Align(alignment: Alignment.centerRight, child: actions),
-        ],
-      );
-    }
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Expanded(child: field),
-        const SizedBox(width: 6.0),
-        actions,
-      ],
-    );
-  }
-}
-
-/// Manages text controller and save validation for [_LocationInlineNameEditor].
-class _LocationInlineNameEditorState
-    extends ConsumerState<_LocationInlineNameEditor> {
-  late final TextEditingController _controller;
-
-  String? _errorText;
-  bool _isSubmitting = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.location.name);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final isCompact = UiBreakpoints.isCompact(MediaQuery.sizeOf(context).width);
-    final effectiveBusy = widget.isBusy || _isSubmitting;
-
-    return _LocationInlineNameEditorLayout(
-      isCompact: isCompact,
-      field: UiField(
-        key: ValueKey<String>('location_name_editor_${widget.location.id}'),
-        controller: _controller,
-        autofocus: true,
-        maxLength: maxTdfTextLength,
-        hintText: localizations.locationNameLabel,
-        semanticLabel: localizations.inlineEditNameTooltip,
-        enabled: !effectiveBusy,
-        errorText: _errorText,
-        textInputAction: TextInputAction.done,
-        onChanged: _handleChanged,
-        onSubmitted: (_) => unawaited(_handleSave()),
-      ),
-      actions: _LocationInlineNameEditorActions(
-        locationId: widget.location.id,
-        isBusy: effectiveBusy,
-        onSave: () => unawaited(_handleSave()),
-        onCancel: ref.read(shellProvider.notifier).closeInlineEdit,
-      ),
-    );
-  }
-
-  /// Clears inline validation errors once typing resumes.
-  void _handleChanged(String _) {
-    if (_errorText != null) {
-      setState(() => _errorText = null);
-    }
-  }
-
-  /// Validates and commits the updated location name via [EntityActionsNotifier.saveLocationName].
-  Future<void> _handleSave() async {
-    if (widget.isBusy || _isSubmitting) {
-      return;
-    }
-    setState(() {
-      _isSubmitting = true;
-      _errorText = null;
-    });
-    final result = await ref
-        .read(entityActionsProvider.notifier)
-        .saveLocationName(
-          widget.location.id,
-          _controller.text,
-          locale: Localizations.localeOf(context),
-        );
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
-        setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message):
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _errorText = message;
-        });
-    }
-  }
-}
-
-/// Responsive latitude/longitude pair and radius input inside [_LocationCoordinatesEditorFields].
+/// Responsive latitude/longitude pair and radius input inside [_LocationCoordinatesEditorBody].
 class _LocationLatitudeLongitudeRadiusFields extends StatelessWidget {
   /// Creates a [_LocationLatitudeLongitudeRadiusFields].
   const _LocationLatitudeLongitudeRadiusFields({
     required this.keyPrefix,
-    required this.isGps,
-    required this.isBusy,
-    required this.latitudeController,
-    required this.longitudeController,
-    required this.radiusController,
-    required this.radiusErrorText,
-    required this.onFieldChanged,
+    required this.data,
   });
 
-  /// Disables inputs while saving.
-  final bool isBusy;
-
-  /// Keeps latitude/longitude editable in GPS mode and read-only (`0.72` opacity) in non-GPS modes.
-  final bool isGps;
+  /// Bundled coordinate controllers, error texts, and callbacks.
+  final _LocationCoordinatesFormData data;
 
   /// Stable prefix for deterministic widget keys.
   final String keyPrefix;
-
-  /// Controller for the WGS-84 latitude input.
-  final TextEditingController latitudeController;
-
-  /// Controller for the WGS-84 longitude input.
-  final TextEditingController longitudeController;
-
-  /// Callback clearing stale validation errors on input changes.
-  final VoidCallback onFieldChanged;
-
-  /// Controller for the geofence radius input.
-  final TextEditingController radiusController;
-
-  /// Optional inline validation error for the radius input.
-  final String? radiusErrorText;
 
   @override
   Widget build(BuildContext context) {
@@ -2237,22 +1843,22 @@ class _LocationLatitudeLongitudeRadiusFields extends StatelessWidget {
       children: <Widget>[
         _LocationCoordinatesPairGrid(
           keyPrefix: keyPrefix,
-          isGps: isGps,
-          isBusy: isBusy,
-          latitudeController: latitudeController,
-          longitudeController: longitudeController,
-          onFieldChanged: onFieldChanged,
+          isGps: data.sourceType == LocationSourceType.gps,
+          isBusy: data.isBusy,
+          latitudeController: data.latitudeController,
+          longitudeController: data.longitudeController,
+          onFieldChanged: data.onFieldChanged,
         ),
         SizedBox(height: tokens.spacing.space2),
         UiField(
           key: ValueKey<String>('${keyPrefix}_radius_field'),
-          controller: radiusController,
+          controller: data.radiusController,
           label: localizations.locationRadiusLabel,
           hintText: _defaultDraftRadiusText,
           isMonospace: true,
-          enabled: !isBusy,
-          errorText: radiusErrorText,
-          onChanged: (_) => onFieldChanged(),
+          enabled: !data.isBusy,
+          errorText: data.radiusErrorText,
+          onChanged: (_) => data.onFieldChanged(),
         ),
       ],
     );
@@ -2322,51 +1928,19 @@ class _LocationSourceAndLookupFields extends StatelessWidget {
   /// Creates a [_LocationSourceAndLookupFields].
   const _LocationSourceAndLookupFields({
     required this.keyPrefix,
-    required this.sourceType,
-    required this.sourceController,
-    required this.sourceErrorText,
-    required this.isBusy,
-    required this.isResolving,
-    required this.onSourceTypeChanged,
-    required this.onUseCurrentGps,
-    required this.onResolveSource,
-    required this.onFieldChanged,
+    required this.data,
   });
 
-  /// Whether a persistence mutation is currently active.
-  final bool isBusy;
-
-  /// Whether a GPS or geocoding lookup is currently active.
-  final bool isResolving;
+  /// Bundled coordinate controllers, error texts, and lookup callbacks.
+  final _LocationCoordinatesFormData data;
 
   /// Stable prefix for deterministic widget keys.
   final String keyPrefix;
 
-  /// Callback notified whenever any text field changes.
-  final VoidCallback onFieldChanged;
-
-  /// Callback resolving the current address or Plus Code source.
-  final VoidCallback onResolveSource;
-
-  /// Callback switching the selected [LocationSourceType].
-  final ValueChanged<LocationSourceType> onSourceTypeChanged;
-
-  /// Callback applying the current foreground GPS fix.
-  final VoidCallback onUseCurrentGps;
-
-  /// Controller for the optional address or Plus Code source input.
-  final TextEditingController sourceController;
-
-  /// Optional inline validation error for [sourceController].
-  final String? sourceErrorText;
-
-  /// Active coordinate source mode (`gps`, `address`, or `plusCode`).
-  final LocationSourceType sourceType;
-
   @override
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
-    final isGps = sourceType == LocationSourceType.gps;
+    final isGps = data.sourceType == LocationSourceType.gps;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2374,30 +1948,30 @@ class _LocationSourceAndLookupFields extends StatelessWidget {
       children: <Widget>[
         _LocationSourceSelectorField(
           keyPrefix: keyPrefix,
-          sourceType: sourceType,
-          enabled: !isBusy && !isResolving,
-          onChanged: onSourceTypeChanged,
+          sourceType: data.sourceType,
+          enabled: !data.isBusy && !data.isResolving,
+          onChanged: data.onSourceTypeChanged,
         ),
         if (!isGps) ...<Widget>[
           SizedBox(height: tokens.spacing.space2),
           _LocationSourceInputField(
             keyPrefix: keyPrefix,
-            sourceType: sourceType,
-            controller: sourceController,
-            enabled: !isBusy && !isResolving,
-            errorText: sourceErrorText,
-            onFieldChanged: onFieldChanged,
-            onResolveSource: onResolveSource,
+            sourceType: data.sourceType,
+            controller: data.sourceController,
+            enabled: !data.isBusy && !data.isResolving,
+            errorText: data.sourceErrorText,
+            onFieldChanged: data.onFieldChanged,
+            onResolveSource: data.onResolveSource,
           ),
         ],
         SizedBox(height: tokens.spacing.space2),
         _LocationCoordinatesActionRow(
           keyPrefix: keyPrefix,
-          sourceType: sourceType,
-          isBusy: isBusy,
-          isResolving: isResolving,
-          onUseCurrentGps: onUseCurrentGps,
-          onResolveSource: onResolveSource,
+          sourceType: data.sourceType,
+          isBusy: data.isBusy,
+          isResolving: data.isResolving,
+          onUseCurrentGps: data.onUseCurrentGps,
+          onResolveSource: data.onResolveSource,
         ),
       ],
     );
@@ -2462,56 +2036,7 @@ class _LocationSourceInputField extends StatelessWidget {
   }
 }
 
-/// Segmented `GPS` / `Address` / `Plus Code` control inside [_LocationSourceSelectorField].
-class _LocationSourceSegmentedControl extends StatelessWidget {
-  /// Creates a [_LocationSourceSegmentedControl].
-  const _LocationSourceSegmentedControl({
-    required this.keyPrefix,
-    required this.sourceType,
-    required this.enabled,
-    required this.onChanged,
-  });
-
-  /// Whether the segmented control is interactive.
-  final bool enabled;
-
-  /// Stable prefix for deterministic widget keys.
-  final String keyPrefix;
-
-  /// Callback notified when the user switches source type.
-  final ValueChanged<LocationSourceType> onChanged;
-
-  /// Currently selected coordinate source type.
-  final LocationSourceType sourceType;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiSegmentedControl<LocationSourceType>(
-      key: ValueKey<String>('${keyPrefix}_source_type_segmented'),
-      value: sourceType,
-      enabled: enabled,
-      semanticLabel: localizations.locationSourceTypeLabel,
-      onChanged: onChanged,
-      segments: <UiSegment<LocationSourceType>>[
-        UiSegment<LocationSourceType>(
-          value: LocationSourceType.gps,
-          label: localizations.locationSourceTypeGps,
-        ),
-        UiSegment<LocationSourceType>(
-          value: LocationSourceType.address,
-          label: localizations.locationSourceTypeAddress,
-        ),
-        UiSegment<LocationSourceType>(
-          value: LocationSourceType.plusCode,
-          label: localizations.locationSourceTypePlusCode,
-        ),
-      ],
-    );
-  }
-}
-
-/// Labeled `GPS` / `Address` / `Plus Code` segmented selector inside [_LocationCoordinatesEditorFields].
+/// Labeled `GPS` / `Address` / `Plus Code` segmented selector inside [_LocationCoordinatesEditorBody].
 class _LocationSourceSelectorField extends StatelessWidget {
   /// Creates a [_LocationSourceSelectorField].
   const _LocationSourceSelectorField({
@@ -2550,11 +2075,13 @@ class _LocationSourceSelectorField extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 6.0),
-        _LocationSourceSegmentedControl(
-          keyPrefix: keyPrefix,
-          sourceType: sourceType,
+        UiSegmentedControl<LocationSourceType>(
+          key: ValueKey<String>('${keyPrefix}_source_type_segmented'),
+          value: sourceType,
           enabled: enabled,
+          semanticLabel: localizations.locationSourceTypeLabel,
           onChanged: onChanged,
+          segments: _locationSourceSegments(localizations),
         ),
       ],
     );
@@ -2660,6 +2187,26 @@ String _locationSourceDisplayValue(
   return rawSource;
 }
 
+/// Builds the three segmented options (`GPS` / `Address` / `Plus Code`) for [_LocationSourceSelectorField].
+List<UiSegment<LocationSourceType>> _locationSourceSegments(
+  AppLocalizations localizations,
+) {
+  return <UiSegment<LocationSourceType>>[
+    UiSegment<LocationSourceType>(
+      value: LocationSourceType.gps,
+      label: localizations.locationSourceTypeGps,
+    ),
+    UiSegment<LocationSourceType>(
+      value: LocationSourceType.address,
+      label: localizations.locationSourceTypeAddress,
+    ),
+    UiSegment<LocationSourceType>(
+      value: LocationSourceType.plusCode,
+      label: localizations.locationSourceTypePlusCode,
+    ),
+  ];
+}
+
 /// Maps [sourceType] exhaustively to its localized display label.
 String _locationSourceTypeLabel(
   LocationSourceType sourceType,
@@ -2733,6 +2280,7 @@ _resolveLocationSourceWithDisambiguation(
   WidgetRef ref, {
   required LocationSourceType sourceType,
   required String rawSource,
+  required bool Function() isRequestCurrent,
 }) async {
   final locale = Localizations.localeOf(context);
   final result = await ref
@@ -2742,7 +2290,7 @@ _resolveLocationSourceWithDisambiguation(
         rawSource: rawSource,
         locale: locale,
       );
-  if (!context.mounted) {
+  if (!context.mounted || !isRequestCurrent()) {
     return null;
   }
   return switch (result) {

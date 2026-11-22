@@ -55,13 +55,16 @@ UINT GetDpiForWindowSafe(HWND hwnd) {
 
 // Queries a DPI-aware Win32 system metric, falling back to scaled GetSystemMetrics.
 int GetSystemMetricsForDpiSafe(int index, UINT dpi) {
-  HMODULE user32_module = GetModuleHandleA("User32.dll");
-  if (user32_module != nullptr) {
-    auto get_metrics_for_dpi = reinterpret_cast<GetSystemMetricsForDpiFn*>(
-        GetProcAddress(user32_module, "GetSystemMetricsForDpi"));
-    if (get_metrics_for_dpi != nullptr) {
-      return get_metrics_for_dpi(index, dpi);
+  static const auto get_metrics_for_dpi = []() -> GetSystemMetricsForDpiFn* {
+    HMODULE user32_module = GetModuleHandleA("User32.dll");
+    if (user32_module == nullptr) {
+      return nullptr;
     }
+    return reinterpret_cast<GetSystemMetricsForDpiFn*>(
+        GetProcAddress(user32_module, "GetSystemMetricsForDpi"));
+  }();
+  if (get_metrics_for_dpi != nullptr) {
+    return get_metrics_for_dpi(index, dpi);
   }
   return Scale(GetSystemMetrics(index), dpi / 96.0);
 }
@@ -300,7 +303,7 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
   }
 
-  return DefWindowProc(window_handle_, message, wparam, lparam);
+  return DefWindowProc(hwnd, message, wparam, lparam);
 }
 
 void Win32Window::Destroy() {

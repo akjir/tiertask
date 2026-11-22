@@ -18,6 +18,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 
 import '../services/app_logger.dart';
+import 'tdf_metadata.dart';
 import 'tdf_timezone.dart';
 
 /// Supported display language modes in TierTask.
@@ -617,17 +618,6 @@ class WebDavConfig {
     return normalizedUrl.substring(pathStart, pathEnd);
   }
 
-  /// Returns `true` when [value] contains ASCII control characters or null bytes.
-  static bool _hasControlCharacters(String value) {
-    for (var i = 0; i < value.length; i++) {
-      final code = value.codeUnitAt(i);
-      if (code < 0x20 || code == 0x7F) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /// Returns `true` when [segments] contains `.` or `..` traversal components.
   static bool _hasInvalidPathSegments(Iterable<String> segments) {
     for (final segment in segments) {
@@ -643,7 +633,8 @@ class WebDavConfig {
     if (rawFilePath.isEmpty) {
       return false;
     }
-    if (rawFilePath.contains(r'\') || _hasControlCharacters(rawFilePath)) {
+    if (rawFilePath.contains(r'\') ||
+        TdfMetadata.containsAsciiControlChar(rawFilePath)) {
       return true;
     }
     return _hasInvalidPathSegments(rawFilePath.split('/'));
@@ -667,7 +658,7 @@ class WebDavConfig {
   static ({String? normalizedUrl, WebDavServerUrlError? error}) _parseServerUrl(
     String rawServerUrl,
   ) {
-    if (_hasControlCharacters(rawServerUrl)) {
+    if (TdfMetadata.containsAsciiControlChar(rawServerUrl)) {
       return (normalizedUrl: null, error: WebDavServerUrlError.invalid);
     }
     final trimmed = rawServerUrl.trim();

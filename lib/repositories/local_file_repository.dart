@@ -16,8 +16,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:ui';
+import 'dart:isolate';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../l10n/app_localizations.dart';
@@ -124,7 +125,19 @@ class LocalFileRepository {
     this.inMemoryStore,
     this.lockAcquireTimeout = HostFileLockManager.defaultLockAcquireTimeout,
     this.maxFileBytes = defaultMaxFileBytes,
-  });
+    this._androidFilesDirectoryResolver,
+    this._languageResolver,
+    @visibleForTesting this._legacyAndroidCacheDirectoryOverride,
+  }) : _lockManager = HostFileLockManager<LocalFileException>(
+         createException: LocalFileException.new,
+         hostLockDirectoryOverride: hostLockDirectoryOverride,
+         lockAcquireTimeout: lockAcquireTimeout,
+       );
+
+  /// Platform channel resolving persistent Android `Context.filesDir`.
+  static const MethodChannel androidStorageChannel = MethodChannel(
+    'de.akjir.tiertask/app_storage',
+  );
 
   /// Default maximum allowed TDF file size in bytes (1 MiB).
   static const int defaultMaxFileBytes = 1048576;
@@ -137,6 +150,7 @@ class LocalFileRepository {
   /// Maximum numbered `.bak.NNN` suffix checked when creating a backup copy (`999`).
   static const int maxBackupSuffix = LocalFileOperations.maxBackupSuffix;
 
+  static String? _cachedAndroidFilesDirectory;
   static const LocalFileOperations<LocalFileException> _operations =
       LocalFileOperations<LocalFileException>(LocalFileException.new);
 
@@ -161,6 +175,13 @@ class LocalFileRepository {
   /// Maximum allowed file size in bytes before rejecting a read or write.
   final int maxFileBytes;
 
+  final Future<String?> Function()? _androidFilesDirectoryResolver;
+  bool _androidMigrationChecked = false;
+  final AppLanguage Function()? _languageResolver;
+  final String? _legacyAndroidCacheDirectoryOverride;
+  final HostFileLockManager<LocalFileException> _lockManager;
+  String? _resolvedAndroidFilesDirectory;
+
   /// Whether parent-directory observation is supported for this repository instance.
   bool get canWatchDirectory =>
       !_useInMemoryFallback && FileSystemEntity.isWatchSupported;
@@ -171,18 +192,22 @@ class LocalFileRepository {
   /// Host operating system identifier (`linux`, `android`, `windows`) reported by the Dart VM.
   static String get hostPlatform => Platform.operatingSystem;
 
-  /// Builds the [HostFileLockManager] configured for this repository instance.
-  HostFileLockManager<LocalFileException> get _lockManager =>
-      HostFileLockManager<LocalFileException>(
-        createException: LocalFileException.new,
-        hostLockDirectoryOverride: hostLockDirectoryOverride,
-        lockAcquireTimeout: lockAcquireTimeout,
-      );
+  /// Exposes the memoized [HostFileLockManager] instance for unit test verification.
+  @visibleForTesting
+  HostFileLockManager<LocalFileException> get lockManagerForTesting =>
+      _lockManager;
+
+  /// Cached Android `Context.filesDir` path applicable to this repository instance, if resolved.
+  String? get _effectiveAndroidFilesDirectory =>
+      _resolvedAndroidFilesDirectory ?? _cachedAndroidFilesDirectory;
 
   /// Resolves the active [AppLocalizations] instance for error messages.
-  AppLocalizations get _messages => lookupAppLocalizations(
-    config.language.resolveLocale(PlatformDispatcher.instance.locale),
-  );
+  AppLocalizations get _messages {
+    final effectiveLanguage = _languageResolver?.call() ?? config.language;
+    return lookupAppLocalizations(
+      effectiveLanguage.resolveLocale(PlatformDispatcher.instance.locale),
+    );
+  }
 
   /// Whether to use the isolated in-memory store during hermetic widget tests.
   bool get _useInMemoryFallback =>
@@ -190,6 +215,21 @@ class LocalFileRepository {
       !_operations.isAbsolutePath(config.localFilePath.trim()) &&
       inMemoryStore != null &&
       Platform.environment.containsKey('FLUTTER_TEST');
+
+  /// Whether relative path resolution must use persistent Android `Context.filesDir`.
+  bool get _usesAndroidFilesDirectory =>
+      !_useInMemoryFallback &&
+      baseDirectoryPath == null &&
+      !_operations.isAbsolutePath(config.localFilePath.trim()) &&
+      (Platform.isAndroid || _androidFilesDirectoryResolver != null);
+
+  /// Records [directoryPath] as the process-wide cached Android `Context.filesDir`.
+  static void cacheAndroidFilesDirectory(String? directoryPath) {
+    final trimmed = directoryPath?.trim() ?? '';
+    if (trimmed.isNotEmpty) {
+      _cachedAndroidFilesDirectory = trimmed;
+    }
+  }
 
   /// Combines [directoryPath] and [fileName] into a normalized local `.tdf` file path.
   static String combineDirectoryAndFileName(
@@ -202,15 +242,32 @@ class LocalFileRepository {
     String? baseDirectoryPath,
     String? fileName,
     AppBuildProfile? buildProfile,
+    String? androidFilesDirectoryPath,
   }) => _operations.defaultLogFilePath(
     baseDirectoryPath: baseDirectoryPath,
     fileName: fileName,
     buildProfile: buildProfile,
+    androidFilesDirectoryPath:
+        androidFilesDirectoryPath ?? _cachedAndroidFilesDirectory,
   );
 
   /// Synchronously deletes the diagnostic log file at [path] if it exists.
   static void deleteLogFileSync(String path) =>
       _operations.deleteLogFileSync(path);
+
+  /// Deletes the configured local `.tdf` file under the exclusive host lock if it exists, rejecting directories and symbolic links.
+  Future<void> deleteTdf() async {
+    final messages = _messages;
+    final filePath = await _resolveFilePathAsync(migrateLegacy: true);
+    await _lockManager.withExclusiveLock(filePath, () async {
+      _operations.deleteTdf(
+        filePath,
+        messages,
+        inMemory: _useInMemoryFallback,
+        inMemoryStore: inMemoryStore,
+      );
+    }, inMemoryOnly: _useInMemoryFallback);
+  }
 
   /// Deletes all dated and legacy diagnostic log files for [workspaceId] in [directoryPath].
   static int deleteWorkspaceLogFilesSync({
@@ -223,14 +280,6 @@ class LocalFileRepository {
     workspaceId: workspaceId,
   );
 
-  /// Deletes the configured local `.tdf` file if it exists, rejecting directories and symbolic links.
-  Future<void> deleteTdf() async => _operations.deleteTdf(
-    resolveFilePath(),
-    _messages,
-    inMemory: _useInMemoryFallback,
-    inMemoryStore: inMemoryStore,
-  );
-
   /// Returns `true` when the resolved parent directory exists on disk or in memory, or `false` if invalid or missing.
   bool directoryExists() {
     final directoryPath = tryResolveDirectoryPath();
@@ -241,6 +290,28 @@ class LocalFileRepository {
       directoryPath,
       inMemory: _useInMemoryFallback,
     );
+  }
+
+  /// Resolves and caches the persistent Android `Context.filesDir` via platform channel or injected [resolver].
+  static Future<String?> ensureAndroidFilesDirectoryInitialized({
+    Future<String?> Function()? resolver,
+  }) async {
+    if (resolver == null) {
+      if (_cachedAndroidFilesDirectory case final cached?) {
+        return cached;
+      }
+      if (!Platform.isAndroid) {
+        return null;
+      }
+    }
+    final activeResolver = resolver ?? _invokeAndroidFilesDirectoryChannel;
+    final resolved = await activeResolver();
+    final trimmed = resolved?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    _cachedAndroidFilesDirectory = trimmed;
+    return trimmed;
   }
 
   /// Appends `.tdf` to [rawName] when it does not already end with `.tdf` (case-insensitive).
@@ -277,37 +348,38 @@ class LocalFileRepository {
   /// Creates an empty `.tdf` document at [resolveFilePath] when the file does not exist yet, leaving existing files untouched.
   Future<void> initializeIfMissing() async {
     final messages = _messages;
-    final filePath = resolveFilePath();
+    final filePath = await _resolveFilePathAsync(migrateLegacy: true);
     const emptyContent = 'tdf ${TdfService.supportedVersion}\n';
     await _lockManager.withExclusiveLock(filePath, () async {
       if (_useInMemoryFallback) {
         inMemoryStore?.putIfAbsent(filePath, () => emptyContent);
         return;
       }
-      final entityType = FileSystemEntity.typeSync(
-        filePath,
-        followLinks: false,
-      );
-      if (entityType == FileSystemEntityType.directory) {
-        throw LocalFileException(messages.errorMoveSourceIsDirectory(filePath));
-      }
-      if (entityType == FileSystemEntityType.link) {
-        throw LocalFileException(messages.errorMoveSourceIsSymlink(filePath));
-      }
-      if (entityType == FileSystemEntityType.notFound) {
-        await saveTdf(emptyContent);
-        AppLogger.event(
-          LogLevel.info,
-          LogTag.storage,
-          'local.save',
-          fields: <String, Object?>{'path': filePath, 'initialized': true},
-        );
+      switch (FileSystemEntity.typeSync(filePath, followLinks: false)) {
+        case FileSystemEntityType.directory:
+          throw LocalFileException(
+            messages.errorMoveSourceIsDirectory(filePath),
+          );
+        case FileSystemEntityType.link:
+          throw LocalFileException(messages.errorMoveSourceIsSymlink(filePath));
+        case FileSystemEntityType.pipe:
+        case FileSystemEntityType.unixDomainSock:
+          throw LocalFileException(
+            messages.errorMovePermissionDenied(filePath),
+          );
+        case FileSystemEntityType.file:
+          return;
+        case FileSystemEntityType.notFound:
+          await saveTdf(emptyContent);
+          AppLogger.event(
+            LogLevel.info,
+            LogTag.storage,
+            'local.save',
+            fields: <String, Object?>{'path': filePath, 'initialized': true},
+          );
       }
     }, inMemoryOnly: _useInMemoryFallback);
   }
-
-  /// Alias for [initializeIfMissing] that creates an empty `.tdf` document when the file does not exist yet.
-  Future<void> initializeTdfIfNeeded() => initializeIfMissing();
 
   /// Returns `true` when [rawName] is a valid single `.tdf` file name or base name without path separators or control characters.
   static bool isValidSingleFileName(String rawName) =>
@@ -348,18 +420,41 @@ class LocalFileRepository {
   LocalFileException mapMoveFileSystemException(
     FileSystemException error, {
     required String fallbackPath,
-  }) => _operations.mapMoveFileSystemException(error, fallbackPath, _messages);
+    bool? isWindows,
+  }) => _operations.mapMoveFileSystemException(
+    error,
+    fallbackPath,
+    _messages,
+    isWindows: isWindows,
+  );
 
-  /// Safely moves the local `.tdf` file to [targetRepository]'s resolved path without overwriting existing entities.
+  /// Safely moves the local `.tdf` file to [targetRepository]'s resolved path under ordered exclusive locks without overwriting existing entities.
   Future<void> moveTdfFile(LocalFileRepository targetRepository) async {
-    _operations.moveTdfFile(
-      resolveFilePath(),
-      targetRepository.resolveFilePath(),
-      targetRepository.resolveDirectoryPath(),
-      maxFileBytes,
-      _messages,
-      inMemory: _useInMemoryFallback && targetRepository._useInMemoryFallback,
-      inMemoryStore: inMemoryStore,
+    final messages = _messages;
+    final fromPath = await _resolveFilePathAsync(migrateLegacy: true);
+    final toPath = await targetRepository._resolveFilePathAsync(
+      migrateLegacy: false,
+    );
+    final targetDirectory = _operations.resolveDirectoryPath(toPath);
+    final inMemory =
+        _useInMemoryFallback && targetRepository._useInMemoryFallback;
+    await _withOrderedDualLocks<void>(
+      fromPath,
+      _lockManager,
+      toPath,
+      targetRepository._lockManager,
+      () async {
+        await _operations.moveTdfFile(
+          fromPath,
+          toPath,
+          targetDirectory,
+          maxFileBytes,
+          messages,
+          inMemory: inMemory,
+          inMemoryStore: inMemoryStore,
+        );
+      },
+      inMemoryOnly: inMemory,
     );
   }
 
@@ -434,16 +529,28 @@ class LocalFileRepository {
   Future<({String content, String? digest, bool exists})> readTdfWithDigest() =>
       _readTdfSnapshot(computeDigest: true);
 
-  /// Renames the local `.tdf` file to [newFileName] inside its current directory and returns the new resolved path.
+  /// Renames the local `.tdf` file to [newFileName] inside its current directory under ordered exclusive locks and returns the new resolved path.
   Future<String> renameTdf(String newFileName) async {
-    final renamed = _operations.renameTdf(
-      resolveFilePath(),
-      resolveDirectoryPath(),
-      newFileName,
-      maxFileBytes,
-      _messages,
-      inMemory: _useInMemoryFallback,
-      inMemoryStore: inMemoryStore,
+    final messages = _messages;
+    final fromPath = await _resolveFilePathAsync(migrateLegacy: true);
+    final directoryPath = _operations.resolveDirectoryPath(fromPath);
+    final normalizedName = _operations.validateFileName(newFileName, messages);
+    final toPath = combineDirectoryAndFileName(directoryPath, normalizedName);
+    final renamed = await _withOrderedDualLocks<String>(
+      fromPath,
+      _lockManager,
+      toPath,
+      _lockManager,
+      () => _operations.renameTdf(
+        fromPath,
+        directoryPath,
+        newFileName,
+        maxFileBytes,
+        messages,
+        inMemory: _useInMemoryFallback,
+        inMemoryStore: inMemoryStore,
+      ),
+      inMemoryOnly: _useInMemoryFallback,
     );
     AppLogger.event(
       LogLevel.info,
@@ -454,15 +561,25 @@ class LocalFileRepository {
     return renamed;
   }
 
+  /// Clears the cached Android `Context.filesDir` path for isolated unit tests.
+  @visibleForTesting
+  static void resetAndroidFilesDirectoryCacheForTesting() {
+    _cachedAndroidFilesDirectory = null;
+  }
+
   /// Resolves the platform-appropriate user data directory for relative local file names.
   static String resolveDefaultDirectoryPath({
     AppBuildProfile? buildProfile,
     Map<String, String>? environment,
     bool? isWindows,
+    String? androidFilesDirectoryPath,
   }) => _operations.resolveDefaultDirectoryPath(
     buildProfile: buildProfile,
     environment: environment,
     isWindows: isWindows,
+    androidFilesDirectoryPath:
+        androidFilesDirectoryPath ??
+        (environment == null ? _cachedAndroidFilesDirectory : null),
   );
 
   /// Resolves the parent directory path of [resolveFilePath].
@@ -475,6 +592,7 @@ class LocalFileRepository {
     baseDirectoryPath,
     _messages,
     buildProfile: buildProfile,
+    androidFilesDirectoryPath: _effectiveAndroidFilesDirectory,
   );
 
   /// Resolves the full dated diagnostic log file path for [workspaceId] and [utcNow].
@@ -484,6 +602,7 @@ class LocalFileRepository {
     required String platform,
     required String workspaceId,
     AppBuildProfile? buildProfile,
+    String? androidFilesDirectoryPath,
   }) {
     final fileName = AppLogger.formatLogFileName(
       utcNow: utcNow,
@@ -494,6 +613,7 @@ class LocalFileRepository {
       baseDirectoryPath: baseDirectoryPath,
       fileName: fileName,
       buildProfile: buildProfile,
+      androidFilesDirectoryPath: androidFilesDirectoryPath,
     );
   }
 
@@ -501,7 +621,7 @@ class LocalFileRepository {
   Future<void> saveTdf(String tdfContent) async {
     final stopwatch = Stopwatch()..start();
     final messages = _messages;
-    final filePath = resolveFilePath();
+    final filePath = await _resolveFilePathAsync(migrateLegacy: true);
     final bytes = utf8.encode(tdfContent);
     if (bytes.length > maxFileBytes) {
       AppLogger.event(
@@ -516,9 +636,8 @@ class LocalFileRepository {
       );
       throw LocalFileException(messages.errorLocalFileTooLarge);
     }
-    final lockManager = _lockManager;
     try {
-      await lockManager.withExclusiveLock(filePath, () async {
+      await _lockManager.withExclusiveLock(filePath, () async {
         if (_useInMemoryFallback) {
           inMemoryStore?[filePath] = tdfContent;
           return;
@@ -527,7 +646,7 @@ class LocalFileRepository {
           filePath,
           bytes,
           messages,
-          lockManager: lockManager,
+          lockManager: _lockManager,
         );
       }, inMemoryOnly: _useInMemoryFallback);
       AppLogger.event(
@@ -570,7 +689,7 @@ class LocalFileRepository {
         error: error,
       );
       throw LocalFileException(
-        messages.errorSaveLocalFileFailed(error.toString()),
+        messages.errorSaveLocalFileFailed(_describeUnexpectedError(error)),
         cause: error,
       );
     }
@@ -639,11 +758,10 @@ class LocalFileRepository {
   Future<void> wipeTdf({bool createBackup = false}) async {
     final stopwatch = Stopwatch()..start();
     final messages = _messages;
-    final filePath = resolveFilePath();
+    final filePath = await _resolveFilePathAsync(migrateLegacy: true);
     const emptyContent = 'tdf ${TdfService.supportedVersion}\n';
-    final lockManager = _lockManager;
     try {
-      await lockManager.withExclusiveLock(filePath, () async {
+      await _lockManager.withExclusiveLock(filePath, () async {
         if (_useInMemoryFallback) {
           _wipeInMemoryEntry(
             filePath,
@@ -656,7 +774,7 @@ class LocalFileRepository {
           filePath,
           emptyContent,
           messages,
-          lockManager: lockManager,
+          lockManager: _lockManager,
           createBackup: createBackup,
         );
       }, inMemoryOnly: _useInMemoryFallback);
@@ -703,15 +821,15 @@ class LocalFileRepository {
         error: error,
       );
       throw LocalFileException(
-        messages.errorSaveLocalFileFailed(error.toString()),
+        messages.errorSaveLocalFileFailed(_describeUnexpectedError(error)),
         cause: error,
       );
     }
   }
 
   /// Acquires the exclusive host-local cooperative lock (or hermetic in-process lock) for [resolveFilePath] and runs [action].
-  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) {
-    final filePath = resolveFilePath();
+  Future<T> withExclusiveTargetLock<T>(Future<T> Function() action) async {
+    final filePath = await _resolveFilePathAsync(migrateLegacy: true);
     return _lockManager.withExclusiveLock<T>(
       filePath,
       action,
@@ -727,6 +845,77 @@ class LocalFileRepository {
     bool flush = false,
   }) =>
       _operations.writeLogFileSync(path, content, append: append, flush: flush);
+
+  /// Computes the SHA-256 hex digest of [bytes], offloading to a worker isolate when length meets [LocalFileOperations.asyncReadThresholdBytes].
+  static Future<String> _computeSha256Hex(List<int> bytes) async {
+    if (bytes.length < LocalFileOperations.asyncReadThresholdBytes) {
+      return Sha256Service.hashHex(bytes);
+    }
+    return Isolate.run(() => Sha256Service.hashHex(bytes));
+  }
+
+  /// Decodes UTF-8 [bytes] and optionally computes their SHA-256 hex digest, offloading to a worker isolate when length meets [LocalFileOperations.asyncReadThresholdBytes].
+  static Future<({String decoded, String? digest})> _decodeAndHashBytes(
+    List<int> bytes, {
+    required bool computeDigest,
+  }) async {
+    if (bytes.length < LocalFileOperations.asyncReadThresholdBytes) {
+      final decoded = utf8.decode(bytes);
+      final digest = computeDigest ? Sha256Service.hashHex(bytes) : null;
+      return (decoded: decoded, digest: digest);
+    }
+    return Isolate.run(() {
+      final decoded = utf8.decode(bytes);
+      final digest = computeDigest ? Sha256Service.hashHex(bytes) : null;
+      return (decoded: decoded, digest: digest);
+    });
+  }
+
+  /// Returns a static safe summary for unexpected storage errors without exposing raw runtime exception strings.
+  static String _describeUnexpectedError(Object error) {
+    return switch (error) {
+      FormatException _ => 'Invalid UTF-8 encoding',
+      IOException _ => 'Filesystem I/O error',
+      ArgumentError _ => 'Invalid file operation argument',
+      OutOfMemoryError _ => 'Insufficient memory',
+      _ => 'Unexpected storage error',
+    };
+  }
+
+  /// Resolves and caches the Android `Context.filesDir` path for this repository instance, throwing [LocalFileException] if unavailable.
+  Future<String> _ensureAndroidFilesDirectory() async {
+    if (_resolvedAndroidFilesDirectory case final resolved?) {
+      return resolved;
+    }
+    final String? rawDirectory;
+    try {
+      rawDirectory = await ensureAndroidFilesDirectoryInitialized(
+        resolver: _androidFilesDirectoryResolver,
+      );
+    } on Object catch (error) {
+      throw LocalFileException(
+        _messages.errorLoadLocalFileFailed(
+          'Could not resolve Android persistent files directory.',
+        ),
+        cause: error,
+      );
+    }
+    final trimmed = rawDirectory?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      throw LocalFileException(
+        _messages.errorLoadLocalFileFailed(
+          'Android persistent files directory resolved to empty path.',
+        ),
+      );
+    }
+    _resolvedAndroidFilesDirectory = trimmed;
+    return trimmed;
+  }
+
+  /// Invokes the Android `de.akjir.tiertask/app_storage` platform channel to resolve `Context.filesDir`.
+  static Future<String?> _invokeAndroidFilesDirectoryChannel() {
+    return androidStorageChannel.invokeMethod<String>('getFilesDirectory');
+  }
 
   /// Lists sorted `.tdf` file names stored under [dirPath] in [inMemoryStore].
   List<String> _listInMemoryTdfFileNames(String dirPath) {
@@ -748,7 +937,82 @@ class LocalFileRepository {
     return List<String>.unmodifiable(sorted);
   }
 
-  /// Validates [filePath], creates an optional `.bak` copy, and atomically writes [emptyContent].
+  /// Performs a safe one-time migration of a legacy regular `.tdf` file from Android `cacheDir` (`Directory.systemTemp`) into persistent `filesDir` under exclusive lock.
+  Future<void> _migrateLegacyAndroidCacheFileIfNeeded(
+    String targetPath,
+    AppLocalizations messages,
+  ) async {
+    final cacheRoot = _operations.trimTrailingSeparators(
+      (_legacyAndroidCacheDirectoryOverride ?? Directory.systemTemp.path)
+          .trim(),
+    );
+    if (cacheRoot.isEmpty) {
+      _androidMigrationChecked = true;
+      return;
+    }
+    final effectiveProfile = buildProfile ?? AppBuildProfile.current;
+    final legacyBaseDir = effectiveProfile.isDev
+        ? '$cacheRoot${Platform.pathSeparator}${effectiveProfile.dataDirectoryName}'
+        : cacheRoot;
+    final legacyPath = _operations.resolveFilePath(
+      config.localFilePath,
+      legacyBaseDir,
+      messages,
+      buildProfile: effectiveProfile,
+    );
+    if (legacyPath == targetPath) {
+      _androidMigrationChecked = true;
+      return;
+    }
+    if (FileSystemEntity.typeSync(targetPath, followLinks: false) !=
+            FileSystemEntityType.notFound ||
+        FileSystemEntity.typeSync(legacyPath, followLinks: false) !=
+            FileSystemEntityType.file) {
+      _androidMigrationChecked = true;
+      return;
+    }
+
+    await _lockManager.withExclusiveLock(targetPath, () async {
+      if (FileSystemEntity.typeSync(targetPath, followLinks: false) !=
+              FileSystemEntityType.notFound ||
+          FileSystemEntity.typeSync(legacyPath, followLinks: false) !=
+              FileSystemEntityType.file) {
+        return;
+      }
+      final bytes = await _operations.readBoundedRegularFileBytes(
+        legacyPath,
+        maxFileBytes,
+        messages,
+      );
+      await _operations.writeTdfAtomically(
+        targetPath,
+        bytes,
+        messages,
+        lockManager: _lockManager,
+      );
+      try {
+        if (FileSystemEntity.typeSync(legacyPath, followLinks: false) ==
+            FileSystemEntityType.file) {
+          File(legacyPath).deleteSync();
+        }
+      } on FileSystemException {
+        // Target is durably written; ignore best-effort legacy cache cleanup errors.
+      }
+      AppLogger.event(
+        LogLevel.info,
+        LogTag.storage,
+        'storage.android_cache_migrated',
+        fields: <String, Object?>{
+          'from': legacyPath,
+          'to': targetPath,
+          'bytes': bytes.length,
+        },
+      );
+    });
+    _androidMigrationChecked = true;
+  }
+
+  /// Validates [filePath], creates an optional bounded atomic `.bak` copy, and atomically writes [emptyContent].
   Future<void> _performDiskWipe(
     String filePath,
     String emptyContent,
@@ -757,18 +1021,34 @@ class LocalFileRepository {
     required bool createBackup,
   }) async {
     final sourceType = FileSystemEntity.typeSync(filePath, followLinks: false);
-    if (sourceType == FileSystemEntityType.directory) {
-      throw LocalFileException(messages.errorMoveSourceIsDirectory(filePath));
+    switch (sourceType) {
+      case FileSystemEntityType.directory:
+        throw LocalFileException(messages.errorMoveSourceIsDirectory(filePath));
+      case FileSystemEntityType.link:
+        throw LocalFileException(messages.errorMoveSourceIsSymlink(filePath));
+      case FileSystemEntityType.pipe:
+      case FileSystemEntityType.unixDomainSock:
+        throw LocalFileException(messages.errorMovePermissionDenied(filePath));
+      case FileSystemEntityType.notFound:
+      case FileSystemEntityType.file:
+        break;
     }
-    if (sourceType == FileSystemEntityType.link) {
-      throw LocalFileException(messages.errorMoveSourceIsSymlink(filePath));
-    }
-    if (sourceType != FileSystemEntityType.notFound && createBackup) {
+    if (sourceType == FileSystemEntityType.file && createBackup) {
       final backupPath = _operations.resolveNextLocalBackupPath(
         filePath,
         messages,
       );
-      File(filePath).copySync(backupPath);
+      final backupBytes = await _operations.readBoundedRegularFileBytes(
+        filePath,
+        maxFileBytes,
+        messages,
+      );
+      await _operations.writeTdfAtomically(
+        backupPath,
+        backupBytes,
+        messages,
+        lockManager: lockManager,
+      );
       AppLogger.event(
         LogLevel.info,
         LogTag.storage,
@@ -784,13 +1064,13 @@ class LocalFileRepository {
     );
   }
 
-  /// Reads the resolved `.tdf` file once and optionally computes its SHA-256 hex digest.
+  /// Reads the resolved `.tdf` file once via bounded [RandomAccessFile] I/O and optionally computes its SHA-256 hex digest.
   Future<({String content, String? digest, bool exists})> _readTdfSnapshot({
     required bool computeDigest,
   }) async {
     final stopwatch = Stopwatch()..start();
     final messages = _messages;
-    final filePath = resolveFilePath();
+    final filePath = await _resolveFilePathAsync(migrateLegacy: true);
     if (_useInMemoryFallback) {
       final store = inMemoryStore;
       final exists = store?.containsKey(filePath) ?? false;
@@ -805,30 +1085,51 @@ class LocalFileRepository {
           'elapsed_ms': stopwatch.elapsedMilliseconds,
         },
       );
-      final digest = computeDigest && exists
-          ? Sha256Service.hashHex(utf8.encode(content))
+      final encodedBytes = computeDigest && exists
+          ? utf8.encode(content)
           : null;
+      final digest = encodedBytes == null
+          ? null
+          : await _computeSha256Hex(encodedBytes);
       return (content: content, digest: digest, exists: exists);
     }
     try {
-      final file = File(filePath);
-      if (!file.existsSync()) {
-        AppLogger.event(
-          LogLevel.info,
-          LogTag.storage,
-          'local.load',
-          fields: <String, Object?>{'path': filePath, 'missing': true},
-        );
-        return (content: '', digest: null, exists: false);
+      final entityType = FileSystemEntity.typeSync(
+        filePath,
+        followLinks: false,
+      );
+      switch (entityType) {
+        case FileSystemEntityType.notFound:
+          AppLogger.event(
+            LogLevel.info,
+            LogTag.storage,
+            'local.load',
+            fields: <String, Object?>{'path': filePath, 'missing': true},
+          );
+          return (content: '', digest: null, exists: false);
+        case FileSystemEntityType.directory:
+          throw LocalFileException(
+            messages.errorMoveSourceIsDirectory(filePath),
+          );
+        case FileSystemEntityType.link:
+          throw LocalFileException(messages.errorMoveSourceIsSymlink(filePath));
+        case FileSystemEntityType.pipe:
+        case FileSystemEntityType.unixDomainSock:
+          throw LocalFileException(
+            messages.errorMovePermissionDenied(filePath),
+          );
+        case FileSystemEntityType.file:
+          break;
       }
-      if (file.lengthSync() > maxFileBytes) {
-        throw LocalFileException(messages.errorLocalFileTooLarge);
-      }
-      final bytes = file.readAsBytesSync();
-      if (bytes.length > maxFileBytes) {
-        throw LocalFileException(messages.errorLocalFileTooLarge);
-      }
-      final decoded = utf8.decode(bytes);
+      final bytes = await _operations.readBoundedRegularFileBytes(
+        filePath,
+        maxFileBytes,
+        messages,
+      );
+      final (:decoded, :digest) = await _decodeAndHashBytes(
+        bytes,
+        computeDigest: computeDigest,
+      );
       AppLogger.event(
         LogLevel.info,
         LogTag.storage,
@@ -839,7 +1140,6 @@ class LocalFileRepository {
           'elapsed_ms': stopwatch.elapsedMilliseconds,
         },
       );
-      final digest = computeDigest ? Sha256Service.hashHex(bytes) : null;
       return (content: decoded, digest: digest, exists: true);
     } on LocalFileException catch (error) {
       AppLogger.event(
@@ -871,10 +1171,39 @@ class LocalFileRepository {
         error: error,
       );
       throw LocalFileException(
-        messages.errorLoadLocalFileFailed(error.toString()),
+        messages.errorLoadLocalFileFailed(_describeUnexpectedError(error)),
         cause: error,
       );
     }
+  }
+
+  /// Resolves the local file path asynchronously, initializing Android `Context.filesDir` and optional legacy `cacheDir` migration.
+  Future<String> _resolveFilePathAsync({required bool migrateLegacy}) async {
+    if (!_usesAndroidFilesDirectory) {
+      if (baseDirectoryPath == null && !_useInMemoryFallback) {
+        try {
+          await ensureAndroidFilesDirectoryInitialized();
+        } on Object {
+          // Absolute-path and desktop operations do not depend on Android filesDir.
+        }
+      }
+      return resolveFilePath();
+    }
+    final messages = _messages;
+    // Validate relative path before touching platform channel or filesystem.
+    _operations.validateRelativeOrAbsolutePath(config.localFilePath, messages);
+    final androidDir = await _ensureAndroidFilesDirectory();
+    final targetPath = _operations.resolveFilePath(
+      config.localFilePath,
+      baseDirectoryPath,
+      messages,
+      buildProfile: buildProfile,
+      androidFilesDirectoryPath: androidDir,
+    );
+    if (migrateLegacy && !_androidMigrationChecked) {
+      await _migrateLegacyAndroidCacheFileIfNeeded(targetPath, messages);
+    }
+    return targetPath;
   }
 
   /// Wipes [filePath] in [inMemoryStore] during hermetic widget tests, creating a `.bak` or `.bak.NNN` copy when [createBackup] is `true`.
@@ -896,5 +1225,49 @@ class LocalFileRepository {
       }
     }
     store[filePath] = emptyContent;
+  }
+
+  /// Acquires exclusive locks on [firstPath] and [secondPath] in deterministic canonical order to prevent AB-BA deadlocks.
+  static Future<T> _withOrderedDualLocks<T>(
+    String firstPath,
+    HostFileLockManager<LocalFileException> firstManager,
+    String secondPath,
+    HostFileLockManager<LocalFileException> secondManager,
+    Future<T> Function() action, {
+    required bool inMemoryOnly,
+  }) {
+    if (firstPath == secondPath) {
+      return firstManager.withExclusiveLock<T>(
+        firstPath,
+        action,
+        inMemoryOnly: inMemoryOnly,
+      );
+    }
+    final firstKey = inMemoryOnly
+        ? firstPath
+        : HostFileLockManager.computeTargetPathHash(firstPath);
+    final secondKey = inMemoryOnly
+        ? secondPath
+        : HostFileLockManager.computeTargetPathHash(secondPath);
+    if (firstKey.compareTo(secondKey) <= 0) {
+      return firstManager.withExclusiveLock<T>(
+        firstPath,
+        () => secondManager.withExclusiveLock<T>(
+          secondPath,
+          action,
+          inMemoryOnly: inMemoryOnly,
+        ),
+        inMemoryOnly: inMemoryOnly,
+      );
+    }
+    return secondManager.withExclusiveLock<T>(
+      secondPath,
+      () => firstManager.withExclusiveLock<T>(
+        firstPath,
+        action,
+        inMemoryOnly: inMemoryOnly,
+      ),
+      inMemoryOnly: inMemoryOnly,
+    );
   }
 }

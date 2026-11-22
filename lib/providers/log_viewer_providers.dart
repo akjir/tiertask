@@ -308,11 +308,14 @@ class LogViewerNotifier extends Notifier<DiagnosticLogSnapshot> {
   Future<LogSyncResult> syncLogToWebDav() async {
     try {
       final current = readCurrentConfig(ref);
-      if (current.diagnosticsEnabled && current.isWebDavConfigured) {
-        await ref
-            .read(webDavRepositoryProvider)
-            .saveLog(AppLogger.activeLogFileName);
+      if (!current.diagnosticsEnabled ||
+          !current.logStorageMode.usesWebDav ||
+          !current.isWebDavConfigured) {
+        return const LogSyncSucceeded();
       }
+      await ref
+          .read(webDavRepositoryProvider)
+          .saveLog(AppLogger.activeLogFileName);
       return const LogSyncSucceeded();
     } on Object catch (error) {
       return LogSyncFailed(AppLogger.sanitize(error.toString()));

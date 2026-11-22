@@ -393,7 +393,6 @@ class TaskBoard {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-      pruneExpiredCompleted: false,
     ),
   );
 
@@ -471,10 +470,14 @@ class TaskBoard {
     final nextReady = ready ?? this.ready;
     final nextPlanned = planned ?? this.planned;
     final nextBlocked = blocked ?? this.blocked;
-    final unqueuedBlocked = <String>{
-      for (final task in this.blocked)
-        if (!this.queueBlock.taskIds.contains(task.id)) task.id,
-    };
+    final nextQueueBlock =
+        queueBlock ??
+        _reconcileCopiedQueue(
+          nextFocus: nextFocus,
+          nextReady: nextReady,
+          nextPlanned: nextPlanned,
+          nextBlocked: nextBlocked,
+        );
     return TaskBoard(
       focus: nextFocus,
       ready: nextReady,
@@ -486,16 +489,42 @@ class TaskBoard {
       labels: labels ?? this.labels,
       locations: locations ?? this.locations,
       deletedBlock: deletedBlock ?? this.deletedBlock,
-      queueBlock:
-          queueBlock ??
-          TaskBoardQueueMutator.reconcileQueueWithSlices(
-            currentQueue: this.queueBlock,
-            focus: nextFocus,
-            ready: nextReady,
-            planned: nextPlanned,
-            blocked: nextBlocked,
-            previousUnqueuedBlockedIds: unqueuedBlocked,
-          ),
+      queueBlock: nextQueueBlock,
+    );
+  }
+
+  /// Atomically creates a label with [name] and assigns it to open [taskId] in one domain mutation.
+  ({TaskBoard board, TdfLabel? label}) createLabelAndAssignToTask({
+    required String taskId,
+    required String name,
+    String? color,
+    String? id,
+    String? note,
+    bool isScoped = false,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) {
+    final current = _slices;
+    final outcome = TaskBoardMutator.createLabelAndAssignToTask(
+      current,
+      taskId: taskId,
+      name: name,
+      color: color,
+      id: id,
+      note: note,
+      isScoped: isScoped,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    );
+    return (
+      board: identical(outcome.board, current)
+          ? this
+          : TaskBoard._normalized(outcome.board),
+      label: outcome.label,
     );
   }
 
@@ -929,6 +958,28 @@ class TaskBoard {
     ),
   );
 
+  /// Atomically updates [taskId]'s [subtasks] and [subtasksAutoFinish] flag and completes [taskId] once.
+  TaskBoard updateTaskSubtasksAndComplete(
+    String taskId, {
+    required List<SubtaskItem> subtasks,
+    required bool subtasksAutoFinish,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) => _mutate(
+    (slices) => TaskBoardMutator.updateTaskSubtasksAndComplete(
+      slices,
+      taskId,
+      subtasks: subtasks,
+      subtasksAutoFinish: subtasksAutoFinish,
+      currentDate: currentDate,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    ),
+  );
+
   /// Returns whether adding [candidateBlockerId] as a prerequisite of [taskId] would create a dependency cycle.
   bool wouldCreateDependencyCycle(String taskId, String candidateBlockerId) =>
       TaskBoardEvaluator.wouldCreateDependencyCycle(
@@ -945,4 +996,65 @@ class TaskBoard {
     final next = mutate(current);
     return identical(current, next) ? this : TaskBoard._normalized(next);
   }
+
+  /// Reconciles `queueBlock` against replaced tier slices in $O(N)$ time using a set lookup for previously unqueued blocked tasks.
+  TdfQueueBlock _reconcileCopiedQueue({
+    required List<TaskItem> nextFocus,
+    required List<TaskItem> nextReady,
+    required List<TaskItem> nextPlanned,
+    required List<TaskItem> nextBlocked,
+  }) {
+    final Set<String> unqueuedBlocked;
+    if (blocked.isEmpty) {
+      unqueuedBlocked = const <String>{};
+    } else {
+      final queuedIds = Set<String>.of(queueBlock.taskIds);
+      unqueuedBlocked = <String>{
+        for (final task in blocked)
+          if (!queuedIds.contains(task.id)) task.id,
+      };
+    }
+    return TaskBoardQueueMutator.reconcileQueueWithSlices(
+      currentQueue: queueBlock,
+      focus: nextFocus,
+      ready: nextReady,
+      planned: nextPlanned,
+      blocked: nextBlocked,
+      previousUnqueuedBlockedIds: unqueuedBlocked,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TaskBoard &&
+        other.queueBlock == queueBlock &&
+        other.deletedBlock == deletedBlock &&
+        listEquals(other.focus, focus) &&
+        listEquals(other.ready, ready) &&
+        listEquals(other.planned, planned) &&
+        listEquals(other.blocked, blocked) &&
+        listEquals(other.someday, someday) &&
+        listEquals(other.completed, completed) &&
+        listEquals(other._scopedHidden, _scopedHidden) &&
+        listEquals(other.allTasks, allTasks) &&
+        listEquals(other.labels, labels) &&
+        listEquals(other.locations, locations);
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    Object.hashAll(focus),
+    Object.hashAll(ready),
+    Object.hashAll(planned),
+    Object.hashAll(blocked),
+    Object.hashAll(someday),
+    Object.hashAll(completed),
+    Object.hashAll(_scopedHidden),
+    Object.hashAll(allTasks),
+    Object.hashAll(labels),
+    Object.hashAll(locations),
+    queueBlock,
+    deletedBlock,
+  );
 }

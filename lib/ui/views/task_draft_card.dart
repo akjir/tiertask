@@ -30,23 +30,20 @@ import '../../providers/entity_actions_provider.dart';
 import '../../providers/shell_providers.dart';
 import '../../providers/task_schedule_helper.dart';
 import '../components/ui_ordered_item_list.dart';
-import '../components/ui_searchable_picker.dart';
 import '../dialogs/compact_label_picker_sheet.dart';
-import '../layout/ui_responsive_grid.dart';
-import '../primitives/ui_banner.dart';
 import '../primitives/ui_button.dart';
 import '../primitives/ui_card.dart';
 import '../primitives/ui_field.dart';
 import '../primitives/ui_pill.dart';
-import '../primitives/ui_segmented_control.dart';
-import '../primitives/ui_toggle_row.dart';
 import '../tokens/ui_breakpoints.dart';
 import '../tokens/ui_theme_tokens.dart';
-import '../tokens/ui_typography_tokens.dart';
 import '../widgets/entity_card_chrome.dart';
+import '../widgets/entity_conditions_section.dart';
 import '../widgets/entity_date_time_fields.dart';
 import '../widgets/entity_label_picker.dart';
+import '../widgets/entity_links_section.dart';
 import 'task_detail_editors.dart';
+import 'task_schedule_editors.dart';
 
 /// Display order for optional sections inside [TaskDraftCard].
 const List<TaskSectionKind> _draftOptionalSectionOrder = <TaskSectionKind>[
@@ -294,7 +291,7 @@ class _DraftCardView {
       state.openSections.contains(TaskSectionKind.suspended);
 }
 
-/// Body column hosted inside [_DraftConditionsCard].
+/// Body column hosted inside [_DraftConditionsCard] delegating to [EntityConditionsEditorBody].
 class _DraftConditionsBody extends StatelessWidget {
   /// Creates a [_DraftConditionsBody].
   const _DraftConditionsBody({required this.view});
@@ -304,38 +301,81 @@ class _DraftConditionsBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final isSuspended = view.isSuspendedOpen;
-    final controlsEnabled = !view.state.isBusy && !isSuspended;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        if (isSuspended) ...<Widget>[
-          UiBanner(
-            variant: UiBannerVariant.inlineWarning,
-            message: localizations.taskSuspendedDisablesConditionsHint,
-          ),
-          SizedBox(height: tokens.spacing.space2),
-        ],
-        IgnorePointer(
-          ignoring: isSuspended,
-          child: Opacity(
-            opacity: isSuspended ? tokens.focus.suspendedDimmedOpacity : 1.0,
-            child: _DraftConditionsControls(
-              view: view,
-              enabled: controlsEnabled,
-            ),
-          ),
-        ),
-        if (view.state.fieldErrors['conditions'] case final error?) ...<Widget>[
-          SizedBox(height: tokens.spacing.space2),
-          EntityInlineErrorText(message: error),
-        ],
-      ],
+    final state = view.state;
+    final callbacks = view.callbacks;
+    return _DraftSectionErrorHost(
+      errorText: state.fieldErrors['conditions'],
+      child: EntityConditionsEditorBody(
+        isTask: true,
+        isSuspended: view.isSuspendedOpen,
+        draft: state.conditionDraft,
+        allLocations: state.allLocations,
+        timeStartController: view.controllers.timeStart,
+        timeEndController: view.controllers.timeEnd,
+        timeInputError: state.timeInputError,
+        enabled: !state.isBusy,
+        onToggleIgnoreAll: _toggleIgnoreAll,
+        onDaysModeChanged: _setDaysMode,
+        onToggleWeekday: _toggleWeekday,
+        onTimesModeChanged: _setTimesMode,
+        onAddTimeWindow: callbacks.onAddTimeWindow,
+        onRemoveTimeWindow: (window, index) =>
+            callbacks.onRemoveTimeWindow(index),
+        onLocationsModeChanged: _setLocationsMode,
+        onToggleLocation: _toggleLocation,
+      ),
     );
+  }
+
+  /// Updates the weekday condition dimension [mode] on the draft.
+  void _setDaysMode(ConditionDimensionMode mode) {
+    view.callbacks.onConditionDraftChanged(
+      view.state.conditionDraft.copyWith(daysMode: mode),
+    );
+  }
+
+  /// Updates the GPS locations condition dimension [mode] on the draft.
+  void _setLocationsMode(ConditionDimensionMode mode) {
+    view.callbacks.onConditionDraftChanged(
+      view.state.conditionDraft.copyWith(locationMode: mode),
+    );
+  }
+
+  /// Updates the time-window condition dimension [mode] on the draft.
+  void _setTimesMode(ConditionDimensionMode mode) {
+    view.callbacks.onConditionDraftChanged(
+      view.state.conditionDraft.copyWith(timeMode: mode),
+    );
+  }
+
+  /// Toggles task-level `ignoreAllLabelConditions` on the draft.
+  void _toggleIgnoreAll(bool value) {
+    view.callbacks.onConditionDraftChanged(
+      view.state.conditionDraft.copyWith(ignoreAllLabelConditions: value),
+    );
+  }
+
+  /// Toggles [locationId] inside the draft condition locations list.
+  void _toggleLocation(String locationId) {
+    final draft = view.state.conditionDraft;
+    final nextIds = List<String>.of(draft.locationIds);
+    if (!nextIds.remove(locationId)) {
+      nextIds.add(locationId);
+    }
+    view.callbacks.onConditionDraftChanged(
+      draft.copyWith(locationIds: nextIds),
+    );
+  }
+
+  /// Toggles ISO weekday [weekday] (`1..7`) inside the draft condition weekdays.
+  void _toggleWeekday(int weekday) {
+    final draft = view.state.conditionDraft;
+    final nextDays = List<int>.of(draft.weekdays);
+    if (!nextDays.remove(weekday)) {
+      nextDays.add(weekday);
+      nextDays.sort();
+    }
+    view.callbacks.onConditionDraftChanged(draft.copyWith(weekdays: nextDays));
   }
 }
 
@@ -360,53 +400,6 @@ class _DraftConditionsCard extends StatelessWidget {
             view.callbacks.onCloseSection(TaskSectionKind.conditions),
       ),
       child: _DraftConditionsBody(view: view),
-    );
-  }
-}
-
-/// Interactive controls body inside [_DraftConditionsCard].
-class _DraftConditionsControls extends StatelessWidget {
-  /// Creates a [_DraftConditionsControls].
-  const _DraftConditionsControls({required this.view, required this.enabled});
-
-  /// Whether controls accept interaction.
-  final bool enabled;
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final draft = view.state.conditionDraft;
-    final dimensionsEnabled = enabled && !draft.ignoreAllLabelConditions;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        UiToggleRow(
-          label: localizations.conditionGlobalAnyLabel,
-          value: draft.ignoreAllLabelConditions,
-          isDense: true,
-          enabled: enabled,
-          onChanged: (value) => view.callbacks.onConditionDraftChanged(
-            draft.copyWith(ignoreAllLabelConditions: value),
-          ),
-        ),
-        if (!draft.ignoreAllLabelConditions) ...<Widget>[
-          SizedBox(height: tokens.spacing.space2),
-          _DraftDayConditionSection(view: view, enabled: dimensionsEnabled),
-          SizedBox(height: tokens.spacing.space2),
-          _DraftTimeConditionSection(view: view, enabled: dimensionsEnabled),
-          SizedBox(height: tokens.spacing.space2),
-          _DraftLocationConditionSection(
-            view: view,
-            enabled: dimensionsEnabled,
-          ),
-        ],
-      ],
     );
   }
 }
@@ -491,115 +484,6 @@ class _DraftControllers {
   }
 }
 
-/// Day-of-week condition dimension selector and weekday picker inside [_DraftConditionsControls].
-class _DraftDayConditionSection extends StatelessWidget {
-  /// Creates a [_DraftDayConditionSection].
-  const _DraftDayConditionSection({required this.view, required this.enabled});
-
-  /// Whether day condition controls accept interaction.
-  final bool enabled;
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final draft = view.state.conditionDraft;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _DraftDimensionSelector(
-          label: localizations.conditionDayGroupTitle,
-          mode: draft.daysMode,
-          anyLabel: localizations.conditionDayAnyLabel,
-          enabled: enabled,
-          onModeChanged: (mode) => view.callbacks.onConditionDraftChanged(
-            draft.copyWith(daysMode: mode),
-          ),
-        ),
-        if (draft.daysMode == ConditionDimensionMode.custom) ...<Widget>[
-          SizedBox(height: tokens.spacing.space2),
-          _DraftWeekdaysWrap(
-            selectedWeekdays: draft.weekdays,
-            enabled: enabled,
-            onToggleWeekday: _toggleWeekday,
-          ),
-        ],
-      ],
-    );
-  }
-
-  /// Toggles ISO weekday [weekday] (`1..7`) in the draft condition weekdays.
-  void _toggleWeekday(int weekday) {
-    final draft = view.state.conditionDraft;
-    final nextDays = List<int>.of(draft.weekdays);
-    if (!nextDays.remove(weekday)) {
-      nextDays.add(weekday);
-      nextDays.sort();
-    }
-    view.callbacks.onConditionDraftChanged(draft.copyWith(weekdays: nextDays));
-  }
-}
-
-/// Dimension override selector (`Inherit` / `Any` / `Custom`) used inside [_DraftConditionsControls].
-class _DraftDimensionSelector extends StatelessWidget {
-  /// Creates a [_DraftDimensionSelector].
-  const _DraftDimensionSelector({
-    required this.label,
-    required this.mode,
-    required this.anyLabel,
-    required this.enabled,
-    required this.onModeChanged,
-  });
-
-  /// Localized label for [ConditionDimensionMode.any].
-  final String anyLabel;
-
-  /// Whether the dropdown accepts changes.
-  final bool enabled;
-
-  /// Dimension heading label.
-  final String label;
-
-  /// Currently selected dimension mode.
-  final ConditionDimensionMode mode;
-
-  /// Callback notified when the mode changes.
-  final ValueChanged<ConditionDimensionMode> onModeChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiField(
-      kind: UiFieldKind.select,
-      label: label,
-      enabled: enabled,
-      selectValue: mode.name,
-      selectOptions: <UiSelectOption>[
-        UiSelectOption(
-          value: ConditionDimensionMode.inherit.name,
-          label: localizations.conditionInheritLabel,
-        ),
-        UiSelectOption(value: ConditionDimensionMode.any.name, label: anyLabel),
-        UiSelectOption(
-          value: ConditionDimensionMode.custom.name,
-          label: localizations.conditionCustomLabel,
-        ),
-      ],
-      onSelectChanged: (value) {
-        final next = _parseConditionDimensionMode(value);
-        if (next != null) {
-          onModeChanged(next);
-        }
-      },
-    );
-  }
-}
-
 /// Optional Due date section hosted inside [TaskDraftCard].
 class _DraftDueCard extends StatelessWidget {
   /// Creates a [_DraftDueCard].
@@ -611,84 +495,29 @@ class _DraftDueCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final state = view.state;
+    final callbacks = view.callbacks;
+
     return UiCard.inset(
       key: const ValueKey<String>('draft_due_card'),
       headerIcon: Icons.calendar_today_outlined,
       headerTitle: localizations.taskInfoDueLabel,
       headerTrailing: _DraftSectionCloseButton(
-        isBusy: view.state.isBusy,
-        onClose: () => view.callbacks.onCloseSection(TaskSectionKind.due),
+        isBusy: state.isBusy,
+        onClose: () => callbacks.onCloseSection(TaskSectionKind.due),
       ),
-      child: _DraftDueCardBody(view: view),
-    );
-  }
-}
-
-/// Body column hosted inside [_DraftDueCard].
-class _DraftDueCardBody extends StatelessWidget {
-  /// Creates a [_DraftDueCardBody].
-  const _DraftDueCardBody({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final state = view.state;
-    final callbacks = view.callbacks;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        EntityHybridDateTimeField(
-          controller: view.controllers.due,
-          label: localizations.taskDueButtonLabel,
-          fallbackLocalDateTime: state.currentLocalDateTimeHint,
-          enabled: !state.isBusy,
-          errorText: state.fieldErrors['due'],
-          onChanged: callbacks.onDueChanged,
-        ),
-        SizedBox(height: tokens.spacing.space2),
-        UiToggleRow(
-          label: localizations.taskDueAutoPrioritizeLabel,
-          description: localizations.taskDueAutoPrioritizeSubtitle,
-          value: state.dueAutoPrioritize,
-          isDense: true,
-          enabled: !state.isBusy,
-          onChanged: callbacks.onDueAutoPrioritizeChanged,
-        ),
-        SizedBox(height: tokens.spacing.space2),
-        _DraftDueNoteField(view: view),
-      ],
-    );
-  }
-}
-
-/// Optional deadline note field hosted inside [_DraftDueCardBody].
-class _DraftDueNoteField extends StatelessWidget {
-  /// Creates a [_DraftDueNoteField].
-  const _DraftDueNoteField({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiField(
-      kind: UiFieldKind.multiline,
-      controller: view.controllers.dueNote,
-      label: localizations.taskDueNoteLabel,
-      hintText: localizations.taskDueNoteHint,
-      maxLength: maxTdfNoteLength,
-      minLines: 2,
-      maxLines: 4,
-      enabled: !view.state.isBusy,
-      errorText: view.state.fieldErrors['dueNote'],
-      onChanged: (_) => view.callbacks.onClearFieldError('dueNote'),
+      child: TaskDueFields(
+        dueController: view.controllers.due,
+        dueNoteController: view.controllers.dueNote,
+        autoPrioritize: state.dueAutoPrioritize,
+        currentLocalDateTimeHint: state.currentLocalDateTimeHint,
+        dueError: state.fieldErrors['due'],
+        dueNoteError: state.fieldErrors['dueNote'],
+        isBusy: state.isBusy,
+        onDueChanged: callbacks.onDueChanged,
+        onDueNoteChanged: (_) => callbacks.onClearFieldError('dueNote'),
+        onAutoPrioritizeChanged: callbacks.onDueAutoPrioritizeChanged,
+      ),
     );
   }
 }
@@ -720,7 +549,6 @@ class _DraftFooter extends StatelessWidget {
         UiButton(
           key: const ValueKey<String>('task_draft_cancel_button'),
           label: localizations.actionCancel,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           onPressed: isBusy ? null : onCancel,
         ),
@@ -764,7 +592,6 @@ class _DraftLabelsInlinePickerCard extends StatelessWidget {
       ),
       headerTrailing: UiButton(
         label: localizations.actionDone,
-        variant: UiButtonVariant.secondary,
         density: UiButtonDensity.compact,
         onPressed: callbacks.onCloseLabelPicker,
       ),
@@ -841,187 +668,6 @@ class _DraftLabelsSummaryCard extends StatelessWidget {
   }
 }
 
-/// Save/add and cancel action buttons hosted inside [_DraftLinkAddForm].
-class _DraftLinkAddActions extends StatelessWidget {
-  /// Creates a [_DraftLinkAddActions].
-  const _DraftLinkAddActions({
-    required this.isEditingExisting,
-    required this.isBusy,
-    required this.onCommit,
-    required this.onCancelEdit,
-  });
-
-  /// Whether draft submission is in flight.
-  final bool isBusy;
-
-  /// Whether currently updating an existing draft link row.
-  final bool isEditingExisting;
-
-  /// Callback cancelling the active row edit.
-  final VoidCallback onCancelEdit;
-
-  /// Callback adding or updating the link row.
-  final VoidCallback onCommit;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Wrap(
-      spacing: 8.0,
-      runSpacing: 6.0,
-      children: <Widget>[
-        UiButton(
-          label: isEditingExisting
-              ? localizations.tooltipSaveLink
-              : localizations.tooltipAddLink,
-          variant: UiButtonVariant.secondary,
-          density: UiButtonDensity.compact,
-          onPressed: isBusy ? null : onCommit,
-        ),
-        if (isEditingExisting)
-          UiButton(
-            label: localizations.actionCancel,
-            variant: UiButtonVariant.text,
-            density: UiButtonDensity.compact,
-            onPressed: isBusy ? null : onCancelEdit,
-          ),
-      ],
-    );
-  }
-}
-
-/// Responsive title and URI input grid hosted inside [_DraftLinkAddForm].
-class _DraftLinkAddFields extends StatelessWidget {
-  /// Creates a [_DraftLinkAddFields].
-  const _DraftLinkAddFields({
-    required this.titleController,
-    required this.uriController,
-    required this.isBusy,
-    required this.onCommit,
-  });
-
-  /// Whether draft submission is in flight.
-  final bool isBusy;
-
-  /// Callback committing the typed link on URI submit.
-  final VoidCallback onCommit;
-
-  /// Controller for the link title.
-  final TextEditingController titleController;
-
-  /// Controller for the link URI.
-  final TextEditingController uriController;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    return UiResponsiveGrid(
-      preset: UiGridPreset.twoColumnCompactCollapse,
-      spacing: tokens.spacing.space2,
-      runSpacing: tokens.spacing.space2,
-      children: <Widget>[
-        UiField(
-          kind: UiFieldKind.text,
-          controller: titleController,
-          hintText: localizations.linkTitleHint,
-          maxLength: maxTdfTextLength,
-          enabled: !isBusy,
-          textInputAction: TextInputAction.next,
-        ),
-        UiField(
-          kind: UiFieldKind.text,
-          controller: uriController,
-          hintText: localizations.linkUriHint,
-          maxLength: maxTdfTextLength,
-          isMonospace: true,
-          enabled: !isBusy,
-          textInputAction: TextInputAction.done,
-          onSubmitted: (_) => onCommit(),
-        ),
-      ],
-    );
-  }
-}
-
-/// Inline link title/URI input bar hosted inside [_DraftLinksCard].
-class _DraftLinkAddForm extends StatelessWidget {
-  /// Creates a [_DraftLinkAddForm].
-  const _DraftLinkAddForm({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final state = view.state;
-    final callbacks = view.callbacks;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _DraftLinkAddFields(
-          titleController: view.controllers.linkTitle,
-          uriController: view.controllers.linkUri,
-          isBusy: state.isBusy,
-          onCommit: callbacks.onCommitLinkInput,
-        ),
-        if (state.linkInputError case final error?) ...<Widget>[
-          SizedBox(height: tokens.spacing.space1),
-          EntityInlineErrorText(message: error),
-        ],
-        SizedBox(height: tokens.spacing.space2),
-        _DraftLinkAddActions(
-          isEditingExisting: state.editingLinkIndex != null,
-          isBusy: state.isBusy,
-          onCommit: callbacks.onCommitLinkInput,
-          onCancelEdit: callbacks.onCancelLinkEdit,
-        ),
-      ],
-    );
-  }
-}
-
-/// Single reference link title and monospace URI row inside [_DraftLinksCardBody].
-class _DraftLinkRowContent extends StatelessWidget {
-  /// Creates a [_DraftLinkRowContent].
-  const _DraftLinkRowContent({required this.link});
-
-  /// Draft link entry rendered by this row.
-  final TaskLink link;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Text(
-          link.title,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: tokens.typography.meta.copyWith(
-            color: colors.ink,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        Text(
-          link.uri,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: UiTypographyTokens.mono(
-            tokens.typography.monoSmall.copyWith(color: colors.muted),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 /// Optional Reference Links section hosted inside [TaskDraftCard].
 class _DraftLinksCard extends StatelessWidget {
   /// Creates a [_DraftLinksCard].
@@ -1060,145 +706,24 @@ class _DraftLinksCardBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
     final state = view.state;
     final callbacks = view.callbacks;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        UiOrderedItemList<TaskLink>(
-          items: state.draftLinks,
-          editingIndex: state.editingLinkIndex,
-          itemKey: (link, index) =>
-              ValueKey<String>('draft_link_${index}_${link.title}_${link.uri}'),
-          onReorder: state.isBusy ? null : callbacks.onReorderLinks,
-          moveUpTooltip: localizations.tooltipMoveLinkUp,
-          moveDownTooltip: localizations.tooltipMoveLinkDown,
-          onEdit: state.isBusy ? null : callbacks.onStartEditLink,
-          editTooltip: localizations.tooltipEditLink,
-          onDelete: state.isBusy ? null : callbacks.onDeleteLink,
-          deleteTooltip: localizations.tooltipRemoveLink,
-          itemBuilder: (context, link, index, isEditing) =>
-              _DraftLinkRowContent(link: link),
-          addBar: _DraftLinkAddForm(view: view),
-        ),
-        if (state.fieldErrors['links'] case final error?) ...<Widget>[
-          SizedBox(height: tokens.spacing.space2),
-          EntityInlineErrorText(message: error),
-        ],
-      ],
-    );
-  }
-}
-
-/// GPS location condition dimension selector and chips wrap inside [_DraftConditionsControls].
-class _DraftLocationConditionSection extends StatelessWidget {
-  /// Creates a [_DraftLocationConditionSection].
-  const _DraftLocationConditionSection({
-    required this.view,
-    required this.enabled,
-  });
-
-  /// Whether location condition controls accept interaction.
-  final bool enabled;
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final draft = view.state.conditionDraft;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _DraftDimensionSelector(
-          label: localizations.conditionLocationGroupTitle,
-          mode: draft.locationMode,
-          anyLabel: localizations.conditionLocationAnyLabel,
-          enabled: enabled,
-          onModeChanged: (mode) => view.callbacks.onConditionDraftChanged(
-            draft.copyWith(locationMode: mode),
-          ),
-        ),
-        if (draft.locationMode == ConditionDimensionMode.custom) ...<Widget>[
-          SizedBox(height: tokens.spacing.space2),
-          _DraftLocationsWrap(
-            allLocations: view.state.allLocations,
-            selectedIds: draft.locationIds,
-            enabled: enabled,
-            onToggleLocation: _toggleLocation,
-          ),
-        ],
-      ],
-    );
-  }
-
-  /// Toggles [locationId] in the draft condition location identifiers.
-  void _toggleLocation(String locationId) {
-    final draft = view.state.conditionDraft;
-    final nextIds = List<String>.of(draft.locationIds);
-    if (!nextIds.remove(locationId)) {
-      nextIds.add(locationId);
-    }
-    view.callbacks.onConditionDraftChanged(
-      draft.copyWith(locationIds: nextIds),
-    );
-  }
-}
-
-/// Selectable GPS location chips wrap hosted inside [_DraftLocationConditionSection].
-class _DraftLocationsWrap extends StatelessWidget {
-  /// Creates a [_DraftLocationsWrap].
-  const _DraftLocationsWrap({
-    required this.allLocations,
-    required this.selectedIds,
-    required this.enabled,
-    required this.onToggleLocation,
-  });
-
-  /// All workspace locations.
-  final List<TdfLocation> allLocations;
-
-  /// Whether chips are interactive.
-  final bool enabled;
-
-  /// Callback toggling selection of a location identifier.
-  final ValueChanged<String> onToggleLocation;
-
-  /// Selected location identifiers.
-  final List<String> selectedIds;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    if (allLocations.isEmpty) {
-      return Text(
-        localizations.emptyLocationsHint,
-        style: tokens.typography.meta.copyWith(color: tokens.colors.muted),
-      );
-    }
-    return Wrap(
-      spacing: 6.0,
-      runSpacing: 6.0,
-      children: <Widget>[
-        for (final location in allLocations)
-          UiPill(
-            label: location.name,
-            icon: Icons.location_on_outlined,
-            variant: UiPillVariant.selectable,
-            isSelected: selectedIds.contains(location.id),
-            enabled: enabled,
-            onPressed: enabled ? () => onToggleLocation(location.id) : null,
-          ),
-      ],
+    return _DraftSectionErrorHost(
+      errorText: state.fieldErrors['links'],
+      child: EntityLinksEditorBody(
+        links: state.draftLinks,
+        editingIndex: state.editingLinkIndex,
+        titleController: view.controllers.linkTitle,
+        uriController: view.controllers.linkUri,
+        inputErrorText: state.linkInputError,
+        enabled: !state.isBusy,
+        itemKeyPrefix: 'draft_link',
+        onReorder: callbacks.onReorderLinks,
+        onStartRowEdit: callbacks.onStartEditLink,
+        onDeleteRow: callbacks.onDeleteLink,
+        onCommitLink: callbacks.onCommitLinkInput,
+        onCancelRowEdit: callbacks.onCancelLinkEdit,
+      ),
     );
   }
 }
@@ -1268,96 +793,6 @@ class _DraftOptionalSectionCard extends StatelessWidget {
   }
 }
 
-/// Always-visible Queue & Priority placement selector hosted inside [TaskDraftCard].
-class _DraftPlacementCard extends StatelessWidget {
-  /// Creates a [_DraftPlacementCard].
-  const _DraftPlacementCard({
-    required this.placement,
-    required this.isBusy,
-    required this.onChanged,
-  });
-
-  /// Whether draft creation is currently in flight.
-  final bool isBusy;
-
-  /// Callback notified when placement changes.
-  final ValueChanged<QuickAddMode> onChanged;
-
-  /// Currently selected placement mode.
-  final QuickAddMode placement;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiCard.inset(
-      key: const ValueKey<String>('draft_placement_card'),
-      headerIcon: Icons.bolt_outlined,
-      headerTitle: localizations.inlinePlacementSectionTitle,
-      child: _DraftPlacementCardBody(
-        placement: placement,
-        isBusy: isBusy,
-        onChanged: onChanged,
-      ),
-    );
-  }
-}
-
-/// Segmented placement control and caption hosted inside [_DraftPlacementCard].
-class _DraftPlacementCardBody extends StatelessWidget {
-  /// Creates a [_DraftPlacementCardBody].
-  const _DraftPlacementCardBody({
-    required this.placement,
-    required this.isBusy,
-    required this.onChanged,
-  });
-
-  /// Whether draft creation is currently in flight.
-  final bool isBusy;
-
-  /// Callback notified when placement changes.
-  final ValueChanged<QuickAddMode> onChanged;
-
-  /// Currently selected placement mode.
-  final QuickAddMode placement;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        UiSegmentedControl<QuickAddMode>(
-          segments: <UiSegment<QuickAddMode>>[
-            UiSegment<QuickAddMode>(
-              value: QuickAddMode.standard,
-              label: localizations.placementQueueOption,
-            ),
-            UiSegment<QuickAddMode>(
-              value: QuickAddMode.priority,
-              label: localizations.quickAddPriority,
-            ),
-            UiSegment<QuickAddMode>(
-              value: QuickAddMode.someday,
-              label: localizations.tier5Name,
-            ),
-          ],
-          value: placement,
-          enabled: !isBusy,
-          semanticLabel: localizations.inlinePlacementSectionTitle,
-          onChanged: onChanged,
-        ),
-        SizedBox(height: tokens.spacing.space2),
-        Text(
-          _placementHint(placement, localizations),
-          style: tokens.typography.meta.copyWith(color: tokens.colors.muted),
-        ),
-      ],
-    );
-  }
-}
-
 /// Optional Prerequisite tasks selector hosted inside [TaskDraftCard].
 class _DraftPrerequisitesCard extends StatelessWidget {
   /// Creates a [_DraftPrerequisitesCard].
@@ -1397,58 +832,17 @@ class _DraftPrerequisitesCardBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _DraftPrerequisitesPicker(view: view),
-        if (view.state.fieldErrors['prerequisites']
-            case final error?) ...<Widget>[
-          SizedBox(height: tokens.spacing.space2),
-          EntityInlineErrorText(message: error),
-        ],
-      ],
-    );
-  }
-}
-
-/// Searchable prerequisite candidate picker hosted inside [_DraftPrerequisitesCardBody].
-class _DraftPrerequisitesPicker extends StatelessWidget {
-  /// Creates a [_DraftPrerequisitesPicker].
-  const _DraftPrerequisitesPicker({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
     final state = view.state;
-
-    return UiSearchablePicker<String>(
-      options: <UiPickerOption<String>>[
-        for (final candidate in state.prerequisiteCandidates)
-          UiPickerOption<String>(
-            id: candidate.id,
-            value: candidate.id,
-            label: candidate.title,
-            enabled: !candidate.wouldCreateCycle,
-            disabledHint: candidate.wouldCreateCycle
-                ? localizations.prerequisiteCyclePreventedHint
-                : null,
-          ),
-      ],
-      selectedIds: state.selectedPrerequisiteIds,
-      searchMaxLength: maxTdfTextLength,
-      searchPlaceholder: localizations.blockedBySearchHint,
-      searchClearTooltip: localizations.tooltipClearSearch,
-      emptyText: localizations.blockedBySearchNoResults,
-      onToggleOption: (option) {
-        if (!state.isBusy) {
-          view.callbacks.onTogglePrerequisite(option.value);
-        }
-      },
+    return _DraftSectionErrorHost(
+      errorText: state.fieldErrors['prerequisites'],
+      child: TaskPrerequisitesPickerBody(
+        candidates: state.prerequisiteCandidates,
+        selectedIds: state.selectedPrerequisiteIds,
+        isBusy: state.isBusy,
+        showDescription: false,
+        autoFocusSearch: false,
+        onToggleOption: view.callbacks.onTogglePrerequisite,
+      ),
     );
   }
 }
@@ -1464,128 +858,29 @@ class _DraftRepeatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final state = view.state;
+    final callbacks = view.callbacks;
+
     return UiCard.inset(
       key: const ValueKey<String>('draft_repeat_card'),
       headerIcon: Icons.repeat_rounded,
       headerTitle: localizations.repeatFlagLabel,
       headerTrailing: _DraftSectionCloseButton(
-        isBusy: view.state.isBusy,
-        onClose: () => view.callbacks.onCloseSection(TaskSectionKind.repeat),
+        isBusy: state.isBusy,
+        onClose: () => callbacks.onCloseSection(TaskSectionKind.repeat),
       ),
-      child: _DraftRepeatCardBody(view: view),
-    );
-  }
-}
-
-/// Interval, unit, and lead-days column hosted inside [_DraftRepeatCard].
-class _DraftRepeatCardBody extends StatelessWidget {
-  /// Creates a [_DraftRepeatCardBody].
-  const _DraftRepeatCardBody({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final state = view.state;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        UiField(
-          kind: UiFieldKind.text,
-          controller: view.controllers.repeatCount,
-          label: localizations.repeatIntervalLabel,
-          hintText: '1',
-          keyboardType: TextInputType.number,
-          enabled: !state.isBusy,
-          errorText: state.fieldErrors['repeatCount'],
-          onChanged: (_) => view.callbacks.onClearFieldError('repeatCount'),
-        ),
-        SizedBox(height: tokens.spacing.space2),
-        _DraftRepeatUnitControl(
-          unit: state.repeatUnit,
-          isBusy: state.isBusy,
-          onUnitChanged: view.callbacks.onRepeatUnitChanged,
-        ),
-        SizedBox(height: tokens.spacing.space2),
-        _DraftRepeatLeadDaysField(view: view),
-      ],
-    );
-  }
-}
-
-/// Preparation lead-days field hosted inside [_DraftRepeatCardBody].
-class _DraftRepeatLeadDaysField extends StatelessWidget {
-  /// Creates a [_DraftRepeatLeadDaysField].
-  const _DraftRepeatLeadDaysField({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final hasDueDate = view.hasDueDate;
-    return UiField(
-      kind: UiFieldKind.text,
-      controller: view.controllers.repeatLeadDays,
-      label: localizations.repeatLeadDaysLabel,
-      hintText: localizations.repeatLeadDaysHint,
-      helperText: hasDueDate
-          ? null
-          : localizations.inlineRepeatLeadNeedsDueHint,
-      keyboardType: TextInputType.number,
-      enabled: !view.state.isBusy && hasDueDate,
-      errorText: view.state.fieldErrors['repeatLeadDays'],
-      onChanged: (_) => view.callbacks.onClearFieldError('repeatLeadDays'),
-    );
-  }
-}
-
-/// Recurrence unit segmented control hosted inside [_DraftRepeatCardBody].
-class _DraftRepeatUnitControl extends StatelessWidget {
-  /// Creates a [_DraftRepeatUnitControl].
-  const _DraftRepeatUnitControl({
-    required this.unit,
-    required this.isBusy,
-    required this.onUnitChanged,
-  });
-
-  /// Whether draft creation is currently in flight.
-  final bool isBusy;
-
-  /// Callback notified when recurrence unit changes.
-  final ValueChanged<RepeatUnit> onUnitChanged;
-
-  /// Selected recurrence unit.
-  final RepeatUnit unit;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiSegmentedControl<RepeatUnit>(
-      segments: <UiSegment<RepeatUnit>>[
-        UiSegment<RepeatUnit>(
-          value: RepeatUnit.days,
-          label: localizations.repeatUnitDays,
-        ),
-        UiSegment<RepeatUnit>(
-          value: RepeatUnit.weeks,
-          label: localizations.repeatUnitWeeks,
-        ),
-        UiSegment<RepeatUnit>(
-          value: RepeatUnit.months,
-          label: localizations.repeatUnitMonths,
-        ),
-      ],
-      value: unit,
-      enabled: !isBusy,
-      semanticLabel: localizations.repeatFlagLabel,
-      onChanged: onUnitChanged,
+      child: TaskRepeatFields(
+        countController: view.controllers.repeatCount,
+        unit: state.repeatUnit,
+        leadDaysController: view.controllers.repeatLeadDays,
+        hasDueDate: view.hasDueDate,
+        countError: state.fieldErrors['repeatCount'],
+        leadError: state.fieldErrors['repeatLeadDays'],
+        isBusy: state.isBusy,
+        onCountChanged: (_) => callbacks.onClearFieldError('repeatCount'),
+        onLeadDaysChanged: (_) => callbacks.onClearFieldError('repeatLeadDays'),
+        onUnitChanged: callbacks.onRepeatUnitChanged,
+      ),
     );
   }
 }
@@ -1610,6 +905,35 @@ class _DraftSectionCloseButton extends StatelessWidget {
       density: UiButtonDensity.sidebarDesktop,
       tooltip: localizations.actionClose,
       onPressed: isBusy ? null : onClose,
+    );
+  }
+}
+
+/// Wraps an optional draft section body with an inline validation error message when present.
+class _DraftSectionErrorHost extends StatelessWidget {
+  /// Creates a [_DraftSectionErrorHost].
+  const _DraftSectionErrorHost({required this.errorText, required this.child});
+
+  /// Section body widget rendered above the optional error line.
+  final Widget child;
+
+  /// Optional section-level validation error message.
+  final String? errorText;
+
+  @override
+  Widget build(BuildContext context) {
+    final error = errorText;
+    if (error == null) {
+      return child;
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        child,
+        SizedBox(height: UiThemeTokens.of(context).spacing.space2),
+        EntityInlineErrorText(message: error),
+      ],
     );
   }
 }
@@ -1667,114 +991,6 @@ class _DraftSelectedLabelsWrap extends StatelessWidget {
   }
 }
 
-/// Bottom input and Add button bar hosted inside [_DraftSubtasksCardBody].
-class _DraftSubtaskAddBar extends StatelessWidget {
-  /// Creates a [_DraftSubtaskAddBar].
-  const _DraftSubtaskAddBar({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final isBusy = view.state.isBusy;
-    final onAdd = view.callbacks.onAddSubtask;
-
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: UiField(
-            key: const ValueKey<String>('draft_subtask_add_input'),
-            kind: UiFieldKind.text,
-            controller: view.controllers.newSubtask,
-            focusNode: view.controllers.newSubtaskFocusNode,
-            hintText: localizations.subtaskInputHint,
-            maxLength: maxTdfTextLength,
-            enabled: !isBusy,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => onAdd(),
-          ),
-        ),
-        const SizedBox(width: 8.0),
-        UiButton(
-          label: localizations.actionAdd,
-          variant: UiButtonVariant.secondary,
-          density: UiButtonDensity.compact,
-          tooltip: localizations.tooltipAddSubtask,
-          onPressed: isBusy ? null : onAdd,
-        ),
-      ],
-    );
-  }
-}
-
-/// Single editable subtask row hosted inside [_DraftSubtasksCardBody].
-class _DraftSubtaskRowItem extends StatelessWidget {
-  /// Creates a [_DraftSubtaskRowItem].
-  const _DraftSubtaskRowItem({
-    required this.row,
-    required this.isBusy,
-    required this.onToggleDone,
-  });
-
-  /// Whether draft creation is currently in flight.
-  final bool isBusy;
-
-  /// Callback toggling completion of this subtask row.
-  final VoidCallback onToggleDone;
-
-  /// Editable subtask row model.
-  final EditableSubtaskRow row;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return Row(
-      children: <Widget>[
-        TaskSubtaskCheckBoxButton(
-          checked: row.isCompleted,
-          enabled: !isBusy,
-          semanticLabel: row.controller.text,
-          onToggle: onToggleDone,
-        ),
-        const SizedBox(width: 6.0),
-        Expanded(
-          child: UiField(
-            kind: UiFieldKind.text,
-            controller: row.controller,
-            maxLength: maxTdfTextLength,
-            enabled: !isBusy,
-            semanticLabel: localizations.subtasksSectionTitle,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Auto-finish toggle footer hosted inside [_DraftSubtasksCardBody].
-class _DraftSubtasksAutoFinishToggle extends StatelessWidget {
-  /// Creates a [_DraftSubtasksAutoFinishToggle].
-  const _DraftSubtasksAutoFinishToggle({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiToggleRow(
-      label: localizations.subtasksAutoFinishLabel,
-      description: localizations.tooltipTaskEditorAutoFinish,
-      value: view.state.subtasksAutoFinish,
-      isDense: true,
-      enabled: !view.state.isBusy,
-      onChanged: view.callbacks.onAutoFinishChanged,
-    );
-  }
-}
-
 /// Optional Subtasks section hosted inside [TaskDraftCard].
 class _DraftSubtasksCard extends StatelessWidget {
   /// Creates a [_DraftSubtasksCard].
@@ -1817,35 +1033,24 @@ class _DraftSubtasksCardBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
     final state = view.state;
     final callbacks = view.callbacks;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        UiOrderedItemList<EditableSubtaskRow>(
-          items: state.subtaskRows,
-          itemKey: (row, index) =>
-              ValueKey<String>('draft_subtask_row_${row.rowId}'),
-          onReorder: state.isBusy ? null : callbacks.onReorderSubtasks,
-          onDelete: state.isBusy ? null : callbacks.onDeleteSubtask,
-          deleteTooltip: localizations.tooltipRemoveSubtask,
-          itemBuilder: (context, row, index, isEditing) => _DraftSubtaskRowItem(
-            row: row,
-            isBusy: state.isBusy,
-            onToggleDone: () => callbacks.onToggleSubtaskDone(index),
-          ),
-          addBar: _DraftSubtaskAddBar(view: view),
-          footer: _DraftSubtasksAutoFinishToggle(view: view),
-        ),
-        if (state.fieldErrors['subtasks'] case final error?) ...<Widget>[
-          SizedBox(height: tokens.spacing.space2),
-          EntityInlineErrorText(message: error),
-        ],
-      ],
+    return _DraftSectionErrorHost(
+      errorText: state.fieldErrors['subtasks'],
+      child: TaskSubtasksEditorBody(
+        rows: state.subtaskRows,
+        newStepController: view.controllers.newSubtask,
+        newStepFocusNode: view.controllers.newSubtaskFocusNode,
+        autoFinish: state.subtasksAutoFinish,
+        isBusy: state.isBusy,
+        itemKeyPrefix: 'draft_subtask_row',
+        addInputKey: const ValueKey<String>('draft_subtask_add_input'),
+        onReorder: callbacks.onReorderSubtasks,
+        onToggleRowDone: callbacks.onToggleSubtaskDone,
+        onDeleteRow: callbacks.onDeleteSubtask,
+        onAddRow: callbacks.onAddSubtask,
+        onAutoFinishChanged: callbacks.onAutoFinishChanged,
+      ),
     );
   }
 }
@@ -1861,273 +1066,29 @@ class _DraftSuspendedCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
+    final state = view.state;
+    final callbacks = view.callbacks;
+
     return UiCard.inset(
       key: const ValueKey<String>('draft_suspended_card'),
       headerIcon: Icons.pause_circle_outline_rounded,
       headerTitle: localizations.taskSuspendedLabel,
       headerTrailing: _DraftSectionCloseButton(
-        isBusy: view.state.isBusy,
-        onClose: () => view.callbacks.onCloseSection(TaskSectionKind.suspended),
+        isBusy: state.isBusy,
+        onClose: () => callbacks.onCloseSection(TaskSectionKind.suspended),
       ),
-      child: _DraftSuspendedCardBody(view: view),
-    );
-  }
-}
-
-/// Suspension mode, timestamp, and deferral note column inside [_DraftSuspendedCard].
-class _DraftSuspendedCardBody extends StatelessWidget {
-  /// Creates a [_DraftSuspendedCardBody].
-  const _DraftSuspendedCardBody({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final state = view.state;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _DraftSuspendedModeControl(
-          indefinitely: state.suspendedIndefinitely,
-          isBusy: state.isBusy,
-          onModeChanged: view.callbacks.onSuspendedModeChanged,
-        ),
-        if (!state.suspendedIndefinitely) ...<Widget>[
-          SizedBox(height: tokens.spacing.space2),
-          EntityHybridDateTimeField(
-            controller: view.controllers.suspendedUntil,
-            label: localizations.taskSuspendedUntilLabel,
-            fallbackLocalDateTime: state.currentLocalDateTimeHint,
-            enabled: !state.isBusy,
-            errorText: state.fieldErrors['suspended'],
-            onChanged: (_) => view.callbacks.onClearFieldError('suspended'),
-          ),
-        ],
-        SizedBox(height: tokens.spacing.space2),
-        _DraftSuspendedNoteField(view: view),
-      ],
-    );
-  }
-}
-
-/// Timed versus indefinite suspension segmented control inside [_DraftSuspendedCardBody].
-class _DraftSuspendedModeControl extends StatelessWidget {
-  /// Creates a [_DraftSuspendedModeControl].
-  const _DraftSuspendedModeControl({
-    required this.indefinitely,
-    required this.isBusy,
-    required this.onModeChanged,
-  });
-
-  /// Whether indefinite suspension is selected.
-  final bool indefinitely;
-
-  /// Whether draft creation is currently in flight.
-  final bool isBusy;
-
-  /// Callback toggling between timed (`false`) and indefinite (`true`) suspension.
-  final ValueChanged<bool> onModeChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiSegmentedControl<bool>(
-      segments: <UiSegment<bool>>[
-        UiSegment<bool>(
-          value: false,
-          label: localizations.suspendedUntilModeLabel,
-        ),
-        UiSegment<bool>(
-          value: true,
-          label: localizations.suspendedForeverModeLabel,
-        ),
-      ],
-      value: indefinitely,
-      enabled: !isBusy,
-      semanticLabel: localizations.taskSuspendedLabel,
-      onChanged: onModeChanged,
-    );
-  }
-}
-
-/// Deferral note multiline field hosted inside [_DraftSuspendedCardBody].
-class _DraftSuspendedNoteField extends StatelessWidget {
-  /// Creates a [_DraftSuspendedNoteField].
-  const _DraftSuspendedNoteField({required this.view});
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    return UiField(
-      kind: UiFieldKind.multiline,
-      controller: view.controllers.suspendedNote,
-      label: localizations.taskSuspendedNoteLabel,
-      hintText: localizations.taskSuspendedNoteHint,
-      maxLength: maxTdfNoteLength,
-      minLines: 2,
-      maxLines: 4,
-      enabled: !view.state.isBusy,
-      errorText: view.state.fieldErrors['suspendedNote'],
-      onChanged: (_) => view.callbacks.onClearFieldError('suspendedNote'),
-    );
-  }
-}
-
-/// Time-of-day condition dimension selector and time windows editor inside [_DraftConditionsControls].
-class _DraftTimeConditionSection extends StatelessWidget {
-  /// Creates a [_DraftTimeConditionSection].
-  const _DraftTimeConditionSection({required this.view, required this.enabled});
-
-  /// Whether time condition controls accept interaction.
-  final bool enabled;
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    final draft = view.state.conditionDraft;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _DraftDimensionSelector(
-          label: localizations.conditionTimeGroupTitle,
-          mode: draft.timeMode,
-          anyLabel: localizations.conditionTimeAnyLabel,
-          enabled: enabled,
-          onModeChanged: (mode) => view.callbacks.onConditionDraftChanged(
-            draft.copyWith(timeMode: mode),
-          ),
-        ),
-        if (draft.timeMode == ConditionDimensionMode.custom) ...<Widget>[
-          SizedBox(height: tokens.spacing.space2),
-          _DraftTimeWindowsEditor(view: view, enabled: enabled),
-        ],
-      ],
-    );
-  }
-}
-
-/// `HH:MM` start/end add bar hosted inside [_DraftTimeWindowsEditor].
-class _DraftTimeWindowAddBar extends StatelessWidget {
-  /// Creates a [_DraftTimeWindowAddBar].
-  const _DraftTimeWindowAddBar({required this.view, required this.enabled});
-
-  /// Whether inputs and add button accept interaction.
-  final bool enabled;
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        _DraftTimeWindowAddFields(view: view, enabled: enabled),
-        if (view.state.timeInputError case final error?) ...<Widget>[
-          SizedBox(height: tokens.spacing.space1),
-          EntityInlineErrorText(message: error),
-        ],
-        SizedBox(height: tokens.spacing.space2),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: UiButton(
-            label: localizations.tooltipAddTimeCondition,
-            variant: UiButtonVariant.secondary,
-            density: UiButtonDensity.compact,
-            onPressed: enabled ? view.callbacks.onAddTimeWindow : null,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Responsive start and end `HH:MM` fields grid hosted inside [_DraftTimeWindowAddBar].
-class _DraftTimeWindowAddFields extends StatelessWidget {
-  /// Creates a [_DraftTimeWindowAddFields].
-  const _DraftTimeWindowAddFields({required this.view, required this.enabled});
-
-  /// Whether time inputs accept interaction.
-  final bool enabled;
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-    return UiResponsiveGrid(
-      preset: UiGridPreset.twoColumnCompactCollapse,
-      spacing: tokens.spacing.space2,
-      runSpacing: tokens.spacing.space2,
-      children: <Widget>[
-        EntityHybridTimeField(
-          controller: view.controllers.timeStart,
-          hintText: localizations.conditionTimeStartHint,
-          enabled: enabled,
-        ),
-        EntityHybridTimeField(
-          controller: view.controllers.timeEnd,
-          hintText: localizations.conditionTimeEndHint,
-          enabled: enabled,
-          onSubmitted: (_) => view.callbacks.onAddTimeWindow(),
-        ),
-      ],
-    );
-  }
-}
-
-/// Time windows list and `HH:MM` add bar hosted inside [_DraftTimeConditionSection].
-class _DraftTimeWindowsEditor extends StatelessWidget {
-  /// Creates a [_DraftTimeWindowsEditor].
-  const _DraftTimeWindowsEditor({required this.view, required this.enabled});
-
-  /// Whether inputs and buttons accept interaction.
-  final bool enabled;
-
-  /// Shared draft card controllers, callbacks, and state snapshot.
-  final _DraftCardView view;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final tokens = UiThemeTokens.of(context);
-
-    return UiOrderedItemList<TimeWindowDraft>(
-      items: view.state.conditionDraft.timeWindows,
-      itemKey: (window, index) => ValueKey<String>(
-        'draft_time_window_${index}_${window.start}_${window.end}',
+      child: TaskSuspendedFields(
+        indefinitely: state.suspendedIndefinitely,
+        untilController: view.controllers.suspendedUntil,
+        noteController: view.controllers.suspendedNote,
+        currentLocalDateTimeHint: state.currentLocalDateTimeHint,
+        untilError: state.fieldErrors['suspended'],
+        noteError: state.fieldErrors['suspendedNote'],
+        isBusy: state.isBusy,
+        onModeChanged: callbacks.onSuspendedModeChanged,
+        onUntilChanged: (_) => callbacks.onClearFieldError('suspended'),
+        onNoteChanged: (_) => callbacks.onClearFieldError('suspendedNote'),
       ),
-      onDelete: enabled
-          ? (window, index) => view.callbacks.onRemoveTimeWindow(index)
-          : null,
-      deleteTooltip: localizations.tooltipRemoveTimeCondition,
-      itemBuilder: (context, window, index, isEditing) => Text(
-        '${window.start} - ${window.end}',
-        style: UiTypographyTokens.mono(
-          tokens.typography.monoSmall.copyWith(color: tokens.colors.ink),
-        ),
-      ),
-      addBar: _DraftTimeWindowAddBar(view: view, enabled: enabled),
     );
   }
 }
@@ -2145,7 +1106,6 @@ class _DraftTitleField extends StatelessWidget {
     final localizations = AppLocalizations.of(context);
     return UiField(
       key: const ValueKey<String>('task_draft_title_input'),
-      kind: UiFieldKind.text,
       controller: view.controllers.title,
       hintText: localizations.taskNameLabel,
       maxLength: maxTdfTextLength,
@@ -2263,53 +1223,6 @@ class _DraftViewState {
   final String? timeInputError;
 }
 
-/// Selectable Mon..Sun weekday pills wrap hosted inside [_DraftDayConditionSection].
-class _DraftWeekdaysWrap extends StatelessWidget {
-  /// Creates a [_DraftWeekdaysWrap].
-  const _DraftWeekdaysWrap({
-    required this.selectedWeekdays,
-    required this.enabled,
-    required this.onToggleWeekday,
-  });
-
-  /// Whether weekday chips accept taps.
-  final bool enabled;
-
-  /// Callback toggling an ISO weekday (`1..7`).
-  final ValueChanged<int> onToggleWeekday;
-
-  /// Currently selected ISO weekdays.
-  final List<int> selectedWeekdays;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    final labels = <String>[
-      localizations.weekdayMon,
-      localizations.weekdayTue,
-      localizations.weekdayWed,
-      localizations.weekdayThu,
-      localizations.weekdayFri,
-      localizations.weekdaySat,
-      localizations.weekdaySun,
-    ];
-    return Wrap(
-      spacing: 6.0,
-      runSpacing: 6.0,
-      children: <Widget>[
-        for (var i = 0; i < labels.length; i++)
-          UiPill(
-            label: labels[i],
-            variant: UiPillVariant.selectable,
-            isSelected: selectedWeekdays.contains(i + 1),
-            enabled: enabled,
-            onPressed: enabled ? () => onToggleWeekday(i + 1) : null,
-          ),
-      ],
-    );
-  }
-}
-
 /// Composed vertical body of [TaskDraftCard] keeping [_TaskDraftCardState.build] concise.
 class _TaskDraftCardBody extends StatelessWidget {
   /// Creates a [_TaskDraftCardBody].
@@ -2320,6 +1233,7 @@ class _TaskDraftCardBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final localizations = AppLocalizations.of(context);
     final state = view.state;
     final callbacks = view.callbacks;
     final showLabelsSection =
@@ -2332,9 +1246,11 @@ class _TaskDraftCardBody extends StatelessWidget {
       children: <Widget>[
         _DraftTitleField(view: view),
         SizedBox(height: state.spacing),
-        _DraftPlacementCard(
+        TaskPlacementCard(
+          cardKey: const ValueKey<String>('draft_placement_card'),
           placement: state.placement,
           isBusy: state.isBusy,
+          caption: _placementHint(state.placement, localizations),
           onChanged: callbacks.onPlacementChanged,
         ),
         if (showLabelsSection) ...<Widget>[
@@ -2360,6 +1276,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   late final _DraftCallbacks _callbacks;
   late final _DraftControllers _controllers;
   final Set<TaskSectionKind> _openSections = <TaskSectionKind>{};
+  final List<EditableSubtaskRow> _pendingDisposals = <EditableSubtaskRow>[];
   final Set<String> _selectedPrerequisiteIds = <String>{};
   final List<EditableSubtaskRow> _subtaskRows = <EditableSubtaskRow>[];
 
@@ -2368,6 +1285,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
   bool _dueAutoPrioritize = true;
   int? _editingLinkIndex;
   Map<String, String> _fieldErrors = const <String, String>{};
+  bool _isDisposalScheduled = false;
   bool _isSubmitting = false;
   bool _labelPickerOpen = false;
   String? _linkInputError;
@@ -2421,6 +1339,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
 
   @override
   void dispose() {
+    _flushPendingDisposals();
     _controllers.dispose();
     for (final row in _subtaskRows) {
       row.dispose();
@@ -2516,6 +1435,31 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
         timeInputError: _timeInputError,
       ),
     );
+  }
+
+  /// Queues a removed [row] for post-frame disposal after its draft field detaches.
+  void _enqueueDisposal(EditableSubtaskRow row) {
+    _pendingDisposals.add(row);
+    if (_isDisposalScheduled) {
+      return;
+    }
+    _isDisposalScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _flushPendingDisposals();
+    });
+  }
+
+  /// Disposes all queued draft subtask row controllers after the frame or during unmount.
+  void _flushPendingDisposals() {
+    _isDisposalScheduled = false;
+    if (_pendingDisposals.isEmpty) {
+      return;
+    }
+    final rows = List<EditableSubtaskRow>.of(_pendingDisposals);
+    _pendingDisposals.clear();
+    for (final row in rows) {
+      row.dispose();
+    }
   }
 
   /// Appends a new editable subtask row and refocuses the new-subtask input.
@@ -2663,26 +1607,28 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       _submitError = null;
       _fieldErrors = const <String, String>{};
     });
-    final result = await ref
-        .read(boardActionsProvider.notifier)
-        .createTaskDraft(input, locale: Localizations.localeOf(context));
-    if (!mounted) {
-      return;
-    }
-    switch (result) {
-      case ActionSucceeded():
+    try {
+      final result = await ref
+          .read(boardActionsProvider.notifier)
+          .createTaskDraft(input, locale: Localizations.localeOf(context));
+      if (!mounted) {
+        return;
+      }
+      switch (result) {
+        case ActionSucceeded():
+          break;
+        case ActionValidationFailed(:final message, :final fieldErrors):
+          setState(() {
+            _fieldErrors = fieldErrors;
+            _submitError = message;
+          });
+        case ActionPersistFailed(:final message):
+          setState(() => _submitError = message);
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isSubmitting = false);
-      case ActionValidationFailed(:final message, :final fieldErrors):
-        setState(() {
-          _isSubmitting = false;
-          _fieldErrors = fieldErrors;
-          _submitError = message;
-        });
-      case ActionPersistFailed(:final message):
-        setState(() {
-          _isSubmitting = false;
-          _submitError = message;
-        });
+      }
     }
   }
 
@@ -2695,7 +1641,6 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       currentCount: _draftLinks.length,
       localizations: AppLocalizations.of(context),
       isEditingExisting: editingIndex != null,
-      isLabel: false,
     );
     if (error != null) {
       setState(() => _linkInputError = error);
@@ -2780,13 +1725,13 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
     });
   }
 
-  /// Removes and disposes a subtask row at [index].
+  /// Removes a subtask row at [index] and defers disposing its controller.
   void _handleDeleteSubtask(EditableSubtaskRow row, int index) {
     if (index < 0 || index >= _subtaskRows.length) {
       return;
     }
     final removed = _subtaskRows.removeAt(index);
-    removed.dispose();
+    _enqueueDisposal(removed);
     setState(() {});
   }
 
@@ -2850,7 +1795,6 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
       showCompactLabelPickerSheet(
         context,
         title: localizations.taskLabelsSectionTitle,
-        taskId: null,
         initialSelectedLabelIds: Set<String>.of(_selectedLabelIds),
         onToggleLabel: _handleToggleLabel,
         onCreateLabel: _handleCreateAndAssignLabel,
@@ -2975,7 +1919,7 @@ class _TaskDraftCardState extends ConsumerState<TaskDraftCard> {
         _linkInputError = null;
       case TaskSectionKind.subtasks:
         for (final row in _subtaskRows) {
-          row.dispose();
+          _enqueueDisposal(row);
         }
         _subtaskRows.clear();
         _controllers.newSubtask.clear();
@@ -3094,16 +2038,6 @@ bool _equalStringLists(List<String> left, List<String> right) {
     }
   }
   return true;
-}
-
-/// Parses a serialized [ConditionDimensionMode] name safely without unchecked casts.
-ConditionDimensionMode? _parseConditionDimensionMode(String value) {
-  for (final mode in ConditionDimensionMode.values) {
-    if (mode.name == value) {
-      return mode;
-    }
-  }
-  return null;
 }
 
 /// Returns the localized helper caption for [placement].

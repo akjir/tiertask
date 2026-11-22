@@ -80,7 +80,6 @@ class EntityHybridDateTimeField extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     return UiField(
-      kind: UiFieldKind.text,
       controller: controller,
       focusNode: focusNode,
       label: label,
@@ -196,7 +195,6 @@ class EntityHybridTimeField extends StatelessWidget {
   Widget build(BuildContext context) {
     final localizations = AppLocalizations.of(context);
     return UiField(
-      kind: UiFieldKind.text,
       controller: controller,
       label: label,
       hintText: hintText ?? 'HH:MM',

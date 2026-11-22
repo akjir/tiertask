@@ -196,7 +196,6 @@ class _LocationStatusModalBody extends StatelessWidget {
               localizations,
             ),
             icon: UiDomainMappers.locationIcon(locationState.status),
-            variant: UiPillVariant.badge,
             tone: _locationStatusPillTone(locationState.status),
           ),
         ),
@@ -250,7 +249,6 @@ class _LocationStatusModalFooter extends StatelessWidget {
           key: const ValueKey<String>('location_status_refresh_button'),
           label: localizations.actionRefresh,
           leadingIcon: Icons.refresh_rounded,
-          variant: UiButtonVariant.secondary,
           density: UiButtonDensity.compact,
           isLoading: isRefreshing,
           onPressed: (isRefreshing || isBusy) ? null : onRefresh,
@@ -286,7 +284,6 @@ class _LocationStatusModalState extends ConsumerState<_LocationStatusModal> {
     return UiDialogFrame(
       key: const ValueKey<String>('location_status_modal'),
       title: localizations.locationDialogTitle,
-      size: UiDialogSize.medium,
       closeTooltip: localizations.actionClose,
       onClose: widget.onClose,
       body: _LocationStatusModalBody(

@@ -27,7 +27,7 @@ import 'package:tiertask/services/tdf_service.dart';
 
 void main() {
   const tdfService = TdfService();
-  final fixedDate = DateTime.utc(2026, 11, 1, 12, 0);
+  final fixedDate = DateTime.utc(2026, 11, 1, 12);
 
   group('TaskBoard Task & Label Mutations, Validation & Dependency Cycles', () {
     test(
@@ -126,7 +126,7 @@ void main() {
         subtasksAutoFinish: true,
         subtasks: const [
           SubtaskItem(title: 'Prepare nodes', isCompleted: true),
-          SubtaskItem(title: 'Bootstrap control plane', isCompleted: false),
+          SubtaskItem(title: 'Bootstrap control plane'),
         ],
         currentDate: fixedDate,
       );
@@ -198,17 +198,6 @@ void main() {
         ),
       );
       expect(TimeWindowTaskCondition.tryParse('09:00', '09:00'), isNull);
-      expect(
-        LocationTaskCondition.tryParse('50.9787', '11.0328', '150'),
-        equals(
-          const LocationTaskCondition(
-            latitude: 50.9787,
-            longitude: 11.0328,
-            radiusMeters: 150.0,
-          ),
-        ),
-      );
-      expect(LocationTaskCondition.tryParse('95.0', '11.0328', '150'), isNull);
 
       var board = TaskBoard(
         locations: const [
@@ -234,7 +223,7 @@ void main() {
         ],
       );
 
-      final futureSuspend = DateTime.utc(2026, 11, 5, 9, 0);
+      final futureSuspend = DateTime.utc(2026, 11, 5, 9);
       board = board.addTask(
         'Suspended Task With Satisfied Condition Any',
         targetTier: TaskTier.someday,
@@ -362,7 +351,7 @@ label officeOkD2 {
         currentDate: fixedDate,
       );
       board = board.addLabel(
-        'IT & Servers',
+        'Ops & Monitoring',
         color: '#4CAF50',
         currentDate: fixedDate,
       );
@@ -416,7 +405,7 @@ label officeOkD2 {
       );
       expect(
         board.sortedLabels.map((label) => label.name),
-        equals(['Home Office', 'IT & Servers']),
+        equals(['Home Office', 'Ops & Monitoring']),
       );
       expect(board.findLabel(thirdLabelId)?.name, equals('Home Office'));
       expect(board.hasDuplicateLabelName('  home office  '), isTrue);
@@ -488,7 +477,7 @@ label officeOkD2 {
         subtasksAutoFinish: true,
         subtasks: const [
           SubtaskItem(title: 'Check disk health', isCompleted: true),
-          SubtaskItem(title: 'Rotate logs', isCompleted: false),
+          SubtaskItem(title: 'Rotate logs'),
         ],
       );
       final taskId = board.focus.single.id;
@@ -501,12 +490,12 @@ label officeOkD2 {
       final rescheduled = board.findTask(taskId)!;
       expect(rescheduled.isCompleted, isFalse);
       expect(rescheduled.isPriority, isTrue);
-      expect(rescheduled.suspendedAt, equals(DateTime.utc(2026, 11, 8, 0, 0)));
+      expect(rescheduled.suspendedAt, equals(DateTime.utc(2026, 11, 8)));
       expect(board.queueTaskIds, equals([taskId]));
       expect(rescheduled.modifiedAt, equals(toggleTime));
       expect(rescheduled.subtasks.every((step) => !step.isCompleted), isTrue);
 
-      final manualUnblockTime = DateTime.utc(2026, 11, 3, 10, 0);
+      final manualUnblockTime = DateTime.utc(2026, 11, 3, 10);
       board = board.updateTask(
         taskId,
         clearSuspendedAt: true,
@@ -672,14 +661,14 @@ label officeOkD2 {
         currentDate: fixedDate,
       );
 
-      final dueDate = DateTime.utc(2026, 11, 15, 17, 0);
+      final dueDate = DateTime.utc(2026, 11, 15, 17);
       const origin = TaskOrigin(namespace: 'caldav', externalKey: 'uid-12345');
       board = board.addTask(
         'Scoped Priority Task',
         id: 'tScpPri001',
         targetTier: TaskTier.focus,
         isPriority: true,
-        suspendedAt: DateTime.utc(2026, 11, 10, 9, 0),
+        suspendedAt: DateTime.utc(2026, 11, 10, 9),
         dueAt: dueDate,
         origin: origin,
         labelIds: const ['lblScoped1'],
@@ -730,7 +719,7 @@ label officeOkD2 {
       );
       expect(
         afterScopedDelete.suspendedAt,
-        equals(DateTime.utc(2026, 11, 10, 9, 0)),
+        equals(DateTime.utc(2026, 11, 10, 9)),
         reason: 'Section 6.8.1: Deleting the last scoped label must preserve suspended',
       );
       expect(
@@ -920,7 +909,6 @@ label officeOkD2 {
 
       board = board.addTask(
         'Deploy Release',
-        targetTier: TaskTier.planned,
         suspendedAt: fixedDate.add(const Duration(hours: 4)),
         suspendedNote: 'Secret freeze note\tline 2',
         dueAt: fixedDate.add(const Duration(hours: 12)),
@@ -958,7 +946,7 @@ label officeOkD2 {
       );
 
       // History CRUD + strict no-op revision protection:
-      final histTime = DateTime.utc(2026, 11, 1, 9, 30, 0);
+      final histTime = DateTime.utc(2026, 11, 1, 9, 30);
       final t2 = fixedDate.add(const Duration(minutes: 2));
       board = board.addTaskHistoryEntry(
         taskId,
@@ -1133,11 +1121,10 @@ label officeOkD2 {
     });
 
     test('resets isDuePassive to false on explicit priority promotion in updateTask per Section 6.6 while honoring explicit overrides', () {
-      final t0 = DateTime.utc(2026, 11, 15, 10, 0);
-      final dueTime = DateTime.utc(2026, 11, 20, 12, 0);
+      final t0 = DateTime.utc(2026, 11, 15, 10);
+      final dueTime = DateTime.utc(2026, 11, 20, 12);
       var board = TaskBoard.empty().addTask(
         'Passive Deadline Task',
-        targetTier: TaskTier.planned,
         dueAt: dueTime,
         isDuePassive: true,
         dueNote: 'Cutoff',
@@ -1217,14 +1204,14 @@ label officeOkD2 {
   group('TDF 0.8.0 Local Calendar Scheduling Inputs (TDF-CAL-001), dueAnchor & Bound Enforcement', () {
     test('resolves dueLocalInput and suspendedLocalInput across CET/CEST gap & fold, manages dueAnchor/isDuePassive/no-op invariants, and enforces queue/deleted bounds', () {
       final berlin = TdfTimeZoneContext.named('Europe/Berlin');
-      final t0 = DateTime.utc(2026, 1, 15, 9, 0);
+      final t0 = DateTime.utc(2026, 1, 15, 9);
 
       // 1. Winter CET (UTC+1) dueLocalInput + Someday queue exclusion (TDF-MUT-008):
       var board = TaskBoard.empty().addTask(
         'Someday Winter Deadline',
         id: 'someDue001',
         targetTier: TaskTier.someday,
-        dueLocalInput: TdfLocalDateTime(2026, 1, 31, 18, 0, 0),
+        dueLocalInput: TdfLocalDateTime(2026, 1, 31, 18),
         dueNote: 'Month-end cutoff',
         currentDate: t0,
         timeZone: berlin,
@@ -1232,13 +1219,10 @@ label officeOkD2 {
       final someDue = board.findTask('someDue001')!;
       expect(
         someDue.dueAt,
-        equals(DateTime.utc(2026, 1, 31, 17, 0, 0)),
+        equals(DateTime.utc(2026, 1, 31, 17)),
         reason: 'CET (UTC+1) 18:00 local must resolve to 17:00 UTC',
       );
-      expect(
-        someDue.dueAnchor,
-        equals(TdfLocalDateTime(2026, 1, 31, 18, 0, 0)),
-      );
+      expect(someDue.dueAnchor, equals(TdfLocalDateTime(2026, 1, 31, 18)));
       expect(
         board.queueTaskIds,
         isNot(contains('someDue001')),
@@ -1249,7 +1233,7 @@ label officeOkD2 {
       final t1 = t0.add(const Duration(minutes: 5));
       board = board.updateTask(
         'someDue001',
-        dueLocalInput: TdfLocalDateTime(2026, 3, 29, 2, 30, 0),
+        dueLocalInput: TdfLocalDateTime(2026, 3, 29, 2, 30),
         isDuePassive: true,
         currentDate: t1,
         timeZone: berlin,
@@ -1257,12 +1241,12 @@ label officeOkD2 {
       final gapDue = board.findTask('someDue001')!;
       expect(
         gapDue.dueAt,
-        equals(DateTime.utc(2026, 3, 29, 1, 30, 0)),
+        equals(DateTime.utc(2026, 3, 29, 1, 30)),
         reason: 'TDF-CAL-001: spring-forward gap applies pre-gap UTC+1 offset',
       );
       expect(
         gapDue.dueAnchor,
-        equals(TdfLocalDateTime(2026, 3, 29, 2, 30, 0)),
+        equals(TdfLocalDateTime(2026, 3, 29, 2, 30)),
         reason: 'dueAnchor retains unshifted intended 02:30 local clock',
       );
       expect(gapDue.isDuePassive, isTrue);
@@ -1276,14 +1260,14 @@ label officeOkD2 {
       final t2 = t1.add(const Duration(minutes: 5));
       board = board.updateTask(
         'someDue001',
-        suspendedLocalInput: TdfLocalDateTime(2026, 10, 25, 2, 30, 0),
+        suspendedLocalInput: TdfLocalDateTime(2026, 10, 25, 2, 30),
         currentDate: t2,
         timeZone: berlin,
       );
       final foldSusp = board.findTask('someDue001')!;
       expect(
         foldSusp.suspendedAt,
-        equals(DateTime.utc(2026, 10, 25, 0, 30, 0)),
+        equals(DateTime.utc(2026, 10, 25, 0, 30)),
         reason:
             'TDF-CAL-001: autumn fold selects earliest occurrence (CEST UTC+2)',
       );
@@ -1298,13 +1282,13 @@ label officeOkD2 {
         'Summer Someday Task',
         id: 'sumSome001',
         targetTier: TaskTier.someday,
-        dueLocalInput: TdfLocalDateTime(2026, 7, 15, 12, 0, 0),
+        dueLocalInput: TdfLocalDateTime(2026, 7, 15, 12),
         currentDate: t2,
         timeZone: berlin,
       );
       expect(
         board.findTask('sumSome001')!.dueAt,
-        equals(DateTime.utc(2026, 7, 15, 10, 0, 0)),
+        equals(DateTime.utc(2026, 7, 15, 10)),
         reason: 'CEST (UTC+2) 12:00 local must resolve to 10:00 UTC',
       );
       expect(board.queueTaskIds, isNot(contains('sumSome001')));
@@ -1364,14 +1348,14 @@ label officeOkD2 {
       // Changing dueAnchor alone resets isDuePassive to false and advances modifiedAt once:
       board = board.updateTask(
         'someDue001',
-        dueAnchor: TdfLocalDateTime(2026, 3, 31, 2, 30, 0),
+        dueAnchor: TdfLocalDateTime(2026, 3, 31, 2, 30),
         currentDate: t3,
         timeZone: berlin,
       );
       final anchorEdited = board.findTask('someDue001')!;
       expect(
         anchorEdited.dueAnchor,
-        equals(TdfLocalDateTime(2026, 3, 31, 2, 30, 0)),
+        equals(TdfLocalDateTime(2026, 3, 31, 2, 30)),
       );
       expect(
         anchorEdited.isDuePassive,
@@ -1396,7 +1380,7 @@ label officeOkD2 {
       expect(board.findTask('someDue001')!.isDuePassive, isTrue);
       expect(
         board.findTask('someDue001')!.dueAnchor,
-        equals(TdfLocalDateTime(2026, 3, 31, 2, 30, 0)),
+        equals(TdfLocalDateTime(2026, 3, 31, 2, 30)),
       );
 
       final t5 = t4.add(const Duration(minutes: 5));
@@ -1417,7 +1401,7 @@ label officeOkD2 {
       board = board
           .updateTask(
             'someDue001',
-            dueAnchor: TdfLocalDateTime(2026, 3, 29, 3, 30, 0),
+            dueAnchor: TdfLocalDateTime(2026, 3, 29, 3, 30),
             isDuePassive: true,
             currentDate: t6,
             timeZone: berlin,
@@ -1438,7 +1422,7 @@ label officeOkD2 {
       expect(
         () => board.addTask(
           'Missing Zone Local Input',
-          dueLocalInput: TdfLocalDateTime(2026, 5, 1, 10, 0),
+          dueLocalInput: TdfLocalDateTime(2026, 5, 1, 10),
           currentDate: t6,
           timeZone: const TdfTimeZoneContext.missing('Mars/Phobos'),
         ),
@@ -1453,7 +1437,7 @@ label officeOkD2 {
       expect(
         () => board.addTask(
           'Underflow 0001 Local Input',
-          dueLocalInput: TdfLocalDateTime(1, 1, 1, 0, 0, 0),
+          dueLocalInput: TdfLocalDateTime(1, 1, 1),
           currentDate: t6,
           timeZone: berlin,
         ),
@@ -1504,7 +1488,6 @@ label officeOkD2 {
           TaskItem(id: 'delOverflow', title: 'Overflow Del', createdAt: t0),
         ],
         deletedBlock: TdfDeletedBlock(
-          generation: 0,
           tasks: <TdfDeletedTaskRecord>[
             for (var i = 0; i < maxTdfDeletedRecords; i++)
               TdfDeletedTaskRecord(
@@ -1530,7 +1513,7 @@ label officeOkD2 {
     });
 
     test('deleteLabel evicts queued scoped tasks in one queue.modified tick and preserves isPriority on unqueued or completed tasks', () {
-      final t0 = DateTime.utc(2026, 7, 1, 10, 0, 0);
+      final t0 = DateTime.utc(2026, 7, 1, 10);
       final t1 = t0.add(const Duration(seconds: 10));
       const scopedLabel = TdfLabel(
         id: 'lblScpDel1',
@@ -1604,7 +1587,7 @@ label officeOkD2 {
     });
 
     test('updateTask enforces maxTdfCompletions on completion transition and maxTdfArgsPerStmt on dependencies', () {
-      final t0 = DateTime.utc(2026, 7, 2, 10, 0, 0);
+      final t0 = DateTime.utc(2026, 7, 2, 10);
       final t1 = t0.add(const Duration(minutes: 1));
       final maxOpen = TaskItem(
         id: 'maxComp001',
@@ -1613,9 +1596,7 @@ label officeOkD2 {
         createdAt: t0,
         modifiedAt: t0,
         subtasksAutoFinish: true,
-        subtasks: const <SubtaskItem>[
-          SubtaskItem(title: 'Last Step', isCompleted: false),
-        ],
+        subtasks: const <SubtaskItem>[SubtaskItem(title: 'Last Step')],
       );
       final maxDone = TaskItem(
         id: 'maxDone001',
@@ -1686,8 +1667,7 @@ label officeOkD2 {
       ];
       final sixtyFiveIds = <String>[...sixtyFourIds, 'dep0064Ok1'];
       final sixtyFiveDeps = <TdfTaskDependency>[
-        for (final id in sixtyFiveIds)
-          TdfTaskDependency(taskId: id, requiredCompletion: 1),
+        for (final id in sixtyFiveIds) TdfTaskDependency(taskId: id),
       ];
 
       final atLimit = board.addTask(
@@ -1753,7 +1733,7 @@ label officeOkD2 {
     });
 
     test('deleteLocation aggregates multiple LocationTaskCondition objects without emitting mixed location any + concrete id', () {
-      final t0 = DateTime.utc(2026, 7, 3, 10, 0, 0);
+      final t0 = DateTime.utc(2026, 7, 3, 10);
       final t1 = t0.add(const Duration(minutes: 1));
       const locA = TdfLocation(
         id: 'locDelA001',
@@ -1825,6 +1805,456 @@ label officeOkD2 {
           GroupResetTaskCondition(targetGroup: ConditionGroup.location),
         ]),
         reason: 'When all LocationTaskCondition objects become empty, emit exactly one location any reset',
+      );
+    });
+
+    test('rejects colliding explicit task IDs in addTask and duplicate label names in addLabel symmetrically', () {
+      final t0 = DateTime.utc(2026, 11, 1, 9);
+      final t1 = DateTime.utc(2026, 11, 1, 10);
+
+      // 1. addTask rejects explicit IDs colliding with live tasks or tombstoned tasks:
+      var board = TaskBoard.empty()
+          .addTask('Live Task', id: 'taskLive01', currentDate: t0)
+          .addTask('Doomed Task', id: 'taskDead01', currentDate: t0)
+          .deleteTask('taskDead01', currentDate: t1);
+      expect(
+        board.allTasks.map((task) => task.id),
+        equals(<String>['taskLive01']),
+      );
+      expect(board.deletedBlock.findTaskRecord('taskDead01'), isNotNull);
+
+      final afterLiveCollision = board.addTask(
+        'Distinct Title Live Collision',
+        id: 'taskLive01',
+        currentDate: t1,
+      );
+      expect(
+        identical(afterLiveCollision, board),
+        isTrue,
+        reason: 'addTask must reject an explicit ID already present in board.allTasks',
+      );
+      expect(afterLiveCollision.allTasks.length, equals(1));
+
+      final afterTrimmedLiveCollision = board.addTask(
+        'Distinct Title Trimmed Live Collision',
+        id: '  taskLive01  ',
+        currentDate: t1,
+      );
+      expect(
+        identical(afterTrimmedLiveCollision, board),
+        isTrue,
+        reason:
+            'addTask must trim explicit IDs before checking live collisions',
+      );
+
+      final afterTombstoneCollision = board.addTask(
+        'Distinct Title Tombstone Collision',
+        id: 'taskDead01',
+        currentDate: t1,
+      );
+      expect(
+        identical(afterTombstoneCollision, board),
+        isTrue,
+        reason: 'addTask must reject an explicit ID already present in deletedBlock.tasks',
+      );
+      expect(afterTombstoneCollision.allTasks.length, equals(1));
+
+      // 2. addLabel rejects duplicate label names (case-insensitive trimmed equality, matching updateLabel):
+      board = board.addLabel('IT & Servers', id: 'lblIt00001', currentDate: t0);
+      expect(board.labels.length, equals(1));
+
+      for (final duplicateName in const <String>[
+        'IT & Servers',
+        'it & servers',
+        '  IT & SERVERS  ',
+      ]) {
+        final afterDupLabel = board.addLabel(
+          duplicateName,
+          color: '#4CAF50',
+          currentDate: t1,
+        );
+        expect(
+          identical(afterDupLabel, board),
+          isTrue,
+          reason: 'addLabel must reject duplicate label name "$duplicateName"',
+        );
+        expect(afterDupLabel.labels.length, equals(1));
+      }
+    });
+
+    test('updateTaskSubtasksAndComplete atomically updates subtasks and completes once for non-recurring and recurring tasks', () {
+      final t0 = DateTime.utc(2026, 7, 5, 9);
+      final t1 = DateTime.utc(2026, 7, 5, 10);
+
+      // 1. Non-recurring task with subtasksAutoFinish=true and all steps done completes once, strips blanks, unblocks dependents, and bumps modifiedAt once:
+      final regularTask = TaskItem(
+        id: 'cmpSub0001',
+        title: 'Release Checklist',
+        isPriority: true,
+        createdAt: t0,
+        modifiedAt: t0,
+        subtasks: const <SubtaskItem>[
+          SubtaskItem(title: 'Build', isCompleted: true),
+          SubtaskItem(title: 'Verify'),
+        ],
+      );
+      final dependentTask = TaskItem(
+        id: 'cmpDep0001',
+        title: 'Announce Release',
+        createdAt: t0,
+        modifiedAt: t0,
+        dependencies: const <TdfTaskDependency>[
+          TdfTaskDependency(taskId: 'cmpSub0001'),
+        ],
+      );
+      final board1 = TaskBoard.evaluate(
+        tasks: <TaskItem>[regularTask, dependentTask],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['cmpSub0001', 'cmpDep0001'],
+        ),
+        evaluationTime: t0,
+      );
+
+      final completedRegularBoard = board1.updateTaskSubtasksAndComplete(
+        'cmpSub0001',
+        subtasks: const <SubtaskItem>[
+          SubtaskItem(title: '  Build  ', isCompleted: true),
+          SubtaskItem(title: '   '),
+          SubtaskItem(title: 'Verify', isCompleted: true),
+        ],
+        subtasksAutoFinish: true,
+        currentDate: t1,
+      );
+      final completedRegular = completedRegularBoard.findTask('cmpSub0001')!;
+      expect(completedRegular.isCompleted, isTrue);
+      expect(completedRegular.completions, equals(1));
+      expect(completedRegular.completedAt, equals(t1));
+      expect(completedRegular.modifiedAt, equals(t1));
+      expect(completedRegular.subtasksAutoFinish, isTrue);
+      expect(
+        completedRegular.subtasks,
+        equals(const <SubtaskItem>[
+          SubtaskItem(title: 'Build', isCompleted: true),
+          SubtaskItem(title: 'Verify', isCompleted: true),
+        ]),
+      );
+      expect(
+        completedRegularBoard.queueTaskIds,
+        equals(<String>['cmpDep0001']),
+      );
+      expect(
+        completedRegularBoard.findTask('cmpDep0001')!.dependencies,
+        isEmpty,
+        reason:
+            'Atomic subtask completion must clean satisfied dependent blocks',
+      );
+
+      // 2. Recurring task with subtasksAutoFinish=true and all steps already completed completes ONCE (not twice!) and resets steps:
+      final recurringTask = TaskItem(
+        id: 'cmpRec0001',
+        title: 'Weekly Review',
+        createdAt: t0,
+        modifiedAt: t0,
+        repeatRule: const TaskRepeatRule(count: 1, unit: RepeatUnit.weeks),
+      );
+      final board2 = TaskBoard.evaluate(
+        tasks: <TaskItem>[recurringTask],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['cmpRec0001'],
+        ),
+        evaluationTime: t0,
+      );
+      final completedRecurringBoard = board2.updateTaskSubtasksAndComplete(
+        'cmpRec0001',
+        subtasks: const <SubtaskItem>[
+          SubtaskItem(title: 'Inbox', isCompleted: true),
+          SubtaskItem(title: 'Calendar', isCompleted: true),
+        ],
+        subtasksAutoFinish: true,
+        currentDate: t1,
+      );
+      final rescheduled = completedRecurringBoard.findTask('cmpRec0001')!;
+      expect(rescheduled.isCompleted, isFalse);
+      expect(
+        rescheduled.completions,
+        equals(1),
+        reason: 'Recurring task must increment completions exactly once even when all subtasks are already completed and subtasksAutoFinish is true',
+      );
+      expect(rescheduled.modifiedAt, equals(t1));
+      expect(rescheduled.subtasksAutoFinish, isTrue);
+      expect(
+        rescheduled.subtasks,
+        equals(const <SubtaskItem>[
+          SubtaskItem(title: 'Inbox'),
+          SubtaskItem(title: 'Calendar'),
+        ]),
+      );
+      expect(rescheduled.suspendedAt, isNotNull);
+      expect(
+        completedRecurringBoard.queueTaskIds,
+        equals(<String>['cmpRec0001']),
+      );
+
+      // 3. Missing or already-completed task returns original board unchanged:
+      expect(
+        identical(
+          completedRegularBoard.updateTaskSubtasksAndComplete(
+            'cmpSub0001',
+            subtasks: const <SubtaskItem>[],
+            subtasksAutoFinish: false,
+            currentDate: t1,
+          ),
+          completedRegularBoard,
+        ),
+        isTrue,
+      );
+      expect(
+        identical(
+          board1.updateTaskSubtasksAndComplete(
+            'missing001',
+            subtasks: const <SubtaskItem>[],
+            subtasksAutoFinish: false,
+            currentDate: t1,
+          ),
+          board1,
+        ),
+        isTrue,
+      );
+
+      // 4. Task at maxTdfCompletions throws TdfException(limitExceeded):
+      final maxTask = regularTask.copyWith(completions: maxTdfCompletions);
+      final maxBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[maxTask],
+        evaluationTime: t0,
+      );
+      expect(
+        () => maxBoard.updateTaskSubtasksAndComplete(
+          'cmpSub0001',
+          subtasks: const <SubtaskItem>[
+            SubtaskItem(title: 'Done', isCompleted: true),
+          ],
+          subtasksAutoFinish: true,
+          currentDate: t1,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+      );
+    });
+
+    test('createLabelAndAssignToTask atomically creates and assigns a label in board order and guards invalid inputs', () {
+      final t0 = DateTime.utc(2026, 7, 6, 9);
+      final t1 = DateTime.utc(2026, 7, 6, 10);
+      const existingLabel = TdfLabel(
+        id: 'lblExt0001',
+        name: 'Work',
+        color: '#2196F3',
+      );
+      final openTask = TaskItem(
+        id: 'tskAssg001',
+        title: 'Prepare Slides',
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: const <String>['lblExt0001'],
+      );
+      final doneTask = TaskItem(
+        id: 'tskDone001',
+        title: 'Old Task',
+        isCompleted: true,
+        completions: 1,
+        createdAt: t0,
+        completedAt: t0,
+        modifiedAt: t0,
+      );
+      final board = TaskBoard.evaluate(
+        tasks: <TaskItem>[openTask, doneTask],
+        labels: const <TdfLabel>[existingLabel],
+        deletedBlock: TdfDeletedBlock(
+          generation: 1,
+          labels: <TdfDeletedLabelRecord>[
+            TdfDeletedLabelRecord(labelId: 'lblDead001', deletedAt: t0),
+          ],
+        ),
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['tskAssg001'],
+        ),
+        evaluationTime: t0,
+      );
+
+      // 1. Happy path with explicit ID, normalized hex color, and trimmed name:
+      final created = board.createLabelAndAssignToTask(
+        taskId: 'tskAssg001',
+        name: '  Urgent  ',
+        color: 'ff5722',
+        id: 'lblNew0001',
+        currentDate: t1,
+      );
+      expect(created.label, isNotNull);
+      expect(created.label!.id, equals('lblNew0001'));
+      expect(created.label!.name, equals('Urgent'));
+      expect(created.label!.color, equals('#FF5722'));
+      expect(created.label!.modifiedAt, equals(t1));
+      expect(created.board.labels.length, equals(2));
+      final updatedTask = created.board.findTask('tskAssg001')!;
+      expect(
+        updatedTask.labelIds,
+        equals(<String>['lblExt0001', 'lblNew0001']),
+      );
+      expect(updatedTask.modifiedAt, equals(t1));
+
+      // 2. Auto-generated Base62 ID and scoped label hides otherwise unlabelled task from global view:
+      final unlabelledTask = TaskItem(
+        id: 'tskScp0001',
+        title: 'Secret Plan',
+        createdAt: t0,
+        modifiedAt: t0,
+      );
+      final scopedBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[unlabelledTask],
+        queueBlock: TdfQueueBlock(
+          modifiedAt: t0,
+          taskIds: const <String>['tskScp0001'],
+        ),
+        evaluationTime: t0,
+      );
+      final scopedCreated = scopedBoard.createLabelAndAssignToTask(
+        taskId: 'tskScp0001',
+        name: 'Private',
+        isScoped: true,
+        currentDate: t1,
+      );
+      expect(scopedCreated.label, isNotNull);
+      expect(isValidLabelId(scopedCreated.label!.id), isTrue);
+      expect(scopedCreated.label!.isScoped, isTrue);
+      expect(scopedCreated.board.focus, isEmpty);
+      expect(scopedCreated.board.findTask('tskScp0001'), isNotNull);
+      expect(
+        scopedCreated.board
+            .evaluateForContext(
+              activeLabelId: scopedCreated.label!.id,
+              evaluationTime: t1,
+            )
+            .focus
+            .map((item) => item.id),
+        equals(<String>['tskScp0001']),
+      );
+
+      // 3. Invalid targets/names/IDs return (board, null) with zero orphan labels:
+      final invalidCases =
+          <({String label, ({TaskBoard board, TdfLabel? label}) result})>[
+            (
+              label: 'missing task',
+              result: board.createLabelAndAssignToTask(
+                taskId: 'missing001',
+                name: 'Orphan',
+                currentDate: t1,
+              ),
+            ),
+            (
+              label: 'completed task',
+              result: board.createLabelAndAssignToTask(
+                taskId: 'tskDone001',
+                name: 'OrphanDone',
+                currentDate: t1,
+              ),
+            ),
+            (
+              label: 'blank name',
+              result: board.createLabelAndAssignToTask(
+                taskId: 'tskAssg001',
+                name: '   ',
+                currentDate: t1,
+              ),
+            ),
+            (
+              label: 'duplicate label name (case-insensitive)',
+              result: board.createLabelAndAssignToTask(
+                taskId: 'tskAssg001',
+                name: 'work',
+                currentDate: t1,
+              ),
+            ),
+            (
+              label: 'live ID collision',
+              result: board.createLabelAndAssignToTask(
+                taskId: 'tskAssg001',
+                name: 'Distinct',
+                id: 'lblExt0001',
+                currentDate: t1,
+              ),
+            ),
+            (
+              label: 'deleted tombstone ID collision',
+              result: board.createLabelAndAssignToTask(
+                taskId: 'tskAssg001',
+                name: 'Distinct2',
+                id: 'lblDead001',
+                currentDate: t1,
+              ),
+            ),
+          ];
+      for (final testCase in invalidCases) {
+        expect(
+          testCase.result.label,
+          isNull,
+          reason:
+              'createLabelAndAssignToTask must return null for ${testCase.label}',
+        );
+        expect(
+          identical(testCase.result.board, board),
+          isTrue,
+          reason:
+              'createLabelAndAssignToTask must return original board for ${testCase.label}',
+        );
+        expect(
+          testCase.result.board.labels.length,
+          equals(1),
+          reason:
+              'createLabelAndAssignToTask must not leave orphan labels for ${testCase.label}',
+        );
+      }
+
+      // 4. Exceeding maxTdfArgsPerStmt (64 labels) throws TdfException(limitExceeded):
+      final maxLabels = <TdfLabel>[
+        for (var i = 0; i < maxTdfArgsPerStmt; i++)
+          TdfLabel(
+            id: 'lbl${i.toString().padLeft(4, '0')}OkD',
+            name: 'Label $i',
+          ),
+      ];
+      final fullLabelTask = TaskItem(
+        id: 'tskMaxL001',
+        title: 'Max Labels Task',
+        createdAt: t0,
+        modifiedAt: t0,
+        labelIds: <String>[for (final label in maxLabels) label.id],
+      );
+      final fullLabelBoard = TaskBoard.evaluate(
+        tasks: <TaskItem>[fullLabelTask],
+        labels: maxLabels,
+        evaluationTime: t0,
+      );
+      expect(
+        () => fullLabelBoard.createLabelAndAssignToTask(
+          taskId: 'tskMaxL001',
+          name: 'Overflow Label',
+          currentDate: t1,
+        ),
+        throwsA(
+          isA<TdfException>().having(
+            (error) => error.kind,
+            'kind',
+            TdfErrorKind.limitExceeded,
+          ),
+        ),
+        reason: 'Assigning 65th label must throw TdfException(limitExceeded)',
       );
     });
   });

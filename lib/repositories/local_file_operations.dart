@@ -32,6 +32,9 @@ class LocalFileOperations<E extends Exception> {
   /// Creates a const [LocalFileOperations] helper using [createException] to build domain errors.
   const LocalFileOperations(this.createException);
 
+  /// Minimum file size in bytes (`32 KiB`) at which bounded reads switch from synchronous `openSync` to asynchronous [RandomAccessFile] I/O.
+  static const int asyncReadThresholdBytes = 32768;
+
   /// Maximum numbered `.bak.NNN` suffix checked when creating a backup copy (`999`).
   static const int maxBackupSuffix = 999;
 
@@ -54,11 +57,15 @@ class LocalFileOperations<E extends Exception> {
     String? baseDirectoryPath,
     String? fileName,
     AppBuildProfile? buildProfile,
+    String? androidFilesDirectoryPath,
   }) {
     final trimmed = baseDirectoryPath?.trim() ?? '';
     final base = trimmed.isNotEmpty
         ? trimmed
-        : resolveDefaultDirectoryPath(buildProfile: buildProfile);
+        : resolveDefaultDirectoryPath(
+            buildProfile: buildProfile,
+            androidFilesDirectoryPath: androidFilesDirectoryPath,
+          );
     final targetName = (fileName != null && fileName.trim().isNotEmpty)
         ? extractFileNameFromPath(fileName.trim())
         : AppLogger.defaultLogFileName;
@@ -216,25 +223,22 @@ class LocalFileOperations<E extends Exception> {
   E mapMoveFileSystemException(
     FileSystemException error,
     String fallbackPath,
-    AppLocalizations messages,
-  ) {
+    AppLocalizations messages, {
+    bool? isWindows,
+  }) {
     final rawErrorPath = error.path;
     final path = rawErrorPath != null && rawErrorPath.trim().isNotEmpty
         ? rawErrorPath
         : fallbackPath;
-    final text = switch (error.osError?.errorCode) {
-      13 || 1 || 5 || 1314 => messages.errorMovePermissionDenied(path),
-      30 || 19 => messages.errorMoveReadOnlyFileSystem(path),
-      28 || 122 || 112 || 39 => messages.errorMoveDiskFull(path),
-      16 || 26 || 32 || 33 => messages.errorMoveFileLocked(path),
-      17 || 80 || 183 => messages.errorMoveTargetFileExists(path),
-      21 => messages.errorMoveTargetDirectoryExists(path),
-      20 || 267 => messages.errorMoveTargetNotADirectory(path),
-      2 || 3 => messages.errorMoveTargetDirectoryNotFound(path),
-      36 || 206 => messages.errorMovePathTooLong(path),
-      _ => _mapMoveErrorByText(error, path, messages),
-    };
-    return createException(text, cause: error);
+    final effectiveWindows = isWindows ?? Platform.isWindows;
+    final code = error.osError?.errorCode;
+    final mapped = effectiveWindows
+        ? _mapWindowsMoveErrorCode(code, path, messages)
+        : _mapPosixMoveErrorCode(code, path, messages);
+    return createException(
+      mapped ?? _mapMoveErrorByText(error, path, messages),
+      cause: error,
+    );
   }
 
   /// Returns `true` when the exact trailing basename of [candidatePath] equals [targetFileName] without trimming.
@@ -264,7 +268,7 @@ class LocalFileOperations<E extends Exception> {
   }
 
   /// Safely moves the `.tdf` file from [fromPath] to [toPath] inside [targetDirectoryPath] without overwriting existing entities.
-  void moveTdfFile(
+  Future<void> moveTdfFile(
     String fromPath,
     String toPath,
     String targetDirectoryPath,
@@ -272,7 +276,7 @@ class LocalFileOperations<E extends Exception> {
     AppLocalizations messages, {
     required bool inMemory,
     Map<String, String>? inMemoryStore,
-  }) {
+  }) async {
     if (fromPath == toPath) return;
     if (inMemory) {
       _moveInMemoryEntry(inMemoryStore, fromPath, toPath, messages);
@@ -288,7 +292,7 @@ class LocalFileOperations<E extends Exception> {
       case FileSystemEntityType.notFound:
         _verifyDirectoryWritable(targetDirectoryPath, messages);
       case FileSystemEntityType.file:
-        _performFileMove(fromPath, toPath, maxFileBytes, messages);
+        await _performFileMove(fromPath, toPath, maxFileBytes, messages);
       case FileSystemEntityType.pipe:
       case FileSystemEntityType.unixDomainSock:
         throw createException(messages.errorMovePermissionDenied(fromPath));
@@ -350,6 +354,52 @@ class LocalFileOperations<E extends Exception> {
     }
   }
 
+  /// Reads at most [maxBytes] from regular file [filePath] via [RandomAccessFile], using synchronous I/O below [asyncReadThresholdBytes] and asynchronous I/O at or above it while rejecting non-regular entities and oversized files without TOCTOU `lengthSync`.
+  Future<List<int>> readBoundedRegularFileBytes(
+    String filePath,
+    int maxBytes,
+    AppLocalizations messages,
+  ) async {
+    switch (FileSystemEntity.typeSync(filePath, followLinks: false)) {
+      case FileSystemEntityType.directory:
+        throw createException(messages.errorMoveSourceIsDirectory(filePath));
+      case FileSystemEntityType.link:
+        throw createException(messages.errorMoveSourceIsSymlink(filePath));
+      case FileSystemEntityType.pipe:
+      case FileSystemEntityType.unixDomainSock:
+        throw createException(messages.errorMovePermissionDenied(filePath));
+      case FileSystemEntityType.notFound:
+      case FileSystemEntityType.file:
+        break;
+    }
+    if (maxBytes < 0) {
+      throw createException(messages.errorLocalFileTooLarge);
+    }
+    final file = File(filePath);
+    if (file.statSync().size < asyncReadThresholdBytes) {
+      final randomAccessFile = file.openSync();
+      try {
+        final bytes = randomAccessFile.readSync(maxBytes + 1);
+        if (bytes.length > maxBytes) {
+          throw createException(messages.errorLocalFileTooLarge);
+        }
+        return bytes;
+      } finally {
+        randomAccessFile.closeSync();
+      }
+    }
+    final randomAccessFile = await file.open();
+    try {
+      final bytes = await randomAccessFile.read(maxBytes + 1);
+      if (bytes.length > maxBytes) {
+        throw createException(messages.errorLocalFileTooLarge);
+      }
+      return bytes;
+    } finally {
+      await randomAccessFile.close();
+    }
+  }
+
   /// Synchronously reads up to [maxBytes] from the diagnostic log file at [path].
   String readLogFileSync(String path, {required int maxBytes}) {
     if (maxBytes <= 0) return '';
@@ -378,7 +428,7 @@ class LocalFileOperations<E extends Exception> {
   }
 
   /// Renames the local `.tdf` file at [fromPath] inside [directoryPath] to [newFileName] and returns the new resolved path.
-  String renameTdf(
+  Future<String> renameTdf(
     String fromPath,
     String directoryPath,
     String newFileName,
@@ -386,10 +436,10 @@ class LocalFileOperations<E extends Exception> {
     AppLocalizations messages, {
     required bool inMemory,
     Map<String, String>? inMemoryStore,
-  }) {
+  }) async {
     final normalizedName = validateFileName(newFileName, messages);
     final toPath = combineDirectoryAndFileName(directoryPath, normalizedName);
-    moveTdfFile(
+    await moveTdfFile(
       fromPath,
       toPath,
       resolveDirectoryPath(toPath),
@@ -406,12 +456,17 @@ class LocalFileOperations<E extends Exception> {
     AppBuildProfile? buildProfile,
     Map<String, String>? environment,
     bool? isWindows,
+    String? androidFilesDirectoryPath,
   }) {
     final effectiveProfile = buildProfile ?? AppBuildProfile.current;
     final directoryName = effectiveProfile.dataDirectoryName;
-    final activeEnvironment = environment ?? Platform.environment;
     final effectiveWindows = isWindows ?? Platform.isWindows;
     final separator = effectiveWindows ? r'\' : '/';
+    final trimmedAndroid = androidFilesDirectoryPath?.trim() ?? '';
+    if (trimmedAndroid.isNotEmpty) {
+      return '${trimTrailingSeparators(trimmedAndroid)}$separator$directoryName';
+    }
+    final activeEnvironment = environment ?? Platform.environment;
     final candidates = <String?>[
       if (effectiveWindows) ...<String?>[
         activeEnvironment['APPDATA'],
@@ -453,13 +508,17 @@ class LocalFileOperations<E extends Exception> {
     String? baseDirectoryPath,
     AppLocalizations messages, {
     AppBuildProfile? buildProfile,
+    String? androidFilesDirectoryPath,
   }) {
     final normalized = validateRelativeOrAbsolutePath(rawPath, messages);
     if (isAbsolutePath(rawPath.trim())) return normalized;
     final trimmedBase = baseDirectoryPath?.trim() ?? '';
     final base = trimmedBase.isNotEmpty
         ? _validateBaseDirectoryPath(trimmedBase, messages)
-        : resolveDefaultDirectoryPath(buildProfile: buildProfile);
+        : resolveDefaultDirectoryPath(
+            buildProfile: buildProfile,
+            androidFilesDirectoryPath: androidFilesDirectoryPath,
+          );
     return _joinDirectoryAndChild(base, normalized);
   }
 
@@ -576,9 +635,8 @@ class LocalFileOperations<E extends Exception> {
         mode: append ? FileMode.append : FileMode.write,
         flush: flush,
       );
-      if (Platform.isLinux &&
-          (type == FileSystemEntityType.notFound || !append)) {
-        Process.runSync('chmod', <String>['0600', path]);
+      if (type == FileSystemEntityType.notFound || !append) {
+        HostFileLockManager.applyPosixChmodBestEffort(path, 0x180);
       }
     } on FileSystemException {
       // Never propagate diagnostic log I/O errors into user workflows.
@@ -600,23 +658,21 @@ class LocalFileOperations<E extends Exception> {
   );
 
   /// Copies [sourcePath] to [targetPath] and deletes [sourcePath] when moving across mount points (`EXDEV`).
-  void _copyAndDeleteCrossDevice(
+  Future<void> _copyAndDeleteCrossDevice(
     String sourcePath,
     String targetPath,
     int maxBytes,
     AppLocalizations messages,
-  ) {
+  ) async {
     _ensureTargetDoesNotExist(targetPath, messages);
     final sourceFile = File(sourcePath);
     final targetFile = File(targetPath);
     try {
-      if (sourceFile.lengthSync() > maxBytes) {
-        throw createException(messages.errorLocalFileTooLarge);
-      }
-      final bytes = sourceFile.readAsBytesSync();
-      if (bytes.length > maxBytes) {
-        throw createException(messages.errorLocalFileTooLarge);
-      }
+      final bytes = await readBoundedRegularFileBytes(
+        sourcePath,
+        maxBytes,
+        messages,
+      );
       targetFile.writeAsBytesSync(bytes, flush: true);
     } on FileSystemException catch (error) {
       throw mapMoveFileSystemException(error, targetPath, messages);
@@ -658,10 +714,10 @@ class LocalFileOperations<E extends Exception> {
     return false;
   }
 
-  /// Returns `true` when [error] indicates a cross-device link (`EXDEV` on Linux, `ERROR_NOT_SAME_DEVICE` on Windows).
+  /// Returns `true` when [error] indicates a cross-device link (`EXDEV` on POSIX, `ERROR_NOT_SAME_DEVICE` on Windows).
   bool _isCrossDeviceError(FileSystemException error) {
     final code = error.osError?.errorCode;
-    return code == 18 || code == 17 && Platform.isWindows;
+    return Platform.isWindows ? code == 17 : code == 18;
   }
 
   /// Joins [directoryPath] and [childPath] with a single platform path separator without duplicating root slashes.
@@ -725,6 +781,45 @@ class LocalFileOperations<E extends Exception> {
     return messages.errorMoveLocalFileFailed(details);
   }
 
+  /// Maps POSIX `errno` values (`Linux`/`Android`) without colliding with Win32 `GetLastError` codes.
+  String? _mapPosixMoveErrorCode(
+    int? code,
+    String path,
+    AppLocalizations messages,
+  ) {
+    return switch (code) {
+      13 || 1 => messages.errorMovePermissionDenied(path),
+      30 => messages.errorMoveReadOnlyFileSystem(path),
+      28 || 122 => messages.errorMoveDiskFull(path),
+      16 || 26 => messages.errorMoveFileLocked(path),
+      17 => messages.errorMoveTargetFileExists(path),
+      21 || 39 => messages.errorMoveTargetDirectoryExists(path),
+      20 => messages.errorMoveTargetNotADirectory(path),
+      2 => messages.errorMoveTargetDirectoryNotFound(path),
+      36 => messages.errorMovePathTooLong(path),
+      _ => null,
+    };
+  }
+
+  /// Maps Win32 `GetLastError` values (`Windows`) without colliding with POSIX `errno` codes.
+  String? _mapWindowsMoveErrorCode(
+    int? code,
+    String path,
+    AppLocalizations messages,
+  ) {
+    return switch (code) {
+      5 || 1314 => messages.errorMovePermissionDenied(path),
+      19 => messages.errorMoveReadOnlyFileSystem(path),
+      112 || 39 => messages.errorMoveDiskFull(path),
+      32 || 33 => messages.errorMoveFileLocked(path),
+      80 || 183 => messages.errorMoveTargetFileExists(path),
+      267 => messages.errorMoveTargetNotADirectory(path),
+      2 || 3 => messages.errorMoveTargetDirectoryNotFound(path),
+      206 => messages.errorMovePathTooLong(path),
+      _ => null,
+    };
+  }
+
   /// Moves a `.tdf` entry inside [store] during hermetic widget tests.
   void _moveInMemoryEntry(
     Map<String, String>? store,
@@ -741,17 +836,22 @@ class LocalFileOperations<E extends Exception> {
   }
 
   /// Moves [sourcePath] to [targetPath] via `File.renameSync` with cross-device copy-and-delete fallback.
-  void _performFileMove(
+  Future<void> _performFileMove(
     String sourcePath,
     String targetPath,
     int maxBytes,
     AppLocalizations messages,
-  ) {
+  ) async {
     try {
       File(sourcePath).renameSync(targetPath);
     } on FileSystemException catch (error) {
       if (_isCrossDeviceError(error)) {
-        _copyAndDeleteCrossDevice(sourcePath, targetPath, maxBytes, messages);
+        await _copyAndDeleteCrossDevice(
+          sourcePath,
+          targetPath,
+          maxBytes,
+          messages,
+        );
         return;
       }
       throw mapMoveFileSystemException(error, targetPath, messages);
@@ -780,34 +880,32 @@ class LocalFileOperations<E extends Exception> {
           fields: <String, Object?>{'path': directoryPath},
         );
       }
-      return directory
-          .watch(recursive: false)
-          .listen(
-            (event) {
-              if (!controller.isClosed &&
-                  isRelevantWatchEvent(
-                    event,
-                    targetFileName,
-                    caseInsensitive: Platform.isWindows,
-                  )) {
-                controller.add(null);
-              }
-            },
-            onError: (Object error) {
-              _logWatchError(directoryPath, error);
-              onStreamError();
-              if (!controller.isClosed) {
-                unawaited(controller.close());
-              }
-            },
-            onDone: () {
-              onStreamDone();
-              if (!controller.isClosed) {
-                unawaited(controller.close());
-              }
-            },
-            cancelOnError: false,
-          );
+      return directory.watch().listen(
+        (event) {
+          if (!controller.isClosed &&
+              isRelevantWatchEvent(
+                event,
+                targetFileName,
+                caseInsensitive: Platform.isWindows,
+              )) {
+            controller.add(null);
+          }
+        },
+        onError: (Object error) {
+          _logWatchError(directoryPath, error);
+          onStreamError();
+          if (!controller.isClosed) {
+            unawaited(controller.close());
+          }
+        },
+        onDone: () {
+          onStreamDone();
+          if (!controller.isClosed) {
+            unawaited(controller.close());
+          }
+        },
+        cancelOnError: false,
+      );
     } on FileSystemException catch (error) {
       _logWatchError(directoryPath, error);
       if (!controller.isClosed) {
@@ -887,8 +985,7 @@ class LocalFileOperations<E extends Exception> {
         FileSystemEntityType.notFound) {
       throw createException(messages.errorMoveTargetDirectoryNotFound(path));
     }
-    if (FileSystemEntity.typeSync(path, followLinks: true) !=
-        FileSystemEntityType.directory) {
+    if (FileSystemEntity.typeSync(path) != FileSystemEntityType.directory) {
       throw createException(messages.errorMoveTargetNotADirectory(path));
     }
   }

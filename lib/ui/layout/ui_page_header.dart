@@ -94,7 +94,6 @@ class UiPageHeader extends StatelessWidget {
             ),
           ),
         Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
             Expanded(
               child: Row(

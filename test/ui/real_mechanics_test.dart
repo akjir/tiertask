@@ -16,6 +16,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -110,6 +111,17 @@ class _DelayedSettingsRepository extends InMemorySettingsRepository {
   }
 
   @override
+  Future<void> saveConfigForWorkspace(
+    String workspaceId,
+    WebDavConfig config,
+  ) async {
+    if (onSave case final gate?) {
+      await gate();
+    }
+    return super.saveConfigForWorkspace(workspaceId, config);
+  }
+
+  @override
   SettingsRecoveryNotice? takeLastRecoveryNotice() {
     final notice = _emittedNotice;
     _emittedNotice = null;
@@ -191,6 +203,18 @@ class _ControllableSettingsRepository extends InMemorySettingsRepository {
     }
     await super.saveConfig(config);
   }
+
+  @override
+  Future<void> saveConfigForWorkspace(
+    String workspaceId,
+    WebDavConfig config,
+  ) async {
+    final barrier = pendingSave;
+    if (barrier != null) {
+      await barrier.future;
+    }
+    await super.saveConfigForWorkspace(workspaceId, config);
+  }
 }
 
 /// Counting [TdfService] subclass recording canonical `.tdf` serialization calls.
@@ -260,7 +284,7 @@ void _setViewport(WidgetTester tester, Size size) {
 
 void main() {
   const tdfService = TdfService();
-  final baseTime = DateTime.utc(2026, 11, 10, 12, 0);
+  final baseTime = DateTime.utc(2026, 11, 10, 12);
 
   String buildSeedTdf({
     DateTime? deferTaskTime,
@@ -284,9 +308,7 @@ void main() {
         TaskItem(
           id: 'taskS00003',
           title: 'Checklist Focus Task',
-          subtasks: const <SubtaskItem>[
-            SubtaskItem(title: 'Only Step', isCompleted: false),
-          ],
+          subtasks: const <SubtaskItem>[SubtaskItem(title: 'Only Step')],
           subtasksAutoFinish: true,
           createdAt: baseTime,
           modifiedAt: baseTime,
@@ -336,10 +358,8 @@ void main() {
         final deferTarget = baseTime.add(const Duration(seconds: 10));
         const config = WebDavConfig(
           language: AppLanguage.english,
-          themePalette: AppThemePalette.calm,
           themeMode: AppThemeMode.light,
           diagnosticsEnabled: true,
-          localWatchEnabled: true,
         );
         final settingsRepo = InMemorySettingsRepository(config);
         final localRepo = _ControllableLocalFileRepository(
@@ -438,10 +458,7 @@ void main() {
           overrides: [
             settingsRepositoryProvider.overrideWithValue(
               InMemorySettingsRepository(
-                const WebDavConfig(
-                  language: AppLanguage.english,
-                  diagnosticsEnabled: false,
-                ),
+                const WebDavConfig(language: AppLanguage.english),
               ),
             ),
             localFileRepositoryProvider.overrideWith(
@@ -624,7 +641,6 @@ void main() {
           language: AppLanguage.english,
           storageMode: StorageMode.local,
           localFilePath: tdfPath,
-          localWatchEnabled: true,
         );
         final realLocalRepo = _DiskBackedWatchLocalFileRepository(
           config: config,
@@ -1414,10 +1430,7 @@ task loc100OkD2 priority {
   condition location locErfOkD2
 }
 ''';
-        const config = WebDavConfig(
-          language: AppLanguage.english,
-          locationEnabled: false,
-        );
+        const config = WebDavConfig(language: AppLanguage.english);
         final settingsRepository = InMemorySettingsRepository(config);
         final locationRepo = _CompleterLocationRepository();
 
@@ -1540,7 +1553,6 @@ task loc100OkD2 priority {
         const initialConfig = WebDavConfig(
           language: AppLanguage.english,
           themeMode: AppThemeMode.light,
-          themePalette: AppThemePalette.calm,
         );
         final settingsRepository = InMemorySettingsRepository(initialConfig);
 
@@ -1658,7 +1670,6 @@ task loc100OkD2 priority {
         var loadAttempts = 0;
         var failWithFutureSchema = true;
         final settingsRepo = _DelayedSettingsRepository(
-          initialConfig: const WebDavConfig(language: AppLanguage.english),
           onLoad: () async {
             loadAttempts++;
             if (failWithFutureSchema) {
@@ -1761,7 +1772,6 @@ task loc100OkD2 priority {
         // Case 2: Workspace resolves asynchronously after mount (resetAfterQuarantine).
         final loadGate = Completer<void>();
         final delayedRepo = _DelayedSettingsRepository(
-          initialConfig: const WebDavConfig(language: AppLanguage.english),
           onLoad: () => loadGate.future,
           recoveryNotice: const SettingsRecoveryNotice(
             kind: SettingsRecoveryKind.resetAfterQuarantine,
@@ -1811,15 +1821,11 @@ task loc100OkD2 priority {
 
         const initialConfig = WebDavConfig(
           language: AppLanguage.english,
-          themePalette: AppThemePalette.calm,
           themeMode: AppThemeMode.light,
           storageMode: StorageMode.local,
-          localFilePath: 'tasks.tdf',
           diagnosticsEnabled: true,
           logLevel: LogLevel.debug,
-          logStorageMode: StorageMode.local,
           timeZoneMode: AppTimeZoneMode.manual,
-          dueLeadWindow: DueLeadWindow.hours24,
         );
         Completer<void>? saveGate;
         final settingsRepo = _DelayedSettingsRepository(
@@ -1971,17 +1977,13 @@ task loc100OkD2 priority {
 
         final initialConfig = WebDavConfig(
           language: AppLanguage.english,
-          themePalette: AppThemePalette.calm,
           themeMode: AppThemeMode.light,
           storageMode: StorageMode.local,
           localFilePath: tdfPath,
           serverUrl: 'https://cloud.example.com',
           username: 'alice',
           password: 'secret',
-          filePath: 'tasks.tdf',
           diagnosticsEnabled: true,
-          logLevel: LogLevel.info,
-          logStorageMode: StorageMode.local,
         );
         Completer<void>? saveGate;
         final settingsRepository = _DelayedSettingsRepository(
@@ -2164,6 +2166,17 @@ task loc100OkD2 priority {
         );
         final webDavRepositoryAfterLanguage = container.read(
           webDavRepositoryProvider,
+        );
+        expect(
+          webDavRepositoryAfterLanguage,
+          same(webDavRepositoryBefore),
+          reason: 'Language toggle must keep WebDavRepository instance and ETag cache intact',
+        );
+        expect(
+          container.read(localFileRepositoryProvider),
+          same(localRepositoryBefore),
+          reason:
+              'Language toggle must keep LocalFileRepository instance intact',
         );
 
         // Release suspended Completer and settle all queued persistence writes.
@@ -2350,9 +2363,68 @@ task loc100OkD2 priority {
           serverUrl: 'https://cloud.example.com',
           username: 'alice',
           password: 'secret',
-          dueLeadWindow: DueLeadWindow.hours24,
         );
-        final seedTdf = buildSeedTdf();
+        // Seed 3 Focus tasks (filling soft WIP limit) plus 36h and 4d deadlines so
+        // 24h -> 48h and 48h -> 7d lead-window switches genuinely promote tasks.
+        final seedBoard = TaskBoard.evaluate(
+          tasks: <TaskItem>[
+            TaskItem(
+              id: 'taskA00001',
+              title: 'Primary Focus Task',
+              labelIds: const <String>['work000001'],
+              createdAt: baseTime,
+              modifiedAt: baseTime,
+            ),
+            TaskItem(
+              id: 'taskB00002',
+              title: 'Second Focus Task',
+              createdAt: baseTime,
+              modifiedAt: baseTime,
+            ),
+            TaskItem(
+              id: 'taskC00003',
+              title: 'Third Focus Task',
+              createdAt: baseTime,
+              modifiedAt: baseTime,
+            ),
+            TaskItem(
+              id: 'taskDue48h',
+              title: 'Deadline Within 48 Hours',
+              dueAt: baseTime.add(const Duration(hours: 36)),
+              createdAt: baseTime,
+              modifiedAt: baseTime,
+            ),
+            TaskItem(
+              id: 'taskDue7d0',
+              title: 'Deadline Within 7 Days',
+              dueAt: baseTime.add(const Duration(days: 4)),
+              createdAt: baseTime,
+              modifiedAt: baseTime,
+            ),
+          ],
+          labels: <TdfLabel>[
+            TdfLabel(
+              id: 'work000001',
+              name: 'Work',
+              color: '#2196F3',
+              modifiedAt: baseTime,
+            ),
+          ],
+          queueBlock: TdfQueueBlock(
+            modifiedAt: baseTime,
+            taskIds: const <String>[
+              'taskA00001',
+              'taskB00002',
+              'taskC00003',
+              'taskDue48h',
+              'taskDue7d0',
+            ],
+          ),
+          evaluationTime: baseTime,
+          localEvaluationTime: baseTime,
+          dueLeadWindow: config.dueLeadWindow.duration,
+        );
+        final seedTdf = tdfService.serialize(seedBoard);
         final localRepository = _ControllableLocalFileRepository(
           config: config,
           content: seedTdf,
@@ -2592,7 +2664,6 @@ task loc100OkD2 priority {
           serverUrl: 'https://cloud.example.com',
           username: 'alice',
           password: 'secret',
-          filePath: 'tasks.tdf',
         );
         var isWebDavOffline = false;
         final remoteStore = <String, String>{
@@ -2978,8 +3049,12 @@ task loc100OkD2 priority {
           contains(createdLabel.id),
         );
 
+        final searchablePickerFinder = find.descendant(
+          of: pickerFinder,
+          matching: find.byType(UiSearchablePicker<String>),
+        );
         final pickerAfterCreate = tester.widget<UiSearchablePicker<String>>(
-          pickerFinder,
+          searchablePickerFinder,
         );
         expect(
           pickerAfterCreate.selectedIds,
@@ -3012,7 +3087,9 @@ task loc100OkD2 priority {
           reason: 'Toggling newly created label off inside compact sheet must immediately update real board',
         );
         expect(
-          tester.widget<UiSearchablePicker<String>>(pickerFinder).selectedIds,
+          tester
+              .widget<UiSearchablePicker<String>>(searchablePickerFinder)
+              .selectedIds,
           isEmpty,
         );
 
@@ -3030,7 +3107,9 @@ task loc100OkD2 priority {
           reason: 'Toggling newly created label back on inside compact sheet must immediately update real board',
         );
         expect(
-          tester.widget<UiSearchablePicker<String>>(pickerFinder).selectedIds,
+          tester
+              .widget<UiSearchablePicker<String>>(searchablePickerFinder)
+              .selectedIds,
           equals(<String>{createdLabel.id}),
         );
 
@@ -3051,5 +3130,111 @@ task loc100OkD2 priority {
         expect(find.text('MobileTag'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'TierTaskApp skips remote log flush on inactive, deduplicates background flushes, and drains WorkspaceUnloadCoordinator on exit',
+      (tester) async {
+        _setViewport(tester, const Size(1280, 860));
+        const config = WebDavConfig(
+          language: AppLanguage.english,
+          storageMode: StorageMode.both,
+          serverUrl: 'https://cloud.example.com',
+          username: 'alice',
+          password: 'secret',
+          diagnosticsEnabled: true,
+          logStorageMode: StorageMode.both,
+        );
+        final settingsRepo = InMemorySettingsRepository(config);
+        final localRepo = _ControllableLocalFileRepository(
+          config: config,
+          content: 'tdf 0.8.0\n',
+        );
+        final saveLogGate = Completer<void>();
+        var saveLogCount = 0;
+        final webDavRepo = _GatedLogWebDavRepository(
+          config: config,
+          onSaveLog: () async {
+            saveLogCount++;
+            await saveLogGate.future;
+          },
+        );
+        final container = ProviderContainer(
+          overrides: [
+            settingsRepositoryProvider.overrideWithValue(settingsRepo),
+            localFileRepositoryProvider.overrideWithValue(localRepo),
+            webDavRepositoryProvider.overrideWithValue(webDavRepo),
+            clockProvider.overrideWithValue(() => baseTime),
+          ],
+        );
+        addTearDown(container.dispose);
+
+        await tester.pumpWidget(
+          UncontrolledProviderScope(
+            container: container,
+            child: const TierTaskApp(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Desktop focus loss (inactive) must NOT flood WebDAV with remote log PUTs.
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.inactive,
+        );
+        await tester.pump();
+        expect(
+          saveLogCount,
+          equals(0),
+          reason: 'AppLifecycleState.inactive must not trigger remote WebDAV log uploads',
+        );
+
+        // Backgrounding (hidden -> paused) must flush once and deduplicate overlapping flushes.
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await tester.pump();
+        expect(
+          saveLogCount,
+          equals(1),
+          reason: 'Concurrent hidden and paused transitions must deduplicate into one remote log upload',
+        );
+        saveLogGate.complete();
+        await tester.pump();
+
+        // onExitRequested must drain WorkspaceUnloadCoordinator before flushing AppLogger and approving exit.
+        final exitDrainGate = Completer<void>();
+        var unloadDrained = false;
+        container.read(workspaceUnloadCoordinatorProvider).register(() async {
+          await exitDrainGate.future;
+          unloadDrained = true;
+        });
+
+        final exitFuture = tester.binding.handleRequestAppExit();
+        await tester.pump();
+        expect(
+          unloadDrained,
+          isFalse,
+          reason: 'onExitRequested must wait for WorkspaceUnloadCoordinator before exiting',
+        );
+
+        exitDrainGate.complete();
+        final exitResponse = await exitFuture;
+        expect(unloadDrained, isTrue);
+        expect(exitResponse, equals(AppExitResponse.exit));
+        expect(
+          AppLogger.lines.any((line) => line.contains('session.exit')),
+          isTrue,
+          reason: 'onExitRequested must flush AppLogger after draining unload',
+        );
+      },
+    );
   });
+}
+
+class _GatedLogWebDavRepository extends FakeWebDavRepository {
+  _GatedLogWebDavRepository({required super.config, required this.onSaveLog})
+    : super(shouldFail: () => false);
+
+  final Future<void> Function() onSaveLog;
+
+  @override
+  Future<void> saveLog(String logFileName, [String? logContent]) => onSaveLog();
 }

@@ -92,7 +92,7 @@ class TaskBoardMutator {
   }) {
     final validatedLinks = _validateLabelLinks(links);
     final trimmed = name.trim();
-    if (trimmed.isEmpty) return board;
+    if (trimmed.isEmpty || board.hasDuplicateLabelName(trimmed)) return board;
     final cleanupNow = _resolveNow(currentDate ?? modifiedAt);
     final stamp = _normalizeOptionalUtcTimestamp(
       modifiedAt ?? cleanupNow,
@@ -139,10 +139,9 @@ class TaskBoardMutator {
             localEvaluationTime: localEvaluationTime,
             timeZone: timeZone,
             dueLeadWindow: dueLeadWindow,
-            pruneExpiredCompleted: false,
           )
         : board.copyWithSlices(labels: nextLabels);
-    return nextBoard.logDomainMutation('addLabel id=$labelId name="$trimmed"');
+    return nextBoard.logDomainMutation('label.add id=$labelId');
   }
 
   /// Adds a new TDF `location` block to [board] with a unique identifier per `TDF_SPEC.md` Section 4.3 and 6.1.
@@ -188,15 +187,20 @@ class TaskBoardMutator {
         board.deletedBlock.findLocationRecord(locationId) != null) {
       return board;
     }
+    final normalizedLatitude = latitude == 0.0 ? 0.0 : latitude;
+    final normalizedLongitude = longitude == 0.0 ? 0.0 : longitude;
     final newLocation = TdfLocation(
       id: locationId,
       name: trimmedName,
-      latitude: latitude,
-      longitude: longitude,
+      latitude: normalizedLatitude,
+      longitude: normalizedLongitude,
       radius: radius,
       note: _trimOrNull(note),
       source: _trimOrNull(source),
       modifiedAt: stamp,
+      rawLatitudeText: TdfLocation.formatRoundedDouble(normalizedLatitude, 6),
+      rawLongitudeText: TdfLocation.formatRoundedDouble(normalizedLongitude, 6),
+      rawRadiusText: TdfLocation.formatRoundedDouble(radius, 2),
     );
     final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
       tasks: board.allTasks,
@@ -214,10 +218,9 @@ class TaskBoardMutator {
             localEvaluationTime: localEvaluationTime,
             timeZone: timeZone,
             dueLeadWindow: dueLeadWindow,
-            pruneExpiredCompleted: false,
           )
         : board.copyWithSlices(locations: nextLocations);
-    return nextBoard.logDomainMutation('addLocation id=$locationId');
+    return nextBoard.logDomainMutation('location.add id=$locationId');
   }
 
   /// Validates [title], allocates a task ID when [id] is `null`, and creates the task per `TDF-MUT-003`.
@@ -257,7 +260,12 @@ class TaskBoardMutator {
     if (trimmed.isEmpty || board.hasDuplicateTaskTitle(trimmed)) return board;
     final now = _resolveNow(currentDate);
     final used = _collectAllUsedEntityIds(board);
-    final taskId = id ?? generateTaskId(timestamp: now, existingIds: used);
+    final taskId =
+        _trimOrNull(id) ?? generateTaskId(timestamp: now, existingIds: used);
+    if (board.findTask(taskId) != null ||
+        board.deletedBlock.findTaskRecord(taskId) != null) {
+      return board;
+    }
     return updateTask(
       board,
       taskId,
@@ -341,9 +349,8 @@ class TaskBoardMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-      pruneExpiredCompleted: false,
     ).logDomainMutation(
-      'addTaskHistoryEntry id=$taskId historyCount=${nextHistory.length}',
+      'task.history_add id=$taskId historyCount=${nextHistory.length}',
     );
   }
 
@@ -364,47 +371,102 @@ class TaskBoardMutator {
         (expectedCompletions ?? task.completions) != task.completions) {
       return board;
     }
-    if (task.completions >= maxTdfCompletions) {
-      throw const TdfException(
-        kind: TdfErrorKind.limitExceeded,
-        line: 1,
-        message:
-            'Task completions counter exceeds maximum of $maxTdfCompletions.',
-      );
-    }
-    final zone = _zone(now, localEvaluationTime, timeZone);
-    final next = _reschedule(board, task, now, zone);
-    final completedTask = next ?? task.toCompleted(now);
-    _ensureTaskStatementBound(completedTask);
-    final nextQueue = TaskBoardQueueMutator.updateQueueForEditedTask(
-      board.queueBlock,
-      task,
-      completedTask,
-      next != null,
-      now,
-    );
-    final nextTasks = next != null
-        ? board.allTasks.map((item) => item.id == taskId ? next : item)
-        : <TaskItem>[
-            completedTask,
-            ...board.allTasks.where((item) => item.id != taskId),
-          ];
-    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
-      tasks: nextTasks,
-      deleted: board.deletedBlock,
-      nowUtc: now,
-      alreadyStampedTaskIds: <String>{taskId},
-    );
-    final suffix = next != null ? ' (recurring)' : '';
-    return TaskBoardEvaluator.reevaluateBoard(
+    return _completeResolvedTask(
       board,
-      tasks: cleaned.tasks,
-      queueBlock: nextQueue,
+      originalTask: task,
+      taskToComplete: task,
       now: now,
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-    ).logDomainMutation('completeTask$suffix id=$taskId');
+    );
+  }
+
+  /// Atomically creates a label with [name] and assigns it to open [taskId] on [board] in one evaluation pass.
+  static ({NormalizedTierSlices board, TdfLabel? label})
+  createLabelAndAssignToTask(
+    NormalizedTierSlices board, {
+    required String taskId,
+    required String name,
+    String? color,
+    String? id,
+    String? note,
+    bool isScoped = false,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) {
+    final existingTask = board.findTask(taskId);
+    if (existingTask == null ||
+        existingTask.isCompleted ||
+        existingTask.completedAt != null) {
+      return (board: board, label: null);
+    }
+    final trimmed = name.trim();
+    if (trimmed.isEmpty || board.hasDuplicateLabelName(trimmed)) {
+      return (board: board, label: null);
+    }
+    final now = _resolveNow(currentDate);
+    final used = _collectAllUsedEntityIds(board);
+    final labelId =
+        _trimOrNull(id) ?? generateLabelId(timestamp: now, existingIds: used);
+    if (board.findLabel(labelId) != null ||
+        board.deletedBlock.findLabelRecord(labelId) != null) {
+      return (board: board, label: null);
+    }
+    final newLabel = TdfLabel(
+      id: labelId,
+      name: trimmed,
+      isScoped: isScoped,
+      color: TdfColor.normalizeHex(color),
+      note: _trimOrNull(note),
+      modifiedAt: now,
+    );
+    final nextLabels = <TdfLabel>[...board.labels, newLabel];
+    final selectedSet = <String>{...existingTask.labelIds, labelId};
+    final orderedLabelIds = <String>[
+      for (final label in nextLabels)
+        if (selectedSet.contains(label.id)) label.id,
+    ];
+    if (orderedLabelIds.length > maxTdfArgsPerStmt) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task labels exceed maximum of $maxTdfArgsPerStmt per labels directive.',
+      );
+    }
+    final taskStamp = _nextMutationModifiedAt(
+      now,
+      existingTask.effectiveModifiedAt,
+    );
+    final updatedTask = existingTask.copyWith(
+      labelIds: orderedLabelIds,
+      modifiedAt: taskStamp,
+    );
+    _ensureTaskStatementBound(updatedTask);
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: board.allTasks.map(
+        (item) => item.id == taskId ? updatedTask : item,
+      ),
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: <String>{taskId},
+    );
+    final nextBoard =
+        TaskBoardEvaluator.reevaluateBoard(
+          board,
+          tasks: cleaned.tasks,
+          labels: nextLabels,
+          now: now,
+          localEvaluationTime: localEvaluationTime,
+          timeZone: timeZone,
+          dueLeadWindow: dueLeadWindow,
+        ).logDomainMutation(
+          'label.create_and_assign labelId=$labelId taskId=$taskId',
+        );
+    return (board: nextBoard, label: newLabel);
   }
 
   /// Deletes the label with [labelId] from [board], removes its reference from all tasks (applying `scoped` global-view flood protection per Section 6.8.1), and records the deletion.
@@ -454,7 +516,7 @@ class TaskBoardMutator {
       updatedTasks.add(
         task.copyWith(
           labelIds: remainingLabels,
-          isPriority: evictFromQueue ? false : task.isPriority,
+          isPriority: !evictFromQueue && task.isPriority,
           modifiedAt: TaskItem.nextModifiedTimestamp(
             now,
             task.effectiveModifiedAt,
@@ -487,8 +549,7 @@ class TaskBoardMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-      pruneExpiredCompleted: false,
-    ).logDomainMutation('deleteLabel id=$labelId');
+    ).logDomainMutation('label.delete id=$labelId');
   }
 
   /// Deletes the location with [locationId] from [board] in strict `label`-before-`task` order (applying `condition location any` inheritance-trap protection per Section 6.8.1) and records the deletion.
@@ -517,7 +578,7 @@ class TaskBoardMutator {
     ];
     final postCascadeLabelsWithLocation = <String>{
       for (final label in updatedLabels)
-        if (_hasLocationConditionRule(label.conditions)) label.id,
+        if (TdfMetadata.hasLocationConditionRule(label.conditions)) label.id,
     };
     final stampedTaskIds = <String>{};
     final updatedTasks = <TaskItem>[];
@@ -556,8 +617,7 @@ class TaskBoardMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-      pruneExpiredCompleted: false,
-    ).logDomainMutation('deleteLocation id=$locationId');
+    ).logDomainMutation('location.delete id=$locationId');
   }
 
   /// Deletes the task with [taskId] from [board], removes its `queue` entry, records the deletion in `deletedBlock`, and strips `blocked` references targeting [taskId] on open dependents.
@@ -603,7 +663,7 @@ class TaskBoardMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-    ).logDomainMutation('deleteTask id=$taskId');
+    ).logDomainMutation('task.delete id=$taskId');
   }
 
   /// Removes a single [TaskHistoryEntry] from [taskId] on [board] when present (`TDF_SPEC.md` Section 4.1.2 & 6.6).
@@ -645,9 +705,8 @@ class TaskBoardMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-      pruneExpiredCompleted: false,
     ).logDomainMutation(
-      'removeTaskHistoryEntry id=$taskId historyCount=${nextHistory.length}',
+      'task.history_remove id=$taskId historyCount=${nextHistory.length}',
     );
   }
 
@@ -682,7 +741,7 @@ class TaskBoardMutator {
       board,
       (item) => item.id == taskId ? updated : item,
     );
-    final logMessage = 'toggleSubtask id=$taskId step=$stepIndex';
+    final logMessage = 'task.toggle_subtask id=$taskId step=$stepIndex';
     if (!willAutoComplete) {
       final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
         tasks: replaced.allTasks,
@@ -699,7 +758,6 @@ class TaskBoardMutator {
               localEvaluationTime: localEvaluationTime,
               timeZone: timeZone,
               dueLeadWindow: dueLeadWindow,
-              pruneExpiredCompleted: false,
             )
           : replaced;
       return nextBoard.logDomainMutation(logMessage);
@@ -711,7 +769,7 @@ class TaskBoardMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-    ).logDomainMutation('$logMessage (auto-completed)');
+    ).logDomainMutation('$logMessage autoCompleted=true');
   }
 
   /// Updates an existing label with [labelId] on [board], re-evaluates the 6-tier pipeline, and ignores empty/duplicate names or pure no-op updates.
@@ -773,8 +831,7 @@ class TaskBoardMutator {
       deleted: board.deletedBlock,
       nowUtc: now,
     );
-    final logMessage =
-        'updateLabel/renameLabel id=$labelId name="$trimmedName"';
+    final logMessage = 'label.update id=$labelId';
     return TaskBoardEvaluator.reevaluateBoard(
       board,
       tasks: cleaned.tasks,
@@ -861,7 +918,7 @@ class TaskBoardMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-    ).logDomainMutation('updateLocation id=$locationId');
+    ).logDomainMutation('location.update id=$locationId');
   }
 
   /// Updates an existing task (or creates a new task when [isNewTask] is `true`) with [taskId] on [board].
@@ -958,10 +1015,7 @@ class TaskBoardMutator {
     final keepForever =
         (prior?.isSuspendedForever ?? false) ||
         (isBlockedTarget && prior?.suspendedAt == null);
-    final autoForever =
-        (suspendedLocalInput == null &&
-            effectiveSuspendedInput == TaskItem.defaultSuspendedAt) ||
-        (effectiveSuspendedInput == null && keepForever);
+    final autoForever = effectiveSuspendedInput == null && keepForever;
     final isForever = !clearDefer && (isSuspendedForever ?? autoForever);
     final rawSuspended = effectiveSuspendedInput ?? prior?.suspendedAt;
     final nextSuspended = (clearDefer || isForever) ? null : rawSuspended;
@@ -974,7 +1028,7 @@ class TaskBoardMutator {
     final unqueuedEdit = targetTier == null && !wasQueued;
     final isSomeday =
         !isDone && !isDeferred && (isSomedayTarget || unqueuedEdit);
-    final basePriority = isRestoring ? false : (prior?.isPriority ?? false);
+    final basePriority = !isRestoring && (prior?.isPriority ?? false);
     final allowPriority = !isBlockedTarget || isDeferred || repeat != null;
     final isFocus =
         (isPriority ?? basePriority) || targetTier == TaskTier.focus;
@@ -1080,7 +1134,7 @@ class TaskBoardMutator {
       nowUtc: now,
       alreadyStampedTaskIds: <String>{taskId},
     );
-    final action = isNewTask ? 'addTask' : 'updateTask';
+    final action = isNewTask ? 'task.add' : 'task.update';
     return TaskBoardEvaluator.reevaluateBoard(
       board,
       tasks: cleaned.tasks,
@@ -1089,7 +1143,7 @@ class TaskBoardMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-    ).logDomainMutation('$action id=$taskId title="$trimmed"');
+    ).logDomainMutation('$action id=$taskId');
   }
 
   /// Replaces [oldEntry] on [taskId] with a validated `(newTimestampUtc, newText)` history entry (`TDF_SPEC.md` Section 4.1.2 & 6.6).
@@ -1143,9 +1197,40 @@ class TaskBoardMutator {
       localEvaluationTime: localEvaluationTime,
       timeZone: timeZone,
       dueLeadWindow: dueLeadWindow,
-      pruneExpiredCompleted: false,
     ).logDomainMutation(
-      'updateTaskHistoryEntry id=$taskId historyCount=${nextHistory.length}',
+      'task.history_update id=$taskId historyCount=${nextHistory.length}',
+    );
+  }
+
+  /// Atomically updates [taskId]'s [subtasks] and [subtasksAutoFinish] flag and completes [taskId] once on [board].
+  static NormalizedTierSlices updateTaskSubtasksAndComplete(
+    NormalizedTierSlices board,
+    String taskId, {
+    required List<SubtaskItem> subtasks,
+    required bool subtasksAutoFinish,
+    DateTime? currentDate,
+    DateTime? localEvaluationTime,
+    TdfTimeZoneContext? timeZone,
+    Duration? dueLeadWindow = TaskBoardEvaluator.defaultDueLeadWindow,
+  }) {
+    final task = board.findTask(taskId);
+    if (task == null || task.isCompleted || task.completedAt != null) {
+      return board;
+    }
+    final now = _resolveNow(currentDate);
+    final cleanedSteps = _cleanSubtasks(subtasks);
+    final taskToComplete = task.copyWith(
+      subtasks: cleanedSteps,
+      subtasksAutoFinish: subtasksAutoFinish,
+    );
+    return _completeResolvedTask(
+      board,
+      originalTask: task,
+      taskToComplete: taskToComplete,
+      now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
     );
   }
 
@@ -1164,15 +1249,18 @@ class TaskBoardMutator {
     if (prior != null && blockedIds == null && explicitDeps == null) {
       return prior.dependencies;
     }
+    if ((explicitDeps != null && explicitDeps.isEmpty) ||
+        (explicitDeps == null && (blockedIds == null || blockedIds.isEmpty))) {
+      return const <TdfTaskDependency>[];
+    }
+    final allTasks = board.allTasks;
+    final forbiddenIds = TaskBoardEvaluator.collectCycleCreatingPrerequisiteIds(
+      taskId: taskId,
+      tasks: allTasks,
+    );
     final seen = <String>{};
     bool allow(String id) =>
-        id.isNotEmpty &&
-        seen.add(id) &&
-        !TaskBoardEvaluator.wouldCreateDependencyCycle(board, taskId, id);
-    final priorMap = <String, int>{
-      for (final item in prior?.dependencies ?? const <TdfTaskDependency>[])
-        item.taskId: item.requiredCompletion,
-    };
+        id.isNotEmpty && seen.add(id) && !forbiddenIds.contains(id);
     final items = <TdfTaskDependency>[];
     if (explicitDeps != null) {
       for (final dep in explicitDeps) {
@@ -1182,6 +1270,13 @@ class TaskBoardMutator {
       }
       return List<TdfTaskDependency>.unmodifiable(items);
     }
+    final priorMap = <String, int>{
+      for (final item in prior?.dependencies ?? const <TdfTaskDependency>[])
+        item.taskId: item.requiredCompletion,
+    };
+    final tasksById = <String, TaskItem>{
+      for (final task in allTasks) task.id: task,
+    };
     for (final rawId in blockedIds ?? const <String>[]) {
       final id = rawId.trim();
       if (!allow(id)) continue;
@@ -1191,9 +1286,7 @@ class TaskBoardMutator {
           taskId: id,
           requiredCompletion:
               priorMap[id] ??
-              TaskBoardQueueMutator.captureDependencyRequirement(
-                board.findTask(id),
-              ),
+              TaskBoardQueueMutator.captureDependencyRequirement(tasksById[id]),
         ),
       );
     }
@@ -1212,7 +1305,7 @@ class TaskBoardMutator {
     final nextConditions = <TaskCondition>[];
     final survivingLocationIds = <String>[];
     for (final rule in label.conditions) {
-      if (rule is! LocationTaskCondition || rule.locationIds.isEmpty) {
+      if (rule is! LocationTaskCondition) {
         nextConditions.add(rule);
         continue;
       }
@@ -1244,14 +1337,8 @@ class TaskBoardMutator {
     }
     final nextConditions = <TaskCondition>[];
     final survivingLocationIds = <String>[];
-    var hasLegacyLocationRule = false;
     for (final rule in task.conditions) {
       if (rule is! LocationTaskCondition) {
-        nextConditions.add(rule);
-        continue;
-      }
-      if (rule.locationIds.isEmpty) {
-        hasLegacyLocationRule = true;
         nextConditions.add(rule);
         continue;
       }
@@ -1261,8 +1348,7 @@ class TaskBoardMutator {
     }
     if (survivingLocationIds.isNotEmpty) {
       nextConditions.add(LocationTaskCondition.fromIds(survivingLocationIds));
-    } else if (!hasLegacyLocationRule &&
-        task.labelIds.any(postCascadeLabelsWithLocation.contains)) {
+    } else if (task.labelIds.any(postCascadeLabelsWithLocation.contains)) {
       const locationReset = GroupResetTaskCondition(
         targetGroup: ConditionGroup.location,
       );
@@ -1283,23 +1369,6 @@ class TaskBoardMutator {
         SubtaskItem(title: step.title.trim(), isCompleted: step.isCompleted),
   ];
 
-  /// Coalesces [LocationTaskCondition] rules into a single canonical rule when referencing `<location-id>` tokens.
-  static List<LocationTaskCondition> _coalesceLocationConditions(
-    Iterable<LocationTaskCondition> rules,
-  ) {
-    final ids = <String>[];
-    final legacyRules = <LocationTaskCondition>[];
-    for (final rule in rules) {
-      if (rule.locationIds.isNotEmpty) {
-        ids.addAll(rule.locationIds);
-      } else {
-        legacyRules.add(rule);
-      }
-    }
-    if (ids.isEmpty) return legacyRules;
-    return <LocationTaskCondition>[LocationTaskCondition.fromIds(ids)];
-  }
-
   /// Collects all task IDs, label IDs, location IDs, and retained deletion record IDs on [board] (`TDF_SPEC.md` Section 2.9).
   static Set<String> _collectAllUsedEntityIds(NormalizedTierSlices board) =>
       <String>{
@@ -1312,6 +1381,60 @@ class TaskBoardMutator {
         for (final record in board.deletedBlock.labels) record.labelId,
         for (final record in board.deletedBlock.locations) record.locationId,
       };
+
+  /// Completes or reschedules [taskToComplete] (replacing [originalTask]) in one evaluation pass with block cleanup.
+  static NormalizedTierSlices _completeResolvedTask(
+    NormalizedTierSlices board, {
+    required TaskItem originalTask,
+    required TaskItem taskToComplete,
+    required DateTime now,
+    required DateTime? localEvaluationTime,
+    required TdfTimeZoneContext? timeZone,
+    required Duration? dueLeadWindow,
+  }) {
+    if (taskToComplete.completions >= maxTdfCompletions) {
+      throw const TdfException(
+        kind: TdfErrorKind.limitExceeded,
+        line: 1,
+        message:
+            'Task completions counter exceeds maximum of $maxTdfCompletions.',
+      );
+    }
+    final taskId = originalTask.id;
+    final zone = _zone(now, localEvaluationTime, timeZone);
+    final next = _reschedule(board, taskToComplete, now, zone);
+    final completedTask = next ?? taskToComplete.toCompleted(now);
+    _ensureTaskStatementBound(completedTask);
+    final nextQueue = TaskBoardQueueMutator.updateQueueForEditedTask(
+      board.queueBlock,
+      originalTask,
+      completedTask,
+      next != null,
+      now,
+    );
+    final nextTasks = next != null
+        ? board.allTasks.map((item) => item.id == taskId ? next : item)
+        : <TaskItem>[
+            completedTask,
+            ...board.allTasks.where((item) => item.id != taskId),
+          ];
+    final cleaned = TaskBoardEvaluator.cleanupResolvedTaskBlocks(
+      tasks: nextTasks,
+      deleted: board.deletedBlock,
+      nowUtc: now,
+      alreadyStampedTaskIds: <String>{taskId},
+    );
+    final suffix = next != null ? ' recurring=true' : '';
+    return TaskBoardEvaluator.reevaluateBoard(
+      board,
+      tasks: cleaned.tasks,
+      queueBlock: nextQueue,
+      now: now,
+      localEvaluationTime: localEvaluationTime,
+      timeZone: timeZone,
+      dueLeadWindow: dueLeadWindow,
+    ).logDomainMutation('task.complete id=$taskId$suffix');
+  }
 
   /// Verifies that adding another prerequisite dependency will not exceed [maxTdfArgsPerStmt].
   static void _ensureDependencyArgBound(int currentCount) {
@@ -1348,20 +1471,12 @@ class TaskBoardMutator {
       return <TaskCondition>[GroupResetTaskCondition(targetGroup: group)];
     }
     if (group == ConditionGroup.location) {
-      return _coalesceLocationConditions(
+      return TdfMetadata.coalesceLocationRules(
         rules.whereType<LocationTaskCondition>(),
       );
     }
     return rules.whereType<T>();
   }
-
-  /// Returns whether [conditions] contains a non-empty [LocationTaskCondition].
-  static bool _hasLocationConditionRule(List<TaskCondition> conditions) =>
-      conditions.any(
-        (rule) =>
-            rule is LocationTaskCondition &&
-            (rule.locationIds.isNotEmpty || rule.radiusMeters > 0),
-      );
 
   /// Returns whether [value] is empty or consists solely of ASCII `<note>` whitespace (`0x20`, `\t`, `\n`, `\r`).
   static bool _isAsciiNoteWhitespaceOnly(String value) {
@@ -1601,7 +1716,7 @@ class TaskBoardMutator {
       : List<TaskCondition>.unmodifiable([
           ...rules.whereType<DayTaskCondition>(),
           ...rules.whereType<TimeWindowTaskCondition>(),
-          ..._coalesceLocationConditions(
+          ...TdfMetadata.coalesceLocationRules(
             rules.whereType<LocationTaskCondition>(),
           ),
         ]);
