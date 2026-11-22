@@ -54,7 +54,7 @@ class UiQuickComposer extends StatefulWidget {
   /// Tooltip for the compact expanded composer close `x` button.
   final String? compactCloseTooltip;
 
-  /// Label for the compact collapsed full-width primary button (e.g. `+ New task`).
+  /// Label for the compact collapsed full-width primary button paired with [submitLeadingIcon] (e.g. `New task`).
   final String? compactTriggerLabel;
 
   /// Caller-owned title text editing controller.
@@ -117,7 +117,7 @@ class UiQuickComposer extends StatefulWidget {
   /// Primary submission button copy (e.g. `Add`).
   final String submitLabel;
 
-  /// Optional leading outline icon for the primary submission button (`Icons.add_rounded` default).
+  /// Optional leading outline icon for the primary submission and compact trigger buttons (`Icons.add_rounded` default).
   final IconData? submitLeadingIcon;
 
   @override

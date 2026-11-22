@@ -1255,7 +1255,7 @@ void main() {
         tester.view.physicalSize = const Size(390, 844);
         await tester.pumpAndSettle();
 
-        await tester.tap(find.text('+ New task'));
+        await tester.tap(find.text('New task'));
         await tester.pumpAndSettle();
         await tester.tap(
           find.byKey(const ValueKey<String>('quick_add_labels_trigger')),

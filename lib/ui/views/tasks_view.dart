@@ -376,7 +376,7 @@ class _QuickAddComposerSurface extends ConsumerWidget {
       expandDraftLabel: localizations.actionOpenAsDraft,
       isCompactExpanded: compactComposerOpen,
       onCompactExpandedChanged: shellNotifier.setCompactComposerOpen,
-      compactTriggerLabel: '+ ${localizations.actionNewTaskCompact}',
+      compactTriggerLabel: localizations.actionNewTaskCompact,
       compactCloseTooltip: localizations.actionCancel,
       modeWidget: _QuickAddPlacementControl(
         placement: session.placement,

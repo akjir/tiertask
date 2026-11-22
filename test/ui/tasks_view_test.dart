@@ -215,11 +215,36 @@ void main() {
           );
 
           if (isCompact) {
+            final triggerButtonFinder = find.descendant(
+              of: find.byKey(
+                const ValueKey<String>('tasks_quick_add_composer'),
+              ),
+              matching: find.byType(UiButton),
+            );
             expect(
-              find.text('+ New task'),
+              triggerButtonFinder,
               findsOneWidget,
               reason:
-                  'Compact viewport ($width) collapses Quick-Add to + New task',
+                  'Compact viewport ($width) collapses Quick-Add to a single trigger button',
+            );
+            final triggerButton = tester.widget<UiButton>(triggerButtonFinder);
+            expect(
+              triggerButton.label,
+              equals('New task'),
+              reason:
+                  'Compact trigger label must omit literal + because leadingIcon renders the plus symbol ($width)',
+            );
+            expect(
+              triggerButton.leadingIcon,
+              equals(Icons.add_rounded),
+              reason:
+                  'Compact trigger button must render Icons.add_rounded leading icon ($width)',
+            );
+            expect(
+              find.text('+ New task'),
+              findsNothing,
+              reason:
+                  'Compact trigger must not duplicate the + symbol in button text ($width)',
             );
             expect(
               find.text('Open as draft'),
@@ -242,7 +267,7 @@ void main() {
             );
           } else {
             expect(
-              find.text('+ New task'),
+              find.text('New task'),
               findsNothing,
               reason:
                   'Desktop viewport ($width) keeps Quick-Add expanded permanently',
@@ -302,7 +327,7 @@ void main() {
         );
         expect(find.text('Someday item'), findsOneWidget);
 
-        await tester.tap(find.text('+ New task'));
+        await tester.tap(find.text('New task'));
         await tester.pumpAndSettle();
 
         expect(container.read(shellProvider).compactComposerOpen, isTrue);
@@ -1385,7 +1410,32 @@ void main() {
               surfaceSize: size,
             );
 
-            final compactTrigger = isGerman ? '+ Neue Aufgabe' : '+ New task';
+            final compactTrigger = isGerman ? 'Neue Aufgabe' : 'New task';
+            final triggerButtonFinder = find.descendant(
+              of: find.byKey(
+                const ValueKey<String>('tasks_quick_add_composer'),
+              ),
+              matching: find.byType(UiButton),
+            );
+            final triggerButton = tester.widget<UiButton>(triggerButtonFinder);
+            expect(
+              triggerButton.label,
+              equals(compactTrigger),
+              reason:
+                  'Compact trigger (${locale.languageCode}, width=$width) must render localized text without a leading +',
+            );
+            expect(
+              triggerButton.leadingIcon,
+              equals(Icons.add_rounded),
+              reason:
+                  'Compact trigger (${locale.languageCode}, width=$width) must pair text with Icons.add_rounded',
+            );
+            expect(
+              find.text('+ $compactTrigger'),
+              findsNothing,
+              reason:
+                  'Compact trigger (${locale.languageCode}, width=$width) must not duplicate the + symbol in text',
+            );
             await tester.tap(find.text(compactTrigger));
             await tester.pumpAndSettle();
 
@@ -1513,7 +1563,7 @@ void main() {
           surfaceSize: compactSize,
         );
 
-        await tester.tap(find.text('+ New task'));
+        await tester.tap(find.text('New task'));
         await tester.pumpAndSettle();
 
         final placementFinder = find.byKey(

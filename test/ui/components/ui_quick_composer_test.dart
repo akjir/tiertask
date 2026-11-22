@@ -276,7 +276,7 @@ void main() {
                 controller: taskController,
                 placeholder: 'New task...',
                 submitLabel: 'Add',
-                compactTriggerLabel: '+ New task',
+                compactTriggerLabel: 'New task',
                 compactCloseTooltip: 'Close composer',
                 modeHint: 'Append at the end of the active queue.',
                 onSubmit: () {},
@@ -289,15 +289,23 @@ void main() {
         // Inline Labels quick-create stays visible immediately on compact.
         expect(find.text('New label name'), findsOneWidget);
 
-        // Collapsible task composer starts collapsed behind + New task.
-        expect(find.text('+ New task'), findsOneWidget);
+        // Collapsible task composer starts collapsed behind leading + icon and New task label.
+        final compactTriggerButton = tester.widget<UiButton>(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('compact_task_composer')),
+            matching: find.byType(UiButton),
+          ),
+        );
+        expect(compactTriggerButton.label, equals('New task'));
+        expect(compactTriggerButton.leadingIcon, equals(Icons.add_rounded));
+        expect(find.text('New task'), findsOneWidget);
         expect(find.text('New task...'), findsNothing);
         expect(
           find.text('Append at the end of the active queue.'),
           findsNothing,
         );
 
-        await tester.tap(find.text('+ New task'));
+        await tester.tap(find.text('New task'));
         await tester.pumpAndSettle();
         expect(find.text('New task...'), findsOneWidget);
         final compactCardFinder = find.descendant(
@@ -317,7 +325,7 @@ void main() {
 
         await tester.tap(find.byTooltip('Close composer'));
         await tester.pumpAndSettle();
-        expect(find.text('+ New task'), findsOneWidget);
+        expect(find.text('New task'), findsOneWidget);
         expect(find.text('New task...'), findsNothing);
       },
     );
@@ -397,7 +405,7 @@ void main() {
                   controller: controller,
                   placeholder: 'New task...',
                   submitLabel: 'Add',
-                  compactTriggerLabel: '+ New task',
+                  compactTriggerLabel: 'New task',
                   isPopoverOpen: popoverOpen,
                   popoverContent: const Padding(
                     padding: EdgeInsets.all(12.0),
@@ -417,7 +425,7 @@ void main() {
           isNull,
           reason: 'Mounting compact collapsed with isPopoverOpen=true must not call show() on unmounted OverlayPortal',
         );
-        expect(find.text('+ New task'), findsOneWidget);
+        expect(find.text('New task'), findsOneWidget);
         expect(find.text('Popover Picker Body'), findsNothing);
 
         // Resize to desktop while popover remains open: OverlayPortal mounts and shows popover.
@@ -434,7 +442,7 @@ void main() {
         tester.view.physicalSize = const Size(390, 800);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(find.text('+ New task'), findsOneWidget);
+        expect(find.text('New task'), findsOneWidget);
         expect(find.text('Popover Picker Body'), findsNothing);
 
         // Resize back to desktop again while popover remains open: OverlayPortal re-syncs cleanly.

@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed
 
 - Fixed Android system status bar, navigation bar, and on-screen keyboard overlapping the top bar, bottom actions, drawers, and dialogs.
+- Fixed a duplicate plus symbol appearing on the compact New task button.
 
 ## [0.5.0] (Beta 1) - 2026-11-22
 
