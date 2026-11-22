@@ -474,5 +474,123 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'keeps intrinsic width inside bounded loose Wrap and Center while honoring isFullWidth and danger icon styling',
+      (tester) async {
+        final presetTokens = <UiThemeTokens>[
+          UiThemePresets.calm.light,
+          UiThemePresets.calm.dark,
+          UiThemePresets.plumUmber.light,
+          UiThemePresets.plumUmber.dark,
+        ];
+
+        for (final tokens in presetTokens) {
+          await pumpUiWidget(
+            tester,
+            SizedBox(
+              width: 600.0,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Wrap(
+                    spacing: 6.0,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: <Widget>[
+                      const Text('ID: task-1'),
+                      UiButton(
+                        key: const ValueKey<String>('wrap_icon_btn'),
+                        leadingIcon: Icons.copy_outlined,
+                        variant: UiButtonVariant.icon,
+                        density: UiButtonDensity.dense,
+                        tooltip: 'Copy ID',
+                        onPressed: () {},
+                      ),
+                    ],
+                  ),
+                  UiButton(
+                    key: const ValueKey<String>('danger_icon_btn'),
+                    leadingIcon: Icons.delete_outline_rounded,
+                    variant: UiButtonVariant.icon,
+                    tone: UiButtonTone.danger,
+                    density: UiButtonDensity.compact,
+                    tooltip: 'Delete',
+                    onPressed: () {},
+                  ),
+                  UiButton(
+                    key: const ValueKey<String>('full_width_btn'),
+                    label: 'Full width action',
+                    isFullWidth: true,
+                    onPressed: () {},
+                  ),
+                ],
+              ),
+            ),
+            tokens: tokens,
+          );
+          await tester.pumpAndSettle();
+
+          final wrapIconSize = tester.getSize(
+            find.byKey(const ValueKey<String>('wrap_icon_btn')),
+          );
+          expect(
+            wrapIconSize.width,
+            closeTo(tokens.spacing.buttonDenseHeight, 0.5),
+            reason:
+                'Non-full-width icon button inside Wrap must keep square dense width in ${tokens.brightness.name}',
+          );
+          final idRect = tester.getRect(find.text('ID: task-1'));
+          final wrapIconRect = tester.getRect(
+            find.byKey(const ValueKey<String>('wrap_icon_btn')),
+          );
+          expect(
+            wrapIconRect.left,
+            greaterThanOrEqualTo(idRect.right),
+            reason: 'Icon button inside Wrap must stay inline beside text instead of wrapping to next line',
+          );
+
+          final dangerContainer = tester.widget<AnimatedContainer>(
+            find.descendant(
+              of: find.byKey(const ValueKey<String>('danger_icon_btn')),
+              matching: find.byType(AnimatedContainer),
+            ),
+          );
+          final dangerBox = dangerContainer.decoration as BoxDecoration?;
+          expect(
+            dangerBox?.color,
+            equals(tokens.colors.dangerBg),
+            reason:
+                'Danger icon button must use dangerBg fill in ${tokens.brightness.name}',
+          );
+          expect(
+            dangerBox?.border,
+            equals(Border.all(color: tokens.colors.dangerBorder)),
+            reason:
+                'Danger icon button must use dangerBorder hairline border in ${tokens.brightness.name}',
+          );
+          final dangerIcon = tester.widget<Icon>(
+            find.descendant(
+              of: find.byKey(const ValueKey<String>('danger_icon_btn')),
+              matching: find.byType(Icon),
+            ),
+          );
+          expect(
+            dangerIcon.color,
+            equals(tokens.colors.danger),
+            reason:
+                'Danger icon button must use danger foreground color in ${tokens.brightness.name}',
+          );
+
+          expect(
+            tester
+                .getSize(find.byKey(const ValueKey<String>('full_width_btn')))
+                .width,
+            closeTo(600.0, 0.5),
+            reason: 'isFullWidth button must span full parent width',
+          );
+        }
+      },
+    );
   });
 }

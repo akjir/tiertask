@@ -329,5 +329,46 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'aligns compact bottom sheet Done button flush to right header edge',
+      (tester) async {
+        await pumpUiWidget(
+          tester,
+          Builder(
+            builder: (context) => UiButton(
+              key: const ValueKey<String>('open_align_sheet'),
+              label: 'Open Sheet',
+              onPressed: () async {
+                await UiDialogFrame.showBottomSheet<void>(
+                  context: context,
+                  title: 'Labels',
+                  countLabel: '2',
+                  doneLabel: 'Done',
+                  builder: (_) => const SizedBox(height: 80.0),
+                );
+              },
+            ),
+          ),
+          surfaceSize: const Size(390.0, 844.0),
+          wrapInScaffold: false,
+        );
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('open_align_sheet')),
+        );
+        await tester.pumpAndSettle();
+
+        final sheetRect = tester.getRect(
+          find.byKey(const ValueKey<String>('ui_bottom_sheet')),
+        );
+        final doneRect = tester.getRect(find.text('Done'));
+        expect(
+          sheetRect.right - doneRect.right,
+          lessThan(40.0),
+          reason: 'Bottom sheet Done button must anchor near the right edge',
+        );
+      },
+    );
   });
 }

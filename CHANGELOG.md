@@ -9,11 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Changed
 
 - Changed external local TDF file watching to desktop platforms only and hid its Settings toggle on Android.
+- Changed expanded entity cards to move delete into the header with a full-width confirmation bar and right-aligned Copy ID.
 
 ### Fixed
 
 - Fixed Android system status bar, navigation bar, and on-screen keyboard overlapping the top bar, bottom actions, drawers, and dialogs.
 - Fixed a duplicate plus symbol appearing on the compact New task button.
+- Fixed copy and edit icon buttons appearing centered instead of right-aligned inside expanded card sections and headers.
 
 ## [0.5.0] (Beta 1) - 2026-11-22
 

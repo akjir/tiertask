@@ -33,11 +33,13 @@ import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/providers/task_schedule_helper.dart';
 import 'package:tiertask/ui/components/ui_quick_composer.dart';
 import 'package:tiertask/ui/components/ui_searchable_picker.dart';
+import 'package:tiertask/ui/primitives/ui_banner.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/primitives/ui_card.dart';
 import 'package:tiertask/ui/primitives/ui_pill.dart';
 import 'package:tiertask/ui/primitives/ui_segmented_control.dart';
 import 'package:tiertask/ui/tokens/ui_spacing_tokens.dart';
+import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
 import 'package:tiertask/ui/views/task_card.dart';
 import 'package:tiertask/ui/views/task_detail_editors.dart';
 import 'package:tiertask/ui/views/task_schedule_editors.dart';
@@ -2550,6 +2552,190 @@ void main() {
           tuesdayPill.isSelected,
           isTrue,
           reason: 'Entering edit mode on task conditions must seed real ConditionDraft weekdays',
+        );
+      },
+    );
+
+    testWidgets(
+      'expanded task aligns header edit/delete actions, right-aligned Copy ID, full-width delete banner, and flush-right section buttons',
+      (tester) async {
+        final activeTask = TaskItem(
+          id: 'tsk_align',
+          title: 'Reference hub across 6 URI schemes',
+          note: 'Exercises link layout and note actions.',
+          links: const <TaskLink>[
+            TaskLink(
+              title: 'Flutter Architecture',
+              uri: 'https://docs.flutter.dev/resources/architectural-overview',
+            ),
+          ],
+        );
+        final doneTask = TaskItem(
+          id: 'tsk_done_del',
+          title: 'Completed archived item',
+          isCompleted: true,
+          completedAt: _fixedNowUtc.subtract(const Duration(hours: 2)),
+        );
+        final board = _buildBoard(
+          tasks: <TaskItem>[activeTask, doneTask],
+          queueIds: const <String>['tsk_align'],
+        );
+
+        final container = await pumpLeafWidget(
+          tester,
+          const _TasksHarness(),
+          board: board,
+          nowUtc: _fixedNowUtc,
+        );
+
+        // Collapsed card must NOT show the header delete button.
+        expect(
+          find.byKey(const ValueKey<String>('task_delete_tsk_align')),
+          findsNothing,
+          reason: 'Header delete button must only appear while task card is expanded',
+        );
+
+        await tester.tap(find.text('Reference hub across 6 URI schemes'));
+        await tester.pumpAndSettle();
+
+        final editTitleFinder = find.byKey(
+          const ValueKey<String>('task_edit_title_tsk_align'),
+        );
+        final deleteHeaderFinder = find.byKey(
+          const ValueKey<String>('task_delete_tsk_align'),
+        );
+        final downgradeFinder = find.byKey(
+          const ValueKey<String>('task_downgrade_tsk_align'),
+        );
+        expect(editTitleFinder, findsOneWidget);
+        expect(deleteHeaderFinder, findsOneWidget);
+        expect(downgradeFinder, findsOneWidget);
+
+        // Order in expanded header: Edit Title -> Red Delete -> Downgrade.
+        final editRect = tester.getRect(editTitleFinder);
+        final deleteRect = tester.getRect(deleteHeaderFinder);
+        final downgradeRect = tester.getRect(downgradeFinder);
+        expect(editRect.right, lessThan(deleteRect.left));
+        expect(deleteRect.right, lessThan(downgradeRect.left));
+
+        // Copy ID is flush right on the same row as ID (aligned with header right edge).
+        final idRect = tester.getRect(find.text('ID: tsk_align'));
+        final copyIdRect = tester.getRect(find.byTooltip('Copy task ID'));
+        expect(
+          (copyIdRect.center.dy - idRect.center.dy).abs(),
+          lessThan(16.0),
+          reason: 'Copy ID icon must stay on the same row as ID text',
+        );
+        expect(
+          copyIdRect.right,
+          closeTo(downgradeRect.right, 1.0),
+          reason: 'Copy ID icon must occupy the right-aligned meta bar edge',
+        );
+
+        // Section trailing actions (Note Copy/Edit and Links Edit) align flush with link card right edge.
+        final noteSection = find.byKey(
+          const ValueKey<String>('task_section_note_tsk_align'),
+        );
+        final linksSection = find.byKey(
+          const ValueKey<String>('task_section_links_tsk_align'),
+        );
+        final noteEditRect = tester.getRect(
+          find.descendant(of: noteSection, matching: find.byTooltip('Edit')),
+        );
+        final linksEditRect = tester.getRect(
+          find.descendant(of: linksSection, matching: find.byTooltip('Edit')),
+        );
+        final linkCardRect = tester.getRect(
+          find
+              .ancestor(
+                of: find.text('Flutter Architecture'),
+                matching: find.byType(AnimatedContainer),
+              )
+              .first,
+        );
+        expect(
+          noteEditRect.right,
+          closeTo(linkCardRect.right, 1.0),
+          reason: 'Note edit icon must align flush with link card right edge',
+        );
+        expect(
+          linksEditRect.right,
+          closeTo(linkCardRect.right, 1.0),
+          reason: 'Links edit icon must align flush with link card right edge',
+        );
+
+        // Clicking header delete shows full-width danger banner and disables header delete button.
+        final tokens = UiThemePresets.calm.light;
+        final deleteContainer = tester.widget<AnimatedContainer>(
+          find.descendant(
+            of: deleteHeaderFinder,
+            matching: find.byType(AnimatedContainer),
+          ),
+        );
+        final deleteBox = deleteContainer.decoration as BoxDecoration?;
+        expect(deleteBox?.color, equals(tokens.colors.dangerBg));
+        expect(
+          deleteBox?.border,
+          equals(Border.all(color: tokens.colors.dangerBorder)),
+        );
+
+        await tester.tap(deleteHeaderFinder);
+        await tester.pumpAndSettle();
+
+        expect(find.text('Delete this task?'), findsOneWidget);
+        final confirmBannerRect = tester.getRect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('task_card_tsk_align')),
+            matching: find.byType(UiBanner),
+          ),
+        );
+        expect(
+          confirmBannerRect.left,
+          closeTo(idRect.left, 1.0),
+          reason: 'Inline delete banner must start at left inner edge of card',
+        );
+        expect(
+          confirmBannerRect.right,
+          closeTo(copyIdRect.right, 1.0),
+          reason: 'Inline delete banner must span full inner width of card',
+        );
+        final disabledDeleteButton = tester.widget<UiButton>(
+          find.descendant(
+            of: deleteHeaderFinder,
+            matching: find.byType(UiButton),
+          ),
+        );
+        expect(
+          disabledDeleteButton.onPressed,
+          isNull,
+          reason: 'Header delete button must become inactive while delete confirmation banner is shown',
+        );
+
+        // Canceling delete re-enables the header delete button.
+        await tester.tap(find.text('Keep'));
+        await tester.pumpAndSettle();
+        expect(find.text('Delete this task?'), findsNothing);
+        final reenabledDeleteButton = tester.widget<UiButton>(
+          find.descendant(
+            of: deleteHeaderFinder,
+            matching: find.byType(UiButton),
+          ),
+        );
+        expect(reenabledDeleteButton.onPressed, isNotNull);
+
+        // Completed expanded task retains the red header delete button while hiding edit title.
+        container.read(shellProvider.notifier).selectTier(TaskTier.completed);
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Completed archived item'));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const ValueKey<String>('task_edit_title_tsk_done_del')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey<String>('task_delete_tsk_done_del')),
+          findsOneWidget,
+          reason: 'Completed expanded task must retain header delete button',
         );
       },
     );

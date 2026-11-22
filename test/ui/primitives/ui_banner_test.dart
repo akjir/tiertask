@@ -175,5 +175,79 @@ void main() {
         expect(openedSettings, isTrue);
       },
     );
+
+    testWidgets(
+      'inlineConfirm spans full bounded width, aligns actions to trailing edge, and wraps cleanly on compact 390px viewport',
+      (tester) async {
+        await pumpUiWidget(
+          tester,
+          Center(
+            child: SizedBox(
+              width: 720.0,
+              child: UiBanner(
+                key: const ValueKey<String>('full_confirm_banner'),
+                variant: UiBannerVariant.inlineConfirm,
+                message: 'Delete this task?',
+                cancelLabel: 'Keep',
+                onCancel: () {},
+                confirmLabel: 'Yes, delete',
+                onConfirm: () {},
+              ),
+            ),
+          ),
+        );
+
+        final bannerRect = tester.getRect(
+          find.byKey(const ValueKey<String>('full_confirm_banner')),
+        );
+        expect(
+          bannerRect.width,
+          closeTo(720.0, 0.5),
+          reason: 'inlineConfirm banner must span full available width',
+        );
+        final confirmButtonRect = tester.getRect(find.text('Yes, delete'));
+        expect(
+          bannerRect.right - confirmButtonRect.right,
+          lessThan(40.0),
+          reason: 'inlineConfirm action buttons must anchor to the right edge on desktop',
+        );
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('full_confirm_banner')),
+            matching: find.byIcon(Icons.warning_amber_rounded),
+          ),
+          findsOneWidget,
+          reason: 'Destructive inlineConfirm banner must show prominent warning icon',
+        );
+
+        await pumpUiWidget(
+          tester,
+          Padding(
+            padding: const EdgeInsets.all(12.0),
+            child: UiBanner(
+              key: const ValueKey<String>('compact_confirm_banner'),
+              variant: UiBannerVariant.inlineConfirm,
+              message: 'Delete this task permanently from the board?',
+              cancelLabel: 'Keep',
+              onCancel: () {},
+              confirmLabel: 'Yes, delete',
+              onConfirm: () {},
+            ),
+          ),
+          surfaceSize: const Size(390.0, 844.0),
+        );
+
+        expect(tester.takeException(), isNull);
+        expect(
+          tester
+              .getSize(
+                find.byKey(const ValueKey<String>('compact_confirm_banner')),
+              )
+              .width,
+          closeTo(366.0, 0.5),
+          reason: 'Compact inlineConfirm banner must span full available width without overflow',
+        );
+      },
+    );
   });
 }

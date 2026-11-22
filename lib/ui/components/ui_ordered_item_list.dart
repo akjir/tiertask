@@ -139,24 +139,32 @@ class UiOrderedItemList<T> extends StatelessWidget {
         if (hasHeader) ...<Widget>[
           Row(
             children: <Widget>[
-              if (title case final heading?)
-                Flexible(
-                  child: Text(
-                    heading,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: tokens.typography.meta.copyWith(
-                      color: colors.ink,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+              Expanded(
+                child: Row(
+                  children: <Widget>[
+                    if (title case final heading?)
+                      Flexible(
+                        child: Text(
+                          heading,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: tokens.typography.meta.copyWith(
+                            color: colors.ink,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    if (countLabel case final count?) ...<Widget>[
+                      const SizedBox(width: 8.0),
+                      UiPill(label: count, variant: UiPillVariant.count),
+                    ],
+                  ],
                 ),
-              if (countLabel case final count?) ...<Widget>[
+              ),
+              if (headerTrailing case final trailingWidget?) ...<Widget>[
                 const SizedBox(width: 8.0),
-                UiPill(label: count, variant: UiPillVariant.count),
+                trailingWidget,
               ],
-              const Spacer(),
-              ?headerTrailing,
             ],
           ),
           SizedBox(height: tokens.spacing.space2),

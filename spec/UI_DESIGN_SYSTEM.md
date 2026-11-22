@@ -230,13 +230,13 @@ Repeatable add, inline edit, boundary-disabled `Move up`/`Move down`, and remove
 ### `U-CARD-001` Single-Expand Accordion Across Tasks, Labels & Locations
 Replace legacy multi-tab editors and separate info/hub dialogs with unified expandable entity cards sharing one shell:
 - **Strict Single-Expand:** At most one `{ kind, id }` card is expanded at a time. Expanding another card clears open inline edits, delete confirmations, history edits, and label pickers, then reveals the panel smoothly (`220ms` ease-out size + `180ms` opacity). Clicking an expanded card header collapses it.
-- **Header Anatomy:** Optical `34x34px` leading control (task `21px` completion circle, label `12px` color dot, location `18px` `map-pin`), wrapping `15px` title, and right-aligned actions: Downgrade chevron (`chevron-right`, visible on active tasks in Tiers `0..2` only) and inline title/name edit pencil (visible ONLY when expanded and editable).
+- **Header Anatomy:** Optical `34x34px` leading control (task `21px` completion circle, label `12px` color dot, location `18px` `map-pin`), wrapping `15px` title, and right-aligned actions (`4px` spacing): inline title/name edit pencil (visible ONLY when expanded and editable), danger-styled Trash button (`dangerBg` fill, `1px` `dangerBorder` border, `danger` icon matching the inline delete confirmation banner; visible ONLY when expanded and disabled while the inline delete confirmation banner is shown), and Downgrade chevron (`chevron-right`, visible on active tasks in Tiers `0..2` only).
 - **Collapsed Metadata Strip:** Indented `36px` left on desktop (`0` on compact), completely hidden while the card is expanded. Hovering a collapsed card highlights its border to `accent`; expanded cards keep a steady `line` border on hover.
 
 ### `U-CARD-002` Expanded Panel Anatomy & Progressive Disclosure
 Inside every expanded entity card:
-1. **Top Meta Bar:** Hairline top divider, monospace `ID: <id>`, Copy ID button, contextual status pill (`Completed · restore task to edit` for completed tasks; `<N> open` for labels/locations), and right-aligned Trash button that swaps in-place into an inline delete confirmation (`Keep` / `Yes, delete`).
-2. **Populated-Only Section Cards (canonical vertical order):**
+1. **Top Meta Bar:** Hairline top divider, monospace `ID: <id>` and optional contextual status pill (`Completed · restore task to edit` for completed tasks; `<N> open` for labels/locations) on the left, right-aligned Copy ID button flush with the card inner right edge, and a prominent full-width inline delete confirmation banner (`Keep` / `Yes, delete`) revealed immediately below the ID row while confirming deletion.
+2. **Populated-Only Section Cards (canonical vertical order):** Section header trailing actions (Copy, Edit, Done) align flush with the right inner edge of each inset well (`Expanded` leading cluster + trailing controls).
    - **Tasks:** Note -> Links -> Subtasks (with `6px` accent progress bar) -> History (always visible) -> Labels -> Due -> Queue & Priority (only when active and `priority` or `someday`) -> Repeat -> Suspended -> Prerequisites -> Activation Conditions.
    - **Labels:** Note -> Links -> Color (always visible) -> Board Scope (always visible) -> Activation Conditions.
    - **Locations:** Note -> Coordinates & Radius (always visible; source selector `GPS` / `Address` / `Plus Code`, `Use Current GPS` vs `Resolve` mutual gating, `0.01m..100km` radius accepting `m`/`km` and `,`/`.`).
@@ -254,7 +254,7 @@ Inside every expanded entity card:
 ### `U-CARD-004` Read-Only Completed Task Card Exceptions
 Completed tasks display struck-through `muted` titles, checked `accent` circles, and the `Completed · restore task to edit` meta pill:
 - **Hidden / Disabled:** Title edit pencil, all section edit pencils, `+ Add` chips bar, label remove `x` buttons, Placement switch, Downgrade button, and Subtask checkboxes (disabled).
-- **Retained Interactive Controls:** Restore circle button, expand/collapse, Copy ID, Copy Note, clickable external Links, context-preserving Label and Condition Location navigation, Inline Delete (with Undo), and **fully interactive History journal** (add, edit, delete).
+- **Retained Interactive Controls:** Restore circle button, expand/collapse, header danger Delete button + full-width Inline Delete confirmation (with Undo), Copy ID, Copy Note, clickable external Links, context-preserving Label and Condition Location navigation, and **fully interactive History journal** (add, edit, delete).
 
 ### `U-CARD-005` Collapsed Task Badge Order & Bounded Overflow
 Render collapsed task metadata using `6px`-radius (`radiusTag`) chips: `UiPillVariant.tag` (`1px` `line` border) for assigned labels and `UiPillVariant.meta` (transparent resting border on `neutral`, `tone-soft`, and `tone-accent`; semantic border on `tone-warning` and `tone-danger`; `accent` border on interactive hover) for all primary, secondary, and overflow badges in this exact deterministic order:
@@ -306,7 +306,7 @@ On `compact` (`<= 720`) viewports, tier navigation uses the slide-over drawer an
   - **Clears Undo Stack:** Workspace switch, Wipe TDF, applying Deletion Conflict (`TDF-DEL-003`) or Recovery (`TDF-REC-002`) resolution.
 
 ### `U-UX-005` Confirmation Patterns (Inline vs Typed Destructive Modal)
-- **Inline In-Place Confirmation:** Use for entity deletion inside expanded cards (Task, Label, Location) and workspace removal inside the Workspaces modal (noting the `.tdf` file is preserved; disabled when only one workspace exists).
+- **Inline In-Place Confirmation:** Use a prominent full-width danger confirmation bar (warning icon, bold prompt, right-aligned `Keep` / `Yes, delete`) for entity deletion inside expanded cards (Task, Label, Location, disabling the header Trash button while open) and workspace removal inside the Workspaces modal (noting the `.tdf` file is preserved; disabled when only one workspace exists).
 - **Typed-Guard Modal Confirmation:** Use for irreversible destructive actions (Wipe Local TDF, Wipe Remote TDF): commit button stays disabled until the user types the exact `.tdf` base filename (without extension), paired with a default-checked `.bak / .bak.001+` backup checkbox.
 
 ### `U-UX-006` Settings Dual-Persistence & Dirty-State Contract

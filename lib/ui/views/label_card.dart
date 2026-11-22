@@ -145,7 +145,6 @@ class _LabelCardMetaBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final shellNotifier = ref.read(shellProvider.notifier);
-    final entityRef = EntityRef(kind: EntityKind.label, id: label.id);
 
     return EntityCardMetaBar(
       entityId: label.id,
@@ -160,10 +159,8 @@ class _LabelCardMetaBar extends ConsumerWidget {
       ),
       statusPillLabel: localizations.openTasksCountPill('$openCount'),
       statusPillTone: UiPillTone.soft,
-      deleteTooltip: localizations.tooltipDeleteLabel,
       deleteConfirmMessage: localizations.inlineDeleteLabelConfirm,
       isConfirmingDelete: isConfirmingDelete,
-      onRequestDelete: () => shellNotifier.requestInlineDelete(entityRef),
       onCancelDelete: shellNotifier.cancelInlineDelete,
       onConfirmDelete: () =>
           unawaited(_confirmDeleteLabel(context, ref, label.id)),
@@ -760,6 +757,39 @@ class _LabelConditionsSectionCard extends ConsumerWidget {
         isEditing: isEditing,
         isBusy: isBusy,
       ),
+    );
+  }
+}
+
+/// Trailing danger-styled delete icon button rendered while a Label card is expanded (`U-CARD-001`).
+class _LabelDeleteButton extends ConsumerWidget {
+  /// Creates a [_LabelDeleteButton].
+  const _LabelDeleteButton({
+    required this.labelId,
+    required this.isConfirmingDelete,
+    required this.isBusy,
+  });
+
+  /// Disables the button while a mutation is in flight.
+  final bool isBusy;
+
+  /// Disables the button while the inline delete confirmation banner is open.
+  final bool isConfirmingDelete;
+
+  /// Canonical label identifier for deterministic test keys and delete requests.
+  final String labelId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    return EntityHeaderDeleteButton(
+      key: ValueKey<String>('label_delete_$labelId'),
+      tooltip: localizations.tooltipDeleteLabel,
+      isConfirmingDelete: isConfirmingDelete,
+      isBusy: isBusy,
+      onRequestDelete: () => ref
+          .read(shellProvider.notifier)
+          .requestInlineDelete(EntityRef(kind: EntityKind.label, id: labelId)),
     );
   }
 }
@@ -1837,7 +1867,7 @@ class _LabelEditNameButton extends ConsumerWidget {
       key: ValueKey<String>('label_edit_name_$labelId'),
       leadingIcon: Icons.edit_outlined,
       variant: UiButtonVariant.icon,
-      density: UiButtonDensity.dense,
+      density: UiButtonDensity.compact,
       tooltip: localizations.inlineEditNameTooltip,
       onPressed: isBusy
           ? null
@@ -1900,8 +1930,14 @@ class _LabelExpandableCardView extends ConsumerWidget {
           ? _LabelInlineNameEditor(label: label, isBusy: isBusy)
           : null,
       trailingActions: <Widget>[
-        if (isExpanded && !isEditingName)
+        if (isExpanded && !isEditingName) ...<Widget>[
           _LabelEditNameButton(labelId: label.id, isBusy: isBusy),
+          _LabelDeleteButton(
+            labelId: label.id,
+            isConfirmingDelete: isConfirmingDelete,
+            isBusy: isBusy,
+          ),
+        ],
       ],
       collapsedMetadata: _LabelCollapsedMetadataStrip(
         label: label,

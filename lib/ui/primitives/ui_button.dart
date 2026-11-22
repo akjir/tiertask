@@ -268,7 +268,7 @@ class _UiButtonState extends State<UiButton> {
     if (widget.tone == UiButtonTone.danger) {
       return _UiButtonPalette(
         background: colors.dangerBg,
-        border: colors.dangerBorder,
+        border: hovered ? colors.danger : colors.dangerBorder,
         foreground: colors.danger,
       );
     }
@@ -543,14 +543,18 @@ class _UiButtonSurface extends StatelessWidget {
       minHeight: height,
       minWidth: isFullWidth ? double.infinity : minWidth,
     );
+    final centeredChild = Center(
+      widthFactor: 1.0,
+      heightFactor: 1.0,
+      child: child,
+    );
     if (!enabled) {
       return ConstrainedBox(
         constraints: constraints,
         child: Container(
-          alignment: Alignment.center,
           padding: padding,
           decoration: decoration,
-          child: child,
+          child: centeredChild,
         ),
       );
     }
@@ -560,10 +564,9 @@ class _UiButtonSurface extends StatelessWidget {
       constraints: constraints,
       child: AnimatedContainer(
         duration: tokens.focus.hoverDuration,
-        alignment: Alignment.center,
         padding: padding,
         decoration: decoration,
-        child: child,
+        child: centeredChild,
       ),
     );
 

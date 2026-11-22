@@ -467,6 +467,7 @@ class _TaskCardFrame extends ConsumerWidget {
           : <Widget>[
               if (isExpanded && !task.isCompleted)
                 _TaskEditTitleButton(taskId: task.id),
+              if (isExpanded) _TaskDeleteButton(taskId: task.id),
               if (contextData.canDowngrade)
                 _TaskDowngradeButton(taskId: task.id),
             ],
@@ -916,6 +917,36 @@ class _TaskCompleteCircleTarget extends StatelessWidget {
   }
 }
 
+/// Trailing danger-styled delete icon button shown on expanded task cards (`U-CARD-001`).
+class _TaskDeleteButton extends ConsumerWidget {
+  /// Creates a [_TaskDeleteButton].
+  const _TaskDeleteButton({required this.taskId});
+
+  /// Identifier of the task to delete.
+  final String taskId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    final entityRef = EntityRef(kind: EntityKind.task, id: taskId);
+    final isConfirmingDelete = ref.watch(
+      shellProvider.select((shell) => shell.activeDeleteConfirm == entityRef),
+    );
+    final isBusy = ref.watch(
+      boardActionsProvider.select((state) => state.isBusy),
+    );
+
+    return EntityHeaderDeleteButton(
+      key: ValueKey<String>('task_delete_$taskId'),
+      tooltip: localizations.actionDelete,
+      isConfirmingDelete: isConfirmingDelete,
+      isBusy: isBusy,
+      onRequestDelete: () =>
+          ref.read(shellProvider.notifier).requestInlineDelete(entityRef),
+    );
+  }
+}
+
 /// Trailing downgrade icon button for eligible active tasks.
 class _TaskDowngradeButton extends ConsumerWidget {
   /// Creates a [_TaskDowngradeButton].
@@ -1012,10 +1043,8 @@ class _TaskExpandedMetaBar extends ConsumerWidget {
       statusPillLabel: task.isCompleted
           ? localizations.completedReadOnlyPill
           : null,
-      deleteTooltip: localizations.actionDelete,
       deleteConfirmMessage: localizations.inlineDeleteTaskConfirm,
       isConfirmingDelete: isConfirmingDelete,
-      onRequestDelete: () => shellNotifier.requestInlineDelete(entityRef),
       onCancelDelete: shellNotifier.cancelInlineDelete,
       onConfirmDelete: () => _deleteTask(context, ref),
     );

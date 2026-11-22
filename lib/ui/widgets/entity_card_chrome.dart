@@ -30,29 +30,24 @@ class EntityCardMetaBar extends StatelessWidget {
     required this.entityId,
     required this.copyIdTooltip,
     required this.onCopyId,
-    required this.deleteTooltip,
     required this.deleteConfirmMessage,
     required this.isConfirmingDelete,
-    required this.onRequestDelete,
     required this.onCancelDelete,
     required this.onConfirmDelete,
     this.statusPillLabel,
     this.statusPillTone = UiPillTone.neutral,
   });
 
-  /// Tooltip for the compact Copy ID icon button.
+  /// Tooltip for the right-aligned Copy ID icon button.
   final String copyIdTooltip;
 
   /// Inline prompt message displayed while [isConfirmingDelete] is true.
   final String deleteConfirmMessage;
 
-  /// Tooltip for the right-aligned Trash icon button.
-  final String deleteTooltip;
-
   /// Canonical entity identifier displayed in monospace.
   final String entityId;
 
-  /// Swaps the Trash icon button in-place into an inline delete confirmation banner.
+  /// Displays the full-width inline delete confirmation banner below the ID row when true.
   final bool isConfirmingDelete;
 
   /// Callback cancelling the inline delete confirmation.
@@ -64,9 +59,6 @@ class EntityCardMetaBar extends StatelessWidget {
   /// Callback copying [entityId] and emitting confirmation feedback.
   final VoidCallback onCopyId;
 
-  /// Callback requesting inline delete confirmation.
-  final VoidCallback onRequestDelete;
-
   /// Optional contextual status pill label (e.g. completed read-only or open count).
   final String? statusPillLabel;
 
@@ -77,13 +69,6 @@ class EntityCardMetaBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = UiThemeTokens.of(context);
     final localizations = AppLocalizations.of(context);
-    final leadingMeta = _EntityMetaBarLeadingCluster(
-      entityIdLabel: localizations.taskIdRowLabel(entityId),
-      copyIdTooltip: copyIdTooltip,
-      onCopyId: onCopyId,
-      statusPillLabel: statusPillLabel,
-      statusPillTone: statusPillTone,
-    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -96,16 +81,71 @@ class EntityCardMetaBar extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.only(top: 10.0),
-        child: _EntityMetaBarLayout(
-          leadingMeta: leadingMeta,
-          deleteTooltip: deleteTooltip,
-          deleteConfirmMessage: deleteConfirmMessage,
-          isConfirmingDelete: isConfirmingDelete,
-          onRequestDelete: onRequestDelete,
-          onCancelDelete: onCancelDelete,
-          onConfirmDelete: onConfirmDelete,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _EntityMetaIdRow(
+              entityIdLabel: localizations.taskIdRowLabel(entityId),
+              copyIdTooltip: copyIdTooltip,
+              onCopyId: onCopyId,
+              statusPillLabel: statusPillLabel,
+              statusPillTone: statusPillTone,
+            ),
+            if (isConfirmingDelete) ...<Widget>[
+              const SizedBox(height: 10.0),
+              UiBanner(
+                variant: UiBannerVariant.inlineConfirm,
+                message: deleteConfirmMessage,
+                cancelLabel: localizations.actionKeep,
+                confirmLabel: localizations.actionConfirmDelete,
+                onCancel: onCancelDelete,
+                onConfirm: onConfirmDelete,
+              ),
+            ],
+          ],
         ),
       ),
+    );
+  }
+}
+
+/// Prominent danger-styled Trash icon button placed in expanded entity card headers (`U-CARD-001`).
+class EntityHeaderDeleteButton extends StatelessWidget {
+  /// Creates an [EntityHeaderDeleteButton].
+  const EntityHeaderDeleteButton({
+    super.key,
+    required this.tooltip,
+    required this.isConfirmingDelete,
+    required this.isBusy,
+    required this.onRequestDelete,
+    this.density = UiButtonDensity.compact,
+  });
+
+  /// Button density matching adjacent expanded header icon buttons.
+  final UiButtonDensity density;
+
+  /// Disables the button while an asynchronous entity mutation is in flight.
+  final bool isBusy;
+
+  /// Disables the button while the inline delete confirmation banner is displayed.
+  final bool isConfirmingDelete;
+
+  /// Callback requesting inline delete confirmation for the entity.
+  final VoidCallback onRequestDelete;
+
+  /// Localized tooltip and accessible button label.
+  final String tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    return UiButton(
+      leadingIcon: Icons.delete_outline_rounded,
+      variant: UiButtonVariant.icon,
+      tone: UiButtonTone.danger,
+      density: density,
+      tooltip: tooltip,
+      onPressed: isBusy || isConfirmingDelete ? null : onRequestDelete,
     );
   }
 }
@@ -345,84 +385,10 @@ class _EntityInlineEditorActionBar extends StatelessWidget {
   }
 }
 
-/// Arranges [leadingMeta] and the right-aligned Trash button or inline delete confirmation banner.
-class _EntityMetaBarLayout extends StatelessWidget {
-  /// Creates an [_EntityMetaBarLayout].
-  const _EntityMetaBarLayout({
-    required this.leadingMeta,
-    required this.deleteTooltip,
-    required this.deleteConfirmMessage,
-    required this.isConfirmingDelete,
-    required this.onRequestDelete,
-    required this.onCancelDelete,
-    required this.onConfirmDelete,
-  });
-
-  /// Prompt shown inside the inline confirmation banner.
-  final String deleteConfirmMessage;
-
-  /// Tooltip for the Trash icon button.
-  final String deleteTooltip;
-
-  /// Whether the inline delete confirmation banner replaces the Trash icon button.
-  final bool isConfirmingDelete;
-
-  /// Left-aligned ID, copy trigger, and optional status pill cluster.
-  final Widget leadingMeta;
-
-  /// Callback cancelling delete confirmation.
-  final VoidCallback onCancelDelete;
-
-  /// Callback confirming deletion.
-  final VoidCallback onConfirmDelete;
-
-  /// Callback opening inline delete confirmation.
-  final VoidCallback onRequestDelete;
-
-  @override
-  Widget build(BuildContext context) {
-    final localizations = AppLocalizations.of(context);
-    if (isConfirmingDelete) {
-      return Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 8.0,
-        runSpacing: 8.0,
-        children: <Widget>[
-          leadingMeta,
-          UiBanner(
-            variant: UiBannerVariant.inlineConfirm,
-            message: deleteConfirmMessage,
-            cancelLabel: localizations.actionKeep,
-            confirmLabel: localizations.actionConfirmDelete,
-            onCancel: onCancelDelete,
-            onConfirm: onConfirmDelete,
-          ),
-        ],
-      );
-    }
-
-    return Row(
-      children: <Widget>[
-        Expanded(child: leadingMeta),
-        const SizedBox(width: 8.0),
-        UiButton(
-          leadingIcon: Icons.delete_outline_rounded,
-          variant: UiButtonVariant.icon,
-          density: UiButtonDensity.dense,
-          isDangerHover: true,
-          tooltip: deleteTooltip,
-          onPressed: onRequestDelete,
-        ),
-      ],
-    );
-  }
-}
-
-/// Renders the left-side ID, copy trigger, and optional contextual status pill inside [EntityCardMetaBar].
-class _EntityMetaBarLeadingCluster extends StatelessWidget {
-  /// Creates an [_EntityMetaBarLeadingCluster].
-  const _EntityMetaBarLeadingCluster({
+/// Renders the left-side monospace ID + optional status pill and the right-aligned Copy ID icon button.
+class _EntityMetaIdRow extends StatelessWidget {
+  /// Creates an [_EntityMetaIdRow].
+  const _EntityMetaIdRow({
     required this.entityIdLabel,
     required this.copyIdTooltip,
     required this.onCopyId,
@@ -430,7 +396,7 @@ class _EntityMetaBarLeadingCluster extends StatelessWidget {
     required this.statusPillTone,
   });
 
-  /// Tooltip for the compact copy button.
+  /// Tooltip for the right-aligned Copy ID icon button.
   final String copyIdTooltip;
 
   /// Localized `ID: <id>` string.
@@ -450,17 +416,28 @@ class _EntityMetaBarLeadingCluster extends StatelessWidget {
     final tokens = UiThemeTokens.of(context);
     final pillText = statusPillLabel;
 
-    return Wrap(
-      spacing: 6.0,
-      runSpacing: 6.0,
-      crossAxisAlignment: WrapCrossAlignment.center,
+    return Row(
       children: <Widget>[
-        Text(
-          entityIdLabel,
-          style: UiTypographyTokens.mono(
-            tokens.typography.monoSmall.copyWith(color: tokens.colors.muted),
+        Expanded(
+          child: Wrap(
+            spacing: 8.0,
+            runSpacing: 6.0,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: <Widget>[
+              Text(
+                entityIdLabel,
+                style: UiTypographyTokens.mono(
+                  tokens.typography.monoSmall.copyWith(
+                    color: tokens.colors.muted,
+                  ),
+                ),
+              ),
+              if (pillText != null && pillText.isNotEmpty)
+                UiPill(label: pillText, tone: statusPillTone),
+            ],
           ),
         ),
+        const SizedBox(width: 8.0),
         UiButton(
           leadingIcon: Icons.copy_outlined,
           variant: UiButtonVariant.icon,
@@ -468,8 +445,6 @@ class _EntityMetaBarLeadingCluster extends StatelessWidget {
           tooltip: copyIdTooltip,
           onPressed: onCopyId,
         ),
-        if (pillText != null && pillText.isNotEmpty)
-          UiPill(label: pillText, tone: statusPillTone),
       ],
     );
   }

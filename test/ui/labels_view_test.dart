@@ -30,6 +30,7 @@ import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/services/app_logger.dart';
 import 'package:tiertask/ui/components/ui_color_wheel.dart';
 import 'package:tiertask/ui/components/ui_quick_composer.dart';
+import 'package:tiertask/ui/primitives/ui_banner.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/views/labels_view.dart';
 import 'package:tiertask/ui/widgets/entity_conditions_section.dart';
@@ -1143,5 +1144,89 @@ void main() {
         reason: 'Unrelated task note edit must not rebuild LabelsView when sortedLabels values are unchanged',
       );
     });
+
+    testWidgets(
+      'expanded label card shows header delete button beside edit name, aligns Copy ID right, and disables delete while confirming',
+      (tester) async {
+        await pumpLeafWidget(
+          tester,
+          const Scaffold(body: LabelsView()),
+          board: TaskBoard(
+            labels: const <TdfLabel>[
+              TdfLabel(id: 'lbl_hdr', name: 'Operations', color: '#2196F3'),
+            ],
+          ),
+        );
+
+        expect(
+          find.byKey(const ValueKey<String>('label_delete_lbl_hdr')),
+          findsNothing,
+          reason: 'Collapsed label card must hide header delete button',
+        );
+
+        await tester.tap(find.text('Operations'));
+        await tester.pumpAndSettle();
+
+        final editNameFinder = find.byKey(
+          const ValueKey<String>('label_edit_name_lbl_hdr'),
+        );
+        final deleteFinder = find.byKey(
+          const ValueKey<String>('label_delete_lbl_hdr'),
+        );
+        expect(editNameFinder, findsOneWidget);
+        expect(deleteFinder, findsOneWidget);
+
+        final editRect = tester.getRect(editNameFinder);
+        final deleteRect = tester.getRect(deleteFinder);
+        expect(editRect.right, lessThan(deleteRect.left));
+
+        final copyIdRect = tester.getRect(find.byTooltip('Copy'));
+        expect(
+          copyIdRect.right,
+          closeTo(deleteRect.right, 1.0),
+          reason: 'Label Copy ID icon must align flush with right card edge',
+        );
+
+        await tester.tap(deleteFinder);
+        await tester.pumpAndSettle();
+        expect(find.text('Delete this label?'), findsOneWidget);
+        expect(
+          tester
+              .widget<UiButton>(
+                find.descendant(
+                  of: deleteFinder,
+                  matching: find.byType(UiButton),
+                ),
+              )
+              .onPressed,
+          isNull,
+          reason: 'Label header delete button must disable while delete banner is visible',
+        );
+
+        final idRect = tester.getRect(find.text('ID: lbl_hdr'));
+        final bannerRect = tester.getRect(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('label_card_lbl_hdr')),
+            matching: find.byType(UiBanner),
+          ),
+        );
+        expect(bannerRect.left, closeTo(idRect.left, 1.0));
+        expect(bannerRect.right, closeTo(copyIdRect.right, 1.0));
+
+        await tester.tap(find.text('Keep'));
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<UiButton>(
+                find.descendant(
+                  of: deleteFinder,
+                  matching: find.byType(UiButton),
+                ),
+              )
+              .onPressed,
+          isNotNull,
+        );
+      },
+    );
   });
 }

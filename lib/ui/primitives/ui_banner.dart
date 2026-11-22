@@ -172,6 +172,7 @@ class UiBanner extends StatelessWidget {
       ),
       UiBannerVariant.inlineConfirm => _UiInlineConfirmBanner(
         message: message,
+        icon: icon,
         cancelLabel: cancelLabel,
         onCancel: onCancel,
         confirmLabel: confirmLabel,
@@ -577,11 +578,12 @@ class _UiInlineWarningBanner extends StatelessWidget {
   }
 }
 
-/// Inline in-place destructive confirmation bar (`U-UX-005`).
+/// Inline in-place destructive confirmation bar spanning full available width (`U-UX-005`).
 class _UiInlineConfirmBanner extends StatelessWidget {
   /// Creates a [_UiInlineConfirmBanner].
   const _UiInlineConfirmBanner({
     required this.message,
+    required this.icon,
     required this.cancelLabel,
     required this.onCancel,
     required this.confirmLabel,
@@ -594,6 +596,9 @@ class _UiInlineConfirmBanner extends StatelessWidget {
 
   /// Confirm button copy.
   final String? confirmLabel;
+
+  /// Optional leading icon overriding the default warning or info glyph.
+  final IconData? icon;
 
   /// Selects danger vs warning styling.
   final bool isDestructive;
@@ -614,57 +619,137 @@ class _UiInlineConfirmBanner extends StatelessWidget {
     final bg = isDestructive ? colors.dangerBg : colors.warningBg;
     final border = isDestructive ? colors.dangerBorder : colors.warningBorder;
     final fg = isDestructive ? colors.danger : colors.warning;
+    final resolvedIcon =
+        icon ??
+        (isDestructive
+            ? Icons.warning_amber_rounded
+            : Icons.info_outline_rounded);
 
-    return Semantics(
-      liveRegion: true,
-      container: true,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(tokens.radii.md),
-          border: Border.all(color: border, width: tokens.radii.borderWidth),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10.0, vertical: 7.0),
-          child: Wrap(
-            spacing: 8.0,
-            runSpacing: 6.0,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            alignment: WrapAlignment.spaceBetween,
-            children: <Widget>[
-              Text(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final box = DecoratedBox(
+          decoration: BoxDecoration(
+            color: bg,
+            borderRadius: BorderRadius.circular(tokens.radii.row),
+            border: Border.all(color: border, width: tokens.radii.borderWidth),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 14.0,
+              vertical: 10.0,
+            ),
+            child: _UiInlineConfirmContent(
+              icon: resolvedIcon,
+              message: message,
+              foreground: fg,
+              cancelLabel: cancelLabel,
+              onCancel: onCancel,
+              confirmLabel: confirmLabel,
+              onConfirm: onConfirm,
+              isDestructive: isDestructive,
+            ),
+          ),
+        );
+        return Semantics(
+          liveRegion: true,
+          container: true,
+          child: constraints.hasBoundedWidth
+              ? SizedBox(width: constraints.maxWidth, child: box)
+              : box,
+        );
+      },
+    );
+  }
+}
+
+/// Responsive prompt and action cluster rendered inside [_UiInlineConfirmBanner].
+class _UiInlineConfirmContent extends StatelessWidget {
+  /// Creates a [_UiInlineConfirmContent].
+  const _UiInlineConfirmContent({
+    required this.icon,
+    required this.message,
+    required this.foreground,
+    required this.cancelLabel,
+    required this.onCancel,
+    required this.confirmLabel,
+    required this.onConfirm,
+    required this.isDestructive,
+  });
+
+  /// Cancel button copy.
+  final String? cancelLabel;
+
+  /// Confirm button copy.
+  final String? confirmLabel;
+
+  /// Semantic foreground color for icon and prompt text.
+  final Color foreground;
+
+  /// Leading status icon glyph.
+  final IconData icon;
+
+  /// Selects destructive confirm button styling.
+  final bool isDestructive;
+
+  /// Prompt copy.
+  final String message;
+
+  /// Cancel callback.
+  final VoidCallback? onCancel;
+
+  /// Confirm callback.
+  final VoidCallback? onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    return Wrap(
+      spacing: 12.0,
+      runSpacing: 8.0,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      alignment: WrapAlignment.spaceBetween,
+      children: <Widget>[
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            ExcludeSemantics(
+              child: Icon(icon, size: tokens.spacing.iconSm, color: foreground),
+            ),
+            const SizedBox(width: 8.0),
+            Flexible(
+              child: Text(
                 message,
-                style: tokens.typography.meta.copyWith(
-                  color: fg,
-                  fontWeight: FontWeight.w500,
+                style: tokens.typography.control.copyWith(
+                  color: foreground,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  if (cancelLabel case final cancel?)
-                    UiButton(
-                      label: cancel,
-                      density: UiButtonDensity.compact,
-                      onPressed: onCancel,
-                    ),
-                  if (cancelLabel != null && confirmLabel != null)
-                    const SizedBox(width: 6.0),
-                  if (confirmLabel case final confirm?)
-                    UiButton(
-                      label: confirm,
-                      variant: isDestructive
-                          ? UiButtonVariant.danger
-                          : UiButtonVariant.primary,
-                      density: UiButtonDensity.compact,
-                      onPressed: onConfirm,
-                    ),
-                ],
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-      ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (cancelLabel case final cancel?)
+              UiButton(
+                label: cancel,
+                density: UiButtonDensity.compact,
+                onPressed: onCancel,
+              ),
+            if (cancelLabel != null && confirmLabel != null)
+              const SizedBox(width: 6.0),
+            if (confirmLabel case final confirm?)
+              UiButton(
+                label: confirm,
+                variant: isDestructive
+                    ? UiButtonVariant.danger
+                    : UiButtonVariant.primary,
+                density: UiButtonDensity.compact,
+                onPressed: onConfirm,
+              ),
+          ],
+        ),
+      ],
     );
   }
 }

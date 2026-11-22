@@ -186,7 +186,8 @@ class _EntityNoteReadOnlyCard extends StatelessWidget {
             tooltip: localizations.tooltipCopyNote,
             onPressed: onCopyNote,
           ),
-          if (canEdit)
+          if (canEdit) ...<Widget>[
+            const SizedBox(width: 4.0),
             UiButton(
               leadingIcon: Icons.edit_outlined,
               variant: UiButtonVariant.icon,
@@ -194,6 +195,7 @@ class _EntityNoteReadOnlyCard extends StatelessWidget {
               tooltip: localizations.actionEdit,
               onPressed: isBusy ? null : onStartEdit,
             ),
+          ],
         ],
       ),
       child: SelectableText(

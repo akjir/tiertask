@@ -482,38 +482,48 @@ class _UiBottomSheetShell extends StatelessWidget {
                     ),
                     child: Row(
                       children: <Widget>[
-                        if (icon case final glyph?) ...<Widget>[
-                          ExcludeSemantics(
-                            child: Icon(
-                              glyph,
-                              size: tokens.spacing.iconSm,
-                              color: colors.accent,
-                            ),
-                          ),
-                          const SizedBox(width: 8.0),
-                        ],
-                        Flexible(
-                          child: Text(
-                            title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: tokens.typography.body.copyWith(
-                              color: colors.ink,
-                              fontWeight: FontWeight.w600,
-                            ),
+                        Expanded(
+                          child: Row(
+                            children: <Widget>[
+                              if (icon case final glyph?) ...<Widget>[
+                                ExcludeSemantics(
+                                  child: Icon(
+                                    glyph,
+                                    size: tokens.spacing.iconSm,
+                                    color: colors.accent,
+                                  ),
+                                ),
+                                const SizedBox(width: 8.0),
+                              ],
+                              Flexible(
+                                child: Text(
+                                  title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: tokens.typography.body.copyWith(
+                                    color: colors.ink,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              if (countLabel case final count?) ...<Widget>[
+                                const SizedBox(width: 8.0),
+                                UiPill(
+                                  label: count,
+                                  variant: UiPillVariant.count,
+                                ),
+                              ],
+                            ],
                           ),
                         ),
-                        if (countLabel case final count?) ...<Widget>[
+                        if (doneLabel case final done?) ...<Widget>[
                           const SizedBox(width: 8.0),
-                          UiPill(label: count, variant: UiPillVariant.count),
-                        ],
-                        const Spacer(),
-                        if (doneLabel case final done?)
                           UiButton(
                             label: done,
                             density: UiButtonDensity.compact,
                             onPressed: onDone,
                           ),
+                        ],
                       ],
                     ),
                   ),

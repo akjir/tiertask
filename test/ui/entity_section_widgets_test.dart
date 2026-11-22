@@ -25,11 +25,13 @@ import 'package:tiertask/providers/floating_notice_providers.dart';
 import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/task_schedule_helper.dart';
 import 'package:tiertask/repositories/link_launcher_repository.dart';
+import 'package:tiertask/ui/primitives/ui_banner.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/primitives/ui_field.dart';
 import 'package:tiertask/ui/primitives/ui_pill.dart';
 import 'package:tiertask/ui/primitives/ui_segmented_control.dart';
 import 'package:tiertask/ui/tokens/ui_focus_tokens.dart';
+import 'package:tiertask/ui/tokens/ui_theme_tokens.dart';
 import 'package:tiertask/ui/widgets/entity_card_chrome.dart';
 import 'package:tiertask/ui/widgets/entity_conditions_section.dart';
 import 'package:tiertask/ui/widgets/entity_date_time_fields.dart';
@@ -44,39 +46,39 @@ import 'test_helpers.dart';
 void main() {
   group('EntityCardMetaBar', () {
     testWidgets(
-      'displays monospace entity ID, status pill, copy ID, and inline delete confirmation swap',
+      'aligns Copy ID flush right and displays full-width inline delete confirmation below ID row',
       (tester) async {
         var copyCount = 0;
-        var requestDeleteCount = 0;
         var cancelDeleteCount = 0;
         var confirmDeleteCount = 0;
         var confirmingDelete = false;
+        late StateSetter setOuterState;
 
         await pumpLeafWidget(
           tester,
           Scaffold(
             body: StatefulBuilder(
               builder: (context, setState) {
+                setOuterState = setState;
                 return Padding(
                   padding: const EdgeInsets.all(16.0),
-                  child: EntityCardMetaBar(
-                    entityId: 'task-42',
-                    copyIdTooltip: 'Copy task ID',
-                    onCopyId: () => copyCount++,
-                    deleteTooltip: 'Delete',
-                    deleteConfirmMessage: 'Delete this task?',
-                    isConfirmingDelete: confirmingDelete,
-                    onRequestDelete: () {
-                      requestDeleteCount++;
-                      setState(() => confirmingDelete = true);
-                    },
-                    onCancelDelete: () {
-                      cancelDeleteCount++;
-                      setState(() => confirmingDelete = false);
-                    },
-                    onConfirmDelete: () => confirmDeleteCount++,
-                    statusPillLabel: 'Completed · restore task to edit',
-                    statusPillTone: UiPillTone.soft,
+                  child: SizedBox(
+                    key: const ValueKey<String>('meta_bar_host'),
+                    width: 680.0,
+                    child: EntityCardMetaBar(
+                      entityId: 'task-42',
+                      copyIdTooltip: 'Copy task ID',
+                      onCopyId: () => copyCount++,
+                      deleteConfirmMessage: 'Delete this task?',
+                      isConfirmingDelete: confirmingDelete,
+                      onCancelDelete: () {
+                        cancelDeleteCount++;
+                        setState(() => confirmingDelete = false);
+                      },
+                      onConfirmDelete: () => confirmDeleteCount++,
+                      statusPillLabel: 'Completed · restore task to edit',
+                      statusPillTone: UiPillTone.soft,
+                    ),
                   ),
                 );
               },
@@ -87,24 +89,52 @@ void main() {
         expect(find.text('ID: task-42'), findsOneWidget);
         expect(find.text('Completed · restore task to edit'), findsOneWidget);
         expect(find.text('Delete this task?'), findsNothing);
+        expect(
+          find.byIcon(Icons.delete_outline_rounded),
+          findsNothing,
+          reason: 'Delete trigger lives in expanded card header, not meta bar',
+        );
+
+        final hostRect = tester.getRect(
+          find.byKey(const ValueKey<String>('meta_bar_host')),
+        );
+        final copyRect = tester.getRect(find.byTooltip('Copy task ID'));
+        expect(
+          copyRect.right,
+          closeTo(hostRect.right, 0.5),
+          reason:
+              'Copy ID icon must sit flush at the right edge of the meta bar',
+        );
 
         await tester.tap(find.byTooltip('Copy task ID'));
         await tester.pump();
         expect(copyCount, equals(1));
 
-        await tester.tap(find.byTooltip('Delete'));
+        setOuterState(() => confirmingDelete = true);
         await tester.pumpAndSettle();
-        expect(requestDeleteCount, equals(1));
         expect(find.text('Delete this task?'), findsOneWidget);
         expect(find.text('Keep'), findsOneWidget);
         expect(find.text('Yes, delete'), findsOneWidget);
+
+        final confirmBannerRect = tester.getRect(find.byType(UiBanner));
+        expect(
+          confirmBannerRect.width,
+          closeTo(hostRect.width, 0.5),
+          reason:
+              'Inline delete confirmation banner must span full meta bar width',
+        );
+        expect(
+          confirmBannerRect.top,
+          greaterThanOrEqualTo(copyRect.bottom),
+          reason: 'Full-width confirmation banner renders below the ID and Copy row',
+        );
 
         await tester.tap(find.text('Keep'));
         await tester.pumpAndSettle();
         expect(cancelDeleteCount, equals(1));
         expect(find.text('Delete this task?'), findsNothing);
 
-        await tester.tap(find.byTooltip('Delete'));
+        setOuterState(() => confirmingDelete = true);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Yes, delete'));
         await tester.pump();
@@ -124,10 +154,8 @@ void main() {
                 entityId: 'long-entity-identifier-123456',
                 copyIdTooltip: 'Copy ID',
                 onCopyId: () {},
-                deleteTooltip: 'Delete',
                 deleteConfirmMessage: 'Delete this task?',
                 isConfirmingDelete: true,
-                onRequestDelete: () {},
                 onCancelDelete: () {},
                 onConfirmDelete: () {},
                 statusPillLabel: '12 open',
@@ -143,6 +171,152 @@ void main() {
         expect(find.text('Delete this task?'), findsOneWidget);
         expect(find.text('Keep'), findsOneWidget);
         expect(find.text('Yes, delete'), findsOneWidget);
+      },
+    );
+  });
+
+  group('EntityHeaderDeleteButton', () {
+    testWidgets(
+      'matches danger banner palette across all 4 theme presets and disables while confirming or busy',
+      (tester) async {
+        final configs =
+            <({String presetId, ThemeMode mode, UiThemeTokens tokens})>[
+              (
+                presetId: 'calm',
+                mode: ThemeMode.light,
+                tokens: UiThemePresets.calm.light,
+              ),
+              (
+                presetId: 'calm',
+                mode: ThemeMode.dark,
+                tokens: UiThemePresets.calm.dark,
+              ),
+              (
+                presetId: 'plum_umber',
+                mode: ThemeMode.light,
+                tokens: UiThemePresets.plumUmber.light,
+              ),
+              (
+                presetId: 'plum_umber',
+                mode: ThemeMode.dark,
+                tokens: UiThemePresets.plumUmber.dark,
+              ),
+            ];
+
+        for (final config in configs) {
+          var deleteRequests = 0;
+          await pumpLeafWidget(
+            tester,
+            Scaffold(
+              body: Center(
+                child: EntityHeaderDeleteButton(
+                  key: const ValueKey<String>('hdr_del_active'),
+                  tooltip: 'Delete',
+                  isConfirmingDelete: false,
+                  isBusy: false,
+                  onRequestDelete: () => deleteRequests++,
+                ),
+              ),
+            ),
+            presetId: config.presetId,
+            themeMode: config.mode,
+          );
+          await tester.pumpAndSettle();
+
+          final container = tester.widget<AnimatedContainer>(
+            find.descendant(
+              of: find.byKey(const ValueKey<String>('hdr_del_active')),
+              matching: find.byType(AnimatedContainer),
+            ),
+          );
+          final box = container.decoration as BoxDecoration?;
+          expect(
+            box?.color,
+            equals(config.tokens.colors.dangerBg),
+            reason:
+                'Header delete button background must match delete banner dangerBg in ${config.presetId}/${config.mode.name}',
+          );
+          expect(
+            box?.border,
+            equals(Border.all(color: config.tokens.colors.dangerBorder)),
+            reason:
+                'Header delete button border must match delete banner dangerBorder in ${config.presetId}/${config.mode.name}',
+          );
+          final icon = tester.widget<Icon>(
+            find.descendant(
+              of: find.byKey(const ValueKey<String>('hdr_del_active')),
+              matching: find.byIcon(Icons.delete_outline_rounded),
+            ),
+          );
+          expect(
+            icon.color,
+            equals(config.tokens.colors.danger),
+            reason:
+                'Header delete icon must use delete banner text color danger in ${config.presetId}/${config.mode.name}',
+          );
+
+          await tester.tap(
+            find.byKey(const ValueKey<String>('hdr_del_active')),
+          );
+          await tester.pump();
+          expect(deleteRequests, equals(1));
+        }
+
+        // Disabled when confirming delete or busy.
+        var inactiveRequests = 0;
+        await pumpLeafWidget(
+          tester,
+          Scaffold(
+            body: Row(
+              children: <Widget>[
+                EntityHeaderDeleteButton(
+                  key: const ValueKey<String>('hdr_del_confirming'),
+                  tooltip: 'Delete',
+                  isConfirmingDelete: true,
+                  isBusy: false,
+                  onRequestDelete: () => inactiveRequests++,
+                ),
+                EntityHeaderDeleteButton(
+                  key: const ValueKey<String>('hdr_del_busy'),
+                  tooltip: 'Delete',
+                  isConfirmingDelete: false,
+                  isBusy: true,
+                  onRequestDelete: () => inactiveRequests++,
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final confirmingButton = tester.widget<UiButton>(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('hdr_del_confirming')),
+            matching: find.byType(UiButton),
+          ),
+        );
+        expect(
+          confirmingButton.onPressed,
+          isNull,
+          reason: 'Header delete button must be inactive while delete confirmation banner is shown',
+        );
+        final busyButton = tester.widget<UiButton>(
+          find.descendant(
+            of: find.byKey(const ValueKey<String>('hdr_del_busy')),
+            matching: find.byType(UiButton),
+          ),
+        );
+        expect(
+          busyButton.onPressed,
+          isNull,
+          reason: 'Header delete button must be inactive while busy',
+        );
+
+        await tester.tap(
+          find.byKey(const ValueKey<String>('hdr_del_confirming')),
+        );
+        await tester.tap(find.byKey(const ValueKey<String>('hdr_del_busy')));
+        await tester.pump();
+        expect(inactiveRequests, equals(0));
       },
     );
   });

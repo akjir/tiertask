@@ -549,7 +549,6 @@ class _LocationCardMetaBar extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final localizations = AppLocalizations.of(context);
     final shellNotifier = ref.read(shellProvider.notifier);
-    final locationRef = EntityRef(kind: EntityKind.location, id: locationId);
 
     return EntityCardMetaBar(
       entityId: locationId,
@@ -557,10 +556,8 @@ class _LocationCardMetaBar extends ConsumerWidget {
       onCopyId: () => unawaited(_copyLocationId(context, ref, locationId)),
       statusPillLabel: localizations.openTasksCountPill('$openCount'),
       statusPillTone: UiPillTone.soft,
-      deleteTooltip: localizations.tooltipDeleteLocation,
       deleteConfirmMessage: localizations.inlineDeleteLocationConfirm,
       isConfirmingDelete: isConfirmingDelete,
-      onRequestDelete: () => shellNotifier.requestInlineDelete(locationRef),
       onCancelDelete: shellNotifier.cancelInlineDelete,
       onConfirmDelete: () =>
           unawaited(_confirmDeleteLocation(context, ref, locationId)),
@@ -1375,6 +1372,41 @@ class _LocationCoordinatesSectionState
   }
 }
 
+/// Trailing danger-styled delete icon button rendered on expanded location cards (`U-CARD-001`).
+class _LocationDeleteButton extends ConsumerWidget {
+  /// Creates a [_LocationDeleteButton].
+  const _LocationDeleteButton({
+    required this.locationId,
+    required this.isConfirmingDelete,
+    required this.isBusy,
+  });
+
+  /// Disables the button while a mutation is in flight.
+  final bool isBusy;
+
+  /// Disables the button while the inline delete confirmation banner is open.
+  final bool isConfirmingDelete;
+
+  /// Canonical location identifier.
+  final String locationId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = AppLocalizations.of(context);
+    return EntityHeaderDeleteButton(
+      key: ValueKey<String>('location_delete_$locationId'),
+      tooltip: localizations.tooltipDeleteLocation,
+      isConfirmingDelete: isConfirmingDelete,
+      isBusy: isBusy,
+      onRequestDelete: () => ref
+          .read(shellProvider.notifier)
+          .requestInlineDelete(
+            EntityRef(kind: EntityKind.location, id: locationId),
+          ),
+    );
+  }
+}
+
 /// Manages controllers, geocoding resolution, and commit submission for [LocationDraftCard].
 class _LocationDraftCardState extends ConsumerState<LocationDraftCard>
     with _LocationCoordinatesFormMixin<LocationDraftCard> {
@@ -1688,7 +1720,7 @@ class _LocationEditNameButton extends ConsumerWidget {
       key: ValueKey<String>('location_edit_name_button_$locationId'),
       leadingIcon: Icons.edit_outlined,
       variant: UiButtonVariant.icon,
-      density: UiButtonDensity.dense,
+      density: UiButtonDensity.compact,
       tooltip: localizations.inlineEditNameTooltip,
       onPressed: isBusy
           ? null
@@ -1754,8 +1786,14 @@ class _LocationExpandableCardView extends ConsumerWidget {
           ? _LocationInlineNameEditor(location: location, isBusy: isBusy)
           : null,
       trailingActions: <Widget>[
-        if (isExpanded && !isEditingTitle)
+        if (isExpanded && !isEditingTitle) ...<Widget>[
           _LocationEditNameButton(locationId: location.id, isBusy: isBusy),
+          _LocationDeleteButton(
+            locationId: location.id,
+            isConfirmingDelete: isConfirmingDelete,
+            isBusy: isBusy,
+          ),
+        ],
       ],
       collapsedMetadata: _LocationCardCollapsedMetadata(
         location: location,

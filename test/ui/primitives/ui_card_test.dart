@@ -437,5 +437,109 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'aligns headerTrailing flush with inner content right edge on inset and standard cards',
+      (tester) async {
+        await pumpUiWidget(
+          tester,
+          const SizedBox(
+            width: 720.0,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                UiCard.inset(
+                  key: ValueKey<String>('aligned_inset_note'),
+                  headerIcon: Icons.description_outlined,
+                  headerTitle: 'Note',
+                  headerTrailing: SizedBox(
+                    key: ValueKey<String>('note_trailing'),
+                    width: 64.0,
+                    height: 30.0,
+                  ),
+                  child: SizedBox(
+                    key: ValueKey<String>('note_body'),
+                    height: 20.0,
+                  ),
+                ),
+                UiCard.inset(
+                  key: ValueKey<String>('aligned_inset_links'),
+                  headerIcon: Icons.link_rounded,
+                  headerTitle: 'Links',
+                  headerBadge: UiPill(
+                    label: '18 / 20',
+                    variant: UiPillVariant.count,
+                  ),
+                  headerTrailing: SizedBox(
+                    key: ValueKey<String>('links_trailing'),
+                    width: 30.0,
+                    height: 30.0,
+                  ),
+                  child: SizedBox(
+                    key: ValueKey<String>('links_body'),
+                    height: 20.0,
+                  ),
+                ),
+                UiCard.standard(
+                  key: ValueKey<String>('aligned_std'),
+                  headerTitle: 'Settings',
+                  headerTrailing: SizedBox(
+                    key: ValueKey<String>('std_trailing'),
+                    width: 48.0,
+                    height: 30.0,
+                  ),
+                  child: SizedBox(
+                    key: ValueKey<String>('std_body'),
+                    height: 20.0,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+
+        final noteBodyRight = tester
+            .getRect(find.byKey(const ValueKey<String>('note_body')))
+            .right;
+        final noteTrailingRight = tester
+            .getRect(find.byKey(const ValueKey<String>('note_trailing')))
+            .right;
+        expect(
+          noteTrailingRight,
+          closeTo(noteBodyRight, 0.5),
+          reason: 'Note header trailing controls must align flush with inset body right edge',
+        );
+
+        final linksBodyRight = tester
+            .getRect(find.byKey(const ValueKey<String>('links_body')))
+            .right;
+        final linksTrailingRight = tester
+            .getRect(find.byKey(const ValueKey<String>('links_trailing')))
+            .right;
+        expect(
+          linksTrailingRight,
+          closeTo(linksBodyRight, 0.5),
+          reason: 'Links header trailing control must align flush with inset body right edge',
+        );
+        expect(
+          linksTrailingRight,
+          closeTo(noteTrailingRight, 0.5),
+          reason: 'Trailing actions across stacked inset sections must align vertically',
+        );
+
+        final stdBodyRight = tester
+            .getRect(find.byKey(const ValueKey<String>('std_body')))
+            .right;
+        final stdTrailingRight = tester
+            .getRect(find.byKey(const ValueKey<String>('std_trailing')))
+            .right;
+        expect(
+          stdTrailingRight,
+          closeTo(stdBodyRight, 0.5),
+          reason: 'Standard card header trailing control must align flush with body right edge',
+        );
+      },
+    );
   });
 }

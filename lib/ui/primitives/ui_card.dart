@@ -277,6 +277,67 @@ class UiCard extends StatelessWidget {
   }
 }
 
+/// Leading icon, truncating title, and optional badge cluster inside [_UiCardHeaderRow].
+class _UiCardHeaderLeading extends StatelessWidget {
+  /// Creates a [_UiCardHeaderLeading].
+  const _UiCardHeaderLeading({
+    required this.icon,
+    required this.title,
+    required this.badge,
+    required this.isInset,
+  });
+
+  /// Optional badge beside [title].
+  final Widget? badge;
+
+  /// Optional leading icon glyph.
+  final IconData? icon;
+
+  /// Whether this header belongs to an `inset` card.
+  final bool isInset;
+
+  /// Optional heading text.
+  final String? title;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = UiThemeTokens.of(context);
+    final colors = tokens.colors;
+    final titleStyle =
+        (isInset ? tokens.typography.meta : tokens.typography.body).copyWith(
+          color: colors.ink,
+          fontWeight: FontWeight.w600,
+        );
+
+    return Row(
+      children: <Widget>[
+        if (icon case final glyph?) ...<Widget>[
+          ExcludeSemantics(
+            child: Icon(
+              glyph,
+              size: tokens.spacing.iconSm,
+              color: colors.accent,
+            ),
+          ),
+          const SizedBox(width: 8.0),
+        ],
+        if (title case final heading?)
+          Flexible(
+            child: Text(
+              heading,
+              style: titleStyle,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        if (badge case final badgeWidget?) ...<Widget>[
+          const SizedBox(width: 8.0),
+          badgeWidget,
+        ],
+      ],
+    );
+  }
+}
+
 /// Optional shared header row rendered inside `standard` and `inset` cards.
 class _UiCardHeaderRow extends StatelessWidget {
   /// Creates a [_UiCardHeaderRow].
@@ -305,44 +366,20 @@ class _UiCardHeaderRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = UiThemeTokens.of(context);
-    final colors = tokens.colors;
-    final titleStyle = isInset
-        ? tokens.typography.meta.copyWith(
-            color: colors.ink,
-            fontWeight: FontWeight.w600,
-          )
-        : tokens.typography.body.copyWith(
-            color: colors.ink,
-            fontWeight: FontWeight.w600,
-          );
-
     return Row(
       children: <Widget>[
-        if (icon case final glyph?) ...<Widget>[
-          ExcludeSemantics(
-            child: Icon(
-              glyph,
-              size: tokens.spacing.iconSm,
-              color: colors.accent,
-            ),
+        Expanded(
+          child: _UiCardHeaderLeading(
+            icon: icon,
+            title: title,
+            badge: badge,
+            isInset: isInset,
           ),
+        ),
+        if (trailing case final trailingWidget?) ...<Widget>[
           const SizedBox(width: 8.0),
+          trailingWidget,
         ],
-        if (title case final heading?)
-          Flexible(
-            child: Text(
-              heading,
-              style: titleStyle,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        if (badge case final badgeWidget?) ...<Widget>[
-          const SizedBox(width: 8.0),
-          badgeWidget,
-        ],
-        if (trailing != null) const Spacer(),
-        ?trailing,
       ],
     );
   }
@@ -953,7 +990,15 @@ class _UiExpandableHeader extends StatelessWidget {
         Expanded(child: titleRegion),
         if (trailingActions.isNotEmpty) ...<Widget>[
           const SizedBox(width: 6.0),
-          Row(mainAxisSize: MainAxisSize.min, children: trailingActions),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              for (var i = 0; i < trailingActions.length; i++) ...<Widget>[
+                if (i > 0) const SizedBox(width: 4.0),
+                trailingActions[i],
+              ],
+            ],
+          ),
         ],
       ],
     );

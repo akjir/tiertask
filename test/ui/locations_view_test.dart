@@ -32,6 +32,7 @@ import 'package:tiertask/providers/location_providers.dart';
 import 'package:tiertask/providers/shell_providers.dart';
 import 'package:tiertask/providers/task_providers.dart';
 import 'package:tiertask/repositories/location_repository.dart';
+import 'package:tiertask/ui/primitives/ui_banner.dart';
 import 'package:tiertask/ui/primitives/ui_button.dart';
 import 'package:tiertask/ui/primitives/ui_field.dart';
 import 'package:tiertask/ui/views/locations_view.dart';
@@ -1274,5 +1275,90 @@ void main() {
         reason: 'Unrelated task note edit must not rebuild LocationsView when sortedLocations values are unchanged',
       );
     });
+
+    testWidgets(
+      'expanded location card shows header delete button beside edit name, aligns Copy ID right, and disables delete while confirming',
+      (tester) async {
+        await pumpLeafWidget(
+          tester,
+          const Scaffold(body: LocationsView()),
+          board: TaskBoard(
+            locations: const <TdfLocation>[
+              TdfLocation(
+                id: 'loc_hdr',
+                name: 'Warehouse',
+                latitude: 48.1351,
+                longitude: 11.5820,
+                radius: 150.0,
+              ),
+            ],
+          ),
+        );
+
+        expect(
+          find.byKey(const ValueKey<String>('location_delete_loc_hdr')),
+          findsNothing,
+          reason: 'Collapsed location card must hide header delete button',
+        );
+
+        await tester.tap(find.text('Warehouse'));
+        await tester.pumpAndSettle();
+
+        final editNameFinder = find.byKey(
+          const ValueKey<String>('location_edit_name_button_loc_hdr'),
+        );
+        final deleteFinder = find.byKey(
+          const ValueKey<String>('location_delete_loc_hdr'),
+        );
+        expect(editNameFinder, findsOneWidget);
+        expect(deleteFinder, findsOneWidget);
+
+        final editRect = tester.getRect(editNameFinder);
+        final deleteRect = tester.getRect(deleteFinder);
+        expect(editRect.right, lessThan(deleteRect.left));
+
+        final copyIdRect = tester.getRect(find.byTooltip('Copy'));
+        expect(
+          copyIdRect.right,
+          closeTo(deleteRect.right, 1.0),
+          reason: 'Location Copy ID icon must align flush with right card edge',
+        );
+
+        await tester.tap(deleteFinder);
+        await tester.pumpAndSettle();
+        expect(find.text('Delete this location?'), findsOneWidget);
+        expect(
+          tester
+              .widget<UiButton>(
+                find.descendant(
+                  of: deleteFinder,
+                  matching: find.byType(UiButton),
+                ),
+              )
+              .onPressed,
+          isNull,
+          reason: 'Location header delete button must disable while delete banner is visible',
+        );
+
+        final idRect = tester.getRect(find.text('ID: loc_hdr'));
+        final bannerRect = tester.getRect(find.byType(UiBanner));
+        expect(bannerRect.left, closeTo(idRect.left, 1.0));
+        expect(bannerRect.right, closeTo(copyIdRect.right, 1.0));
+
+        await tester.tap(find.text('Keep'));
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<UiButton>(
+                find.descendant(
+                  of: deleteFinder,
+                  matching: find.byType(UiButton),
+                ),
+              )
+              .onPressed,
+          isNotNull,
+        );
+      },
+    );
   });
 }

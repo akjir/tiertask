@@ -208,5 +208,45 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'aligns headerTrailing flush with the right edge of the ordered list',
+      (tester) async {
+        await pumpUiWidget(
+          tester,
+          SizedBox(
+            key: const ValueKey<String>('ordered_list_host'),
+            width: 640.0,
+            child: UiOrderedItemList<String>(
+              title: 'Links',
+              countLabel: '1 / 20',
+              headerTrailing: const SizedBox(
+                key: ValueKey<String>('ordered_header_trailing'),
+                width: 30.0,
+                height: 30.0,
+              ),
+              items: const <String>['Alpha'],
+              itemKey: (_, index) => ValueKey<String>('hdr_$index'),
+              itemBuilder: (_, item, _, _) => Text(item),
+            ),
+          ),
+        );
+
+        final hostRight = tester
+            .getRect(find.byKey(const ValueKey<String>('ordered_list_host')))
+            .right;
+        final trailingRight = tester
+            .getRect(
+              find.byKey(const ValueKey<String>('ordered_header_trailing')),
+            )
+            .right;
+        expect(
+          trailingRight,
+          closeTo(hostRight, 0.5),
+          reason:
+              'UiOrderedItemList headerTrailing must align flush to right edge',
+        );
+      },
+    );
   });
 }
